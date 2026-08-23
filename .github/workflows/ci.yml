@@ -1,0 +1,1492 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, "codex/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  node:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.17.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+  postgres-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgis/postgis:17-3.5-alpine
+        env:
+          POSTGRES_DB: chi_shen_me_ci
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-bootstrap-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d chi_shen_me_ci"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.17.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies and PostgreSQL client
+        run: |
+          pnpm install --frozen-lockfile
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends postgresql-client
+      - name: Bootstrap extensions and isolated least-privilege roles
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: "5432"
+          PGDATABASE: chi_shen_me_ci
+          PGUSER: postgres
+          PGPASSWORD: ci-bootstrap-password
+        run: |
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE schema_migrator LOGIN PASSWORD 'ci-migrator-password'
+            NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+          CREATE ROLE api_runtime LOGIN PASSWORD 'ci-runtime-password'
+            NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+          CREATE ROLE retention_worker LOGIN PASSWORD 'ci-maintenance-password'
+            NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+          CREATE ROLE admin_api_runtime LOGIN PASSWORD 'ci-admin-runtime-password'
+            NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+          CREATE ROLE data_export_worker LOGIN PASSWORD 'ci-export-worker-password'
+            NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+          ALTER SCHEMA public OWNER TO schema_migrator;
+          GRANT CONNECT ON DATABASE chi_shen_me_ci
+            TO schema_migrator, api_runtime, retention_worker, admin_api_runtime,
+               data_export_worker;
+          SQL
+          psql -X -v migration_owner=schema_migrator \
+            -v runtime_role=api_runtime -v maintenance_role=retention_worker \
+            -f infra/postgres/bootstrap-extensions.sql
+      - name: Migrate an empty database and prove idempotency
+        env:
+          NODE_ENV: test
+          DATABASE_MIGRATION_URL: postgresql://schema_migrator:ci-migrator-password@127.0.0.1:5432/chi_shen_me_ci
+          DATABASE_MIGRATION_SSL_MODE: disable
+        run: |
+          pnpm --filter @chi-shen-me/api build
+          node apps/api/dist/database/migrate-cli.js
+          node apps/api/dist/database/migrate-cli.js
+      - name: Apply role grants atomically and test deployment failure gates
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: "5432"
+          PGDATABASE: chi_shen_me_ci
+        run: |
+          export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
+          psql -X -v migration_owner=schema_migrator \
+            -v runtime_role=api_runtime -v maintenance_role=retention_worker \
+            -v admin_runtime_role=admin_api_runtime -v export_worker_role=data_export_worker \
+            -f infra/postgres/role-grants.sql
+          psql -X -v migration_owner=schema_migrator \
+            -v runtime_role=api_runtime -v maintenance_role=retention_worker \
+            -v admin_runtime_role=admin_api_runtime -v export_worker_role=data_export_worker \
+            -f infra/postgres/role-grants.sql
+          if psql -X -f infra/postgres/role-grants.sql >/tmp/missing-role.log 2>&1; then
+            echo "role grant script accepted missing variables" >&2
+            exit 1
+          fi
+          if psql -X -v migration_owner=schema_migrator \
+            -v runtime_role=missing_runtime -v maintenance_role=retention_worker \
+            -v admin_runtime_role=admin_api_runtime -v export_worker_role=data_export_worker \
+            -f infra/postgres/role-grants.sql >/tmp/invalid-role.log 2>&1; then
+            echo "role grant script accepted an unknown role" >&2
+            exit 1
+          fi
+          export PGUSER=postgres PGPASSWORD=ci-bootstrap-password
+          psql -X -v ON_ERROR_STOP=1 -c \
+            "GRANT UPDATE (destination_hash) ON public.otp_challenges TO api_runtime"
+          export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
+          psql -X -v migration_owner=schema_migrator \
+            -v runtime_role=api_runtime -v maintenance_role=retention_worker \
+            -v admin_runtime_role=admin_api_runtime -v export_worker_role=data_export_worker \
+            -f infra/postgres/role-grants.sql
+          export PGUSER=postgres PGPASSWORD=ci-bootstrap-password
+          test "$(psql -X -At -c "SELECT has_column_privilege('api_runtime','public.otp_challenges','destination_hash','UPDATE')")" = "f"
+          test "$(psql -X -At -c "SELECT has_table_privilege('api_runtime','public.users','SELECT')")" = "t"
+          sed 's/public.coverage_areas/public.deliberately_missing_relation/' \
+            infra/postgres/role-grants.sql >/tmp/failing-role-grants.sql
+          export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
+          if psql -X -v migration_owner=schema_migrator \
+            -v runtime_role=api_runtime -v maintenance_role=retention_worker \
+            -v admin_runtime_role=admin_api_runtime -v export_worker_role=data_export_worker \
+            -f /tmp/failing-role-grants.sql >/tmp/mid-grant.log 2>&1; then
+            echo "deliberately broken role grant script unexpectedly succeeded" >&2
+            exit 1
+          fi
+          export PGUSER=postgres PGPASSWORD=ci-bootstrap-password
+          test "$(psql -X -At -c "SELECT has_table_privilege('api_runtime','public.users','SELECT')")" = "t"
+      - name: Exercise fenced data export delivery and least-privilege ACLs
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: "5432"
+          PGDATABASE: chi_shen_me_ci
+        run: |
+          export PGUSER=postgres PGPASSWORD=ci-bootstrap-password
+          for role in api_runtime retention_worker admin_api_runtime data_export_worker; do
+            test "$(psql -X -At -c "SELECT count(*) FROM unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) AS checked(privilege_name) WHERE has_table_privilege('$role','public.data_export_jobs',privilege_name)")" = "0"
+            test "$(psql -X -At -c "SELECT count(*) FROM unnest(ARRAY['SELECT','INSERT','UPDATE','REFERENCES']) AS checked(privilege_name) WHERE has_any_column_privilege('$role','public.data_export_jobs',privilege_name)")" = "0"
+          done
+          test "$(psql -X -At -c "SELECT has_function_privilege('api_runtime','public.app_queue_data_export(uuid,uuid,boolean)','EXECUTE')")" = "t"
+          test "$(psql -X -At -c "SELECT has_function_privilege('api_runtime','public.app_open_data_export_artifact(uuid,uuid)','EXECUTE')")" = "t"
+          test "$(psql -X -At -c "SELECT has_function_privilege('api_runtime','public.export_build_safe_snapshot(uuid,character varying,character varying)','EXECUTE')")" = "f"
+          test "$(psql -X -At -c "SELECT has_function_privilege('data_export_worker','public.export_build_safe_snapshot(uuid,character varying,character varying)','EXECUTE')")" = "t"
+          test "$(psql -X -At -c "SELECT has_function_privilege('data_export_worker','public.app_open_data_export_artifact(uuid,uuid)','EXECUTE')")" = "f"
+          test "$(psql -X -At -c "SELECT has_function_privilege('retention_worker','public.export_build_safe_snapshot(uuid,character varying,character varying)','EXECUTE')")" = "f"
+          test "$(psql -X -At -c "SELECT has_function_privilege('admin_api_runtime','public.export_build_safe_snapshot(uuid,character varying,character varying)','EXECUTE')")" = "f"
+          test "$(psql -X -At -c "SELECT has_table_privilege('data_export_worker','public.schema_migrations','SELECT')")" = "t"
+          test "$(psql -X -At -c "SELECT has_table_privilege('data_export_worker','public.users','SELECT')")" = "f"
+          export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          INSERT INTO public.users (id)
+            VALUES
+              ('13000000-0000-4000-8000-000000000001'),
+              ('13500000-0000-4000-8000-000000000001'),
+              ('13800000-0000-4000-8000-000000000001');
+          INSERT INTO public.identity_bindings (
+            id, user_id, identity_type, lookup_hash, lookup_hash_algorithm,
+            lookup_hash_key_version, dedup_hash, dedup_hash_algorithm,
+            dedup_hash_key_version, masked_display_hint, is_primary, verified_at
+          ) VALUES (
+            '13100000-0000-4000-8000-000000000001',
+            '13000000-0000-4000-8000-000000000001', 'PHONE',
+            '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+            'HMAC-SHA256', 'ci-v1',
+            'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
+            'HMAC-SHA256', 'ci-v1',
+            '+86130****0001', true, now()
+          );
+          INSERT INTO public.recommendation_history (
+            id, user_id, request_correlation_hash, hash_key_version,
+            event_type, meal_period, occurred_at, retain_until
+          ) VALUES
+            ('14100000-0000-4000-8000-000000000001',
+             '13000000-0000-4000-8000-000000000001', repeat('1',64), 'ci-v1',
+             'DETAIL', 'LUNCH', now(), now() + interval '90 days'),
+            ('14200000-0000-4000-8000-000000000001',
+             '13500000-0000-4000-8000-000000000001', repeat('2',64), 'ci-v1',
+             'NAVIGATION', 'DINNER', now(), now() + interval '90 days');
+          ALTER TABLE public.recommendation_history
+            DISABLE TRIGGER recommendation_history_fresh_event;
+          INSERT INTO public.recommendation_history (
+            id, user_id, request_correlation_hash, hash_key_version,
+            event_type, meal_period, occurred_at, retain_until
+          ) VALUES
+            ('14300000-0000-4000-8000-000000000001',
+             '13000000-0000-4000-8000-000000000001', repeat('3',64), 'ci-v1',
+             'IMPRESSION', 'BREAKFAST', now() - interval '91 days',
+             now() - interval '1 day'),
+            ('14400000-0000-4000-8000-000000000001',
+             '13500000-0000-4000-8000-000000000001', repeat('4',64), 'ci-v1',
+             'REROLL', 'LUNCH', now() - interval '91 days',
+             now() - interval '1 day');
+          ALTER TABLE public.recommendation_history
+            ENABLE TRIGGER recommendation_history_fresh_event;
+          ALTER TABLE public.support_feedback
+            DISABLE TRIGGER support_feedback_initial_state;
+          INSERT INTO public.support_feedback (
+            id, user_id, category, content_ciphertext, encryption_key_version,
+            status, created_at, closed_at, retain_until, submitter_kind
+          ) VALUES (
+            '14500000-0000-4000-8000-000000000001',
+            '13000000-0000-4000-8000-000000000001', 'PRODUCT',
+            decode(repeat('cd',16),'hex'), 'enc-v1', 'CLOSED',
+            now() - interval '200 days', now() - interval '181 days',
+            now() - interval '1 day', 'LEGACY'
+          );
+          ALTER TABLE public.support_feedback
+            ENABLE TRIGGER support_feedback_initial_state;
+          SQL
+          export PGUSER=api_runtime PGPASSWORD=ci-runtime-password
+          test "$(psql -X -At -c "SELECT public.submit_support_feedback('13200000-0000-4000-8000-000000000001','13000000-0000-4000-8000-000000000001','ACCOUNT','PRIVACY',decode(repeat('ab',16),'hex'),'enc-v1',repeat('3',64),'ci-v1',jsonb_build_object('ci-v1',repeat('3',64)),NULL,NULL,NULL)")" = "INSERTED"
+          test "$(psql -X -At -F '|' -c "SELECT outcome,export_status,include_behavior_history FROM public.app_queue_data_export('13000000-0000-4000-8000-000000000001','13300000-0000-4000-8000-000000000001',false)")" = "CREATED|QUEUED|f"
+          if psql -X -c "SELECT * FROM public.data_export_jobs" >/tmp/runtime-export-base-read.log 2>&1; then
+            echo "API runtime can read export base rows" >&2
+            exit 1
+          fi
+          if psql -X -c "UPDATE public.data_export_jobs SET artifact_locator_ciphertext=decode(repeat('ff',16),'hex') WHERE id='13300000-0000-4000-8000-000000000001'" >/tmp/runtime-export-stage-write.log 2>&1; then
+            echo "API runtime can directly stage an export locator" >&2
+            exit 1
+          fi
+          test "$(psql -X -At -c "SELECT has_function_privilege('api_runtime','public.export_artifact_required_locator_key_versions()','EXECUTE')")" = "f"
+          export PGUSER=data_export_worker PGPASSWORD=ci-export-worker-password
+          if psql -X -c "SELECT * FROM public.users" >/tmp/export-worker-user-read.log 2>&1; then
+            echo "export worker can read user base rows" >&2
+            exit 1
+          fi
+          if psql -X -c "SELECT * FROM public.support_feedback" >/tmp/export-worker-feedback-read.log 2>&1; then
+            echo "export worker can read support feedback base rows" >&2
+            exit 1
+          fi
+          test "$(psql -X -At -c "SELECT has_function_privilege('data_export_worker','public.export_artifact_required_locator_key_versions()','EXECUTE')")" = "t"
+          test "$(psql -X -At -c "SELECT has_function_privilege('data_export_worker','public.support_feedback_required_key_versions()','EXECUTE')")" = "t"
+          test "$(psql -X -At -c "SELECT count(*) FROM public.support_feedback_required_key_versions() WHERE key_purpose='ENCRYPTION' AND key_version='enc-v1'")" = "1"
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          SELECT * FROM public.export_claim_next_job(
+            repeat('a',64), 'ci-worker-v1', 300
+          ) \gset
+          \if :{?export_id}
+          \else
+            \quit 3
+          \endif
+          SELECT * FROM public.export_stage_job_artifact(
+            :'export_id'::uuid, repeat('a',64), 'ci-worker-v1',
+            :state_version::bigint, decode(repeat('ab',16),'hex'),
+            'ci-artifact-v1', repeat('b',64), 128, 'application/json'
+          ) \gset
+          \if :{?new_state_version}
+          \else
+            \quit 3
+          \endif
+          SELECT count(*) = 1 AS locator_key_version_visible
+          FROM public.export_artifact_required_locator_key_versions()
+          WHERE key_version = 'ci-artifact-v1' \gset
+          \if :locator_key_version_visible
+          \else
+            \quit 3
+          \endif
+          DO $$
+          DECLARE snapshot jsonb;
+          BEGIN
+            snapshot := public.export_build_safe_snapshot(
+              '13300000-0000-4000-8000-000000000001',
+              repeat('a',64), 'ci-worker-v1'
+            );
+            IF jsonb_object_length(snapshot) <> 9
+              OR NOT snapshot ?& ARRAY[
+                'schemaVersion','generatedAt','account','identities','favorites',
+                'recommendationHistory','privateFeedback','preferences',
+                'supportFeedbackEncrypted'
+              ]
+              OR snapshot ->> 'schemaVersion' <> '1'
+              OR jsonb_array_length(snapshot -> 'identities') <> 1
+              OR jsonb_array_length(snapshot -> 'favorites') <> 0
+              OR jsonb_array_length(snapshot -> 'recommendationHistory') <> 0
+              OR jsonb_array_length(snapshot -> 'privateFeedback') <> 0
+              OR snapshot -> 'preferences' <> '{}'::jsonb
+              OR jsonb_array_length(snapshot -> 'supportFeedbackEncrypted') <> 1
+              OR length(snapshot #>> '{supportFeedbackEncrypted,0,ciphertextBase64}')
+                   NOT BETWEEN 24 AND 87384
+              OR snapshot::text ~* '(providerCode|providerPlaceId|lookupHash|dedupHash|requestCorrelationHash|contentFingerprint|guestIpHash|accessToken|refreshToken|coordinate)'
+            THEN
+              RAISE EXCEPTION 'unsafe or invalid export snapshot';
+            END IF;
+          END $$;
+          SELECT count(*) = 0 AS stale_rejected
+          FROM public.export_complete_job(
+            :'export_id'::uuid, repeat('a',64), 'ci-worker-v1',
+            :state_version::bigint
+          ) \gset
+          \if :stale_rejected
+          \else
+            \quit 3
+          \endif
+          SELECT count(*) = 1 AS completed
+          FROM public.export_complete_job(
+            :'export_id'::uuid, repeat('a',64), 'ci-worker-v1',
+            :new_state_version::bigint
+          ) \gset
+          \if :completed
+          \else
+            \quit 3
+          \endif
+          SQL
+          export PGUSER=api_runtime PGPASSWORD=ci-runtime-password
+          test "$(psql -X -At -F '|' -c "SELECT export_status,include_behavior_history,artifact_size_bytes,artifact_sha256 FROM public.app_get_data_export_status('13000000-0000-4000-8000-000000000001','13300000-0000-4000-8000-000000000001')")" = "READY|f|128|bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          test "$(psql -X -At -c "SELECT count(*) FROM public.app_open_data_export_artifact('13000000-0000-4000-8000-000000000001','13300000-0000-4000-8000-000000000001')")" = "1"
+          test "$(psql -X -At -c "SELECT count(*) FROM public.app_open_data_export_artifact('13000000-0000-4000-8000-000000000099','13300000-0000-4000-8000-000000000001')")" = "0"
+          test "$(psql -X -At -c "SELECT public.begin_account_deletion('13000000-0000-4000-8000-000000000001','13400000-0000-4000-8000-000000000001',repeat('c',64),'ci-v1',now()+interval '1 day')")" = "t"
+          export PGUSER=retention_worker PGPASSWORD=ci-maintenance-password
+          test "$(psql -X -At -c "SELECT has_function_privilege('retention_worker','public.export_artifact_required_locator_key_versions()','EXECUTE')")" = "f"
+          test "$(psql -X -At -c "SELECT public.complete_account_deletion('13400000-0000-4000-8000-000000000001','13000000-0000-4000-8000-000000000001')")" = "f"
+          export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          ALTER TABLE public.data_export_jobs DISABLE TRIGGER data_export_job_state_machine;
+          UPDATE public.data_export_jobs
+          SET created_at = now() - interval '8 days',
+              expires_at = now() - interval '1 day',
+              ready_at = now() - interval '2 days',
+              completed_at = now() - interval '2 days'
+          WHERE id = '13300000-0000-4000-8000-000000000001';
+          ALTER TABLE public.data_export_jobs ENABLE TRIGGER data_export_job_state_machine;
+          SQL
+          export PGUSER=api_runtime PGPASSWORD=ci-runtime-password
+          test "$(psql -X -At -c "SELECT count(*) FROM public.app_open_data_export_artifact('13000000-0000-4000-8000-000000000001','13300000-0000-4000-8000-000000000001')")" = "0"
+          export PGUSER=data_export_worker PGPASSWORD=ci-export-worker-password
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          SELECT * FROM public.export_claim_next_artifact_deletion(
+            repeat('d',64), 'ci-worker-v1', 300
+          ) \gset
+          \if :{?export_id}
+          \else
+            \quit 3
+          \endif
+          SELECT count(*) = 1 AS artifact_marked
+          FROM public.export_mark_artifact_deleted(
+            :'export_id'::uuid, repeat('d',64), 'ci-worker-v1',
+            :state_version::bigint
+          ) \gset
+          \if :artifact_marked
+          \else
+            \quit 3
+          \endif
+          SQL
+          export PGUSER=retention_worker PGPASSWORD=ci-maintenance-password
+          test "$(psql -X -At -c "SELECT public.complete_account_deletion('13400000-0000-4000-8000-000000000001','13000000-0000-4000-8000-000000000001')")" = "t"
+          export PGUSER=api_runtime PGPASSWORD=ci-runtime-password
+          test "$(psql -X -At -c "SELECT outcome FROM public.app_queue_data_export('13500000-0000-4000-8000-000000000001','13600000-0000-4000-8000-000000000001',true)")" = "CREATED"
+          export PGUSER=data_export_worker PGPASSWORD=ci-export-worker-password
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          SELECT * FROM public.export_claim_next_job(
+            repeat('e',64), 'ci-worker-v1', 300
+          ) \gset
+          SELECT * FROM public.export_stage_job_artifact(
+            :'export_id'::uuid, repeat('e',64), 'ci-worker-v1',
+            :state_version::bigint, decode(repeat('cd',16),'hex'),
+            'ci-artifact-v1', repeat('c',64), 256, 'application/json'
+          ) \gset
+          \if :{?new_state_version}
+          \else
+            \quit 3
+          \endif
+          DO $$
+          DECLARE snapshot jsonb;
+          BEGIN
+            snapshot := public.export_build_safe_snapshot(
+              '13600000-0000-4000-8000-000000000001',
+              repeat('e',64), 'ci-worker-v1'
+            );
+            IF jsonb_array_length(snapshot -> 'recommendationHistory') <> 1
+              OR snapshot #>> '{recommendationHistory,0,action}' <> 'NAVIGATION'
+            THEN
+              RAISE EXCEPTION 'active behavior history was not exported exactly once';
+            END IF;
+          END $$;
+          SQL
+          export PGUSER=api_runtime PGPASSWORD=ci-runtime-password
+          test "$(psql -X -At -c "SELECT public.begin_account_deletion('13500000-0000-4000-8000-000000000001','13700000-0000-4000-8000-000000000001',repeat('f',64),'ci-v1',now()+interval '1 day')")" = "t"
+          export PGUSER=retention_worker PGPASSWORD=ci-maintenance-password
+          test "$(psql -X -At -c "SELECT public.complete_account_deletion('13700000-0000-4000-8000-000000000001','13500000-0000-4000-8000-000000000001')")" = "f"
+          export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          ALTER TABLE public.data_export_jobs DISABLE TRIGGER data_export_job_state_machine;
+          UPDATE public.data_export_jobs
+            SET lease_expires_at = now() - interval '1 second'
+            WHERE id = '13600000-0000-4000-8000-000000000001';
+          ALTER TABLE public.data_export_jobs ENABLE TRIGGER data_export_job_state_machine;
+          SQL
+          export PGUSER=data_export_worker PGPASSWORD=ci-export-worker-password
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          SELECT * FROM public.export_claim_next_artifact_deletion(
+            repeat('f',64), 'ci-worker-v1', 300
+          ) \gset
+          \if :{?export_id}
+          \else
+            \quit 3
+          \endif
+          SELECT count(*) = 1 AS staged_orphan_marked
+          FROM public.export_mark_artifact_deleted(
+            :'export_id'::uuid, repeat('f',64), 'ci-worker-v1',
+            :state_version::bigint
+          ) \gset
+          \if :staged_orphan_marked
+          \else
+            \quit 3
+          \endif
+          SQL
+          export PGUSER=retention_worker PGPASSWORD=ci-maintenance-password
+          test "$(psql -X -At -c "SELECT public.complete_account_deletion('13700000-0000-4000-8000-000000000001','13500000-0000-4000-8000-000000000001')")" = "t"
+          export PGUSER=api_runtime PGPASSWORD=ci-runtime-password
+          test "$(psql -X -At -c "SELECT outcome FROM public.app_queue_data_export('13800000-0000-4000-8000-000000000001','13900000-0000-4000-8000-000000000001',true)")" = "CREATED"
+          export PGUSER=data_export_worker PGPASSWORD=ci-export-worker-password
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          SELECT export_id = '13900000-0000-4000-8000-000000000001'::uuid
+                   AND state_version = 1 AS claimed_unstaged
+          FROM public.export_claim_next_job(
+            repeat('1',64), 'ci-worker-v1', 300
+          ) \gset
+          \if :claimed_unstaged
+          \else
+            \quit 3
+          \endif
+          SQL
+          export PGUSER=api_runtime PGPASSWORD=ci-runtime-password
+          test "$(psql -X -At -c "SELECT public.begin_account_deletion('13800000-0000-4000-8000-000000000001','14000000-0000-4000-8000-000000000001',repeat('2',64),'ci-v1',now()+interval '1 day')")" = "t"
+          export PGUSER=retention_worker PGPASSWORD=ci-maintenance-password
+          test "$(psql -X -At -c "SELECT public.complete_account_deletion('14000000-0000-4000-8000-000000000001','13800000-0000-4000-8000-000000000001')")" = "f"
+          export PGUSER=data_export_worker PGPASSWORD=ci-export-worker-password
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          SELECT count(*) = 0 AS no_artifact_delete_claimed
+          FROM public.export_claim_next_artifact_deletion(
+            repeat('2',64), 'ci-worker-v1', 300
+          ) \gset
+          \if :no_artifact_delete_claimed
+          \else
+            \quit 3
+          \endif
+          SELECT count(*) = 0 AS stale_unstaged_builder_rejected
+          FROM public.export_stage_job_artifact(
+            '13900000-0000-4000-8000-000000000001'::uuid,
+            repeat('1',64), 'ci-worker-v1', 1,
+            decode(repeat('ef',16),'hex'),
+            'ci-artifact-v1', repeat('e',64), 512, 'application/json'
+          ) \gset
+          \if :stale_unstaged_builder_rejected
+          \else
+            \quit 3
+          \endif
+          SQL
+          export PGUSER=retention_worker PGPASSWORD=ci-maintenance-password
+          test "$(psql -X -At -c "SELECT public.complete_account_deletion('14000000-0000-4000-8000-000000000001','13800000-0000-4000-8000-000000000001')")" = "t"
+          export PGUSER=postgres PGPASSWORD=ci-bootstrap-password
+          test "$(psql -X -At -c "SELECT count(*) FROM public.users WHERE id='13800000-0000-4000-8000-000000000001'")" = "0"
+          test "$(psql -X -At -c "SELECT count(*) FROM public.data_export_jobs WHERE id='13900000-0000-4000-8000-000000000001'")" = "0"
+      - name: Exercise atomic support feedback, quotas, key rotation and ACL gates
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: "5432"
+          PGDATABASE: chi_shen_me_ci
+        run: |
+          export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
+          psql -X -v ON_ERROR_STOP=1 -c "INSERT INTO public.users (id) VALUES ('11000000-0000-0000-0000-000000000001')"
+          export PGUSER=api_runtime PGPASSWORD=ci-runtime-password
+          test "$(psql -X -At -c "SELECT count(*) FROM unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) AS privilege WHERE has_table_privilege('api_runtime','public.support_feedback',privilege)")" = "0"
+          test "$(psql -X -At -c "SELECT count(*) FROM unnest(ARRAY['SELECT','INSERT','UPDATE','REFERENCES']) AS privilege WHERE has_any_column_privilege('api_runtime','public.support_feedback',privilege)")" = "0"
+          test "$(psql -X -At -c "SELECT has_function_privilege('api_runtime','public.submit_support_feedback(uuid,uuid,character varying,character varying,bytea,character varying,character varying,character varying,jsonb,character varying,character varying,jsonb)','EXECUTE')")" = "t"
+          test "$(psql -X -At -c "SELECT has_function_privilege('api_runtime','public.support_feedback_required_key_versions()','EXECUTE')")" = "t"
+          test "$(psql -X -At -c "SELECT has_function_privilege('api_runtime','public.rewrap_support_feedback(uuid,character varying,character varying,character varying,bytea,character varying,character varying,character varying)','EXECUTE')")" = "f"
+          test "$(psql -X -At -c "SELECT has_function_privilege('api_runtime','public.anonymize_expired_support_feedback_guest_ip_hashes()','EXECUTE')")" = "f"
+          if psql -X -c "SELECT content_ciphertext FROM public.support_feedback" >/tmp/support-feedback-read.log 2>&1; then
+            echo "runtime role can read support feedback base rows" >&2
+            exit 1
+          fi
+          if psql -X -c "INSERT INTO public.support_feedback (id,submitter_kind,category,content_ciphertext,encryption_key_version,status) VALUES (gen_random_uuid(),'LEGACY','PRODUCT',decode(repeat('ab',16),'hex'),'enc-v1','OPEN')" >/tmp/support-feedback-insert.log 2>&1; then
+            echo "runtime role can directly insert support feedback" >&2
+            exit 1
+          fi
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$
+          DECLARE
+            result text;
+            content_candidates jsonb := jsonb_build_object('hmac-v1', repeat('a',64));
+            guest_candidates jsonb := jsonb_build_object('hmac-v1', repeat('b',64));
+            index integer;
+          BEGIN
+            result := public.submit_support_feedback(
+              '71000000-0000-4000-8000-000000000001', NULL, 'GUEST', 'PRODUCT',
+              decode(repeat('ab',16),'hex'), 'enc-v1', repeat('a',64), 'hmac-v1',
+              content_candidates, repeat('b',64), 'hmac-v1', guest_candidates
+            );
+            IF result <> 'INSERTED' THEN RAISE EXCEPTION 'guest insert failed'; END IF;
+            result := public.submit_support_feedback(
+              '71000000-0000-4000-8000-000000000001', NULL, 'GUEST', 'PRODUCT',
+              decode(repeat('cd',16),'hex'), 'enc-v1', repeat('a',64), 'hmac-v1',
+              content_candidates, repeat('b',64), 'hmac-v1', guest_candidates
+            );
+            IF result <> 'REPLAY' THEN RAISE EXCEPTION 'exact replay failed'; END IF;
+            result := public.submit_support_feedback(
+              '71000000-0000-4000-8000-000000000001', NULL, 'GUEST', 'PRODUCT',
+              decode(repeat('ef',16),'hex'), 'enc-v1', repeat('c',64), 'hmac-v1',
+              jsonb_build_object('hmac-v1',repeat('c',64)),
+              repeat('b',64), 'hmac-v1', guest_candidates
+            );
+            IF result <> 'MISMATCH' THEN RAISE EXCEPTION 'mismatch was accepted'; END IF;
+            FOR index IN 2..5 LOOP
+              result := public.submit_support_feedback(
+                ('71000000-0000-4000-8000-' || lpad(index::text,12,'0'))::uuid,
+                NULL, 'GUEST', 'PRODUCT', decode(repeat('ab',16),'hex'), 'enc-v1',
+                repeat('a',64), 'hmac-v1', content_candidates,
+                repeat('b',64), 'hmac-v1', guest_candidates
+              );
+              IF result <> 'INSERTED' THEN RAISE EXCEPTION 'guest quota setup failed'; END IF;
+            END LOOP;
+            BEGIN
+              PERFORM public.submit_support_feedback(
+                '71000000-0000-4000-8000-000000000006', NULL, 'GUEST', 'PRODUCT',
+                decode(repeat('ab',16),'hex'), 'enc-v1', repeat('a',64), 'hmac-v1',
+                content_candidates, repeat('b',64), 'hmac-v1', guest_candidates
+              );
+              RAISE EXCEPTION 'guest quota was not enforced';
+            EXCEPTION WHEN SQLSTATE 'P5100' THEN NULL;
+            END;
+            FOR index IN 1..20 LOOP
+              result := public.submit_support_feedback(
+                ('72000000-0000-4000-8000-' || lpad(index::text,12,'0'))::uuid,
+                '11000000-0000-0000-0000-000000000001', 'ACCOUNT', 'COMPLAINT',
+                decode(repeat('ab',16),'hex'), 'enc-v1', repeat('d',64), 'hmac-v1',
+                jsonb_build_object('hmac-v1',repeat('d',64)), NULL, NULL, NULL
+              );
+              IF result <> 'INSERTED' THEN RAISE EXCEPTION 'account quota setup failed'; END IF;
+            END LOOP;
+            BEGIN
+              PERFORM public.submit_support_feedback(
+                '72000000-0000-4000-8000-000000000021',
+                '11000000-0000-0000-0000-000000000001', 'ACCOUNT', 'COMPLAINT',
+                decode(repeat('ab',16),'hex'), 'enc-v1', repeat('d',64), 'hmac-v1',
+                jsonb_build_object('hmac-v1',repeat('d',64)), NULL, NULL, NULL
+              );
+              RAISE EXCEPTION 'account quota was not enforced';
+            EXCEPTION WHEN SQLSTATE 'P5100' THEN NULL;
+            END;
+          END $$;
+          SQL
+          test "$(psql -X -At -c "SELECT count(*) FROM public.support_feedback_required_key_versions() WHERE key_purpose='ENCRYPTION' AND key_version='enc-v1'")" = "1"
+          if psql -X -c "SELECT public.rewrap_support_feedback('71000000-0000-4000-8000-000000000001','enc-v1',repeat('a',64),'hmac-v1',decode(repeat('cd',16),'hex'),'enc-v2',repeat('c',64),'hmac-v2')" >/tmp/runtime-support-rewrap.log 2>&1; then
+            echo "runtime role can execute offline support rewrap" >&2
+            exit 1
+          fi
+          export PGUSER=retention_worker PGPASSWORD=ci-maintenance-password
+          test "$(psql -X -At -c "SELECT count(*) FROM unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) AS privilege WHERE has_table_privilege('retention_worker','public.support_feedback',privilege)")" = "0"
+          test "$(psql -X -At -c "SELECT count(*) FROM unnest(ARRAY['SELECT','INSERT','UPDATE','REFERENCES']) AS privilege WHERE has_any_column_privilege('retention_worker','public.support_feedback',privilege)")" = "0"
+          test "$(psql -X -At -c "SELECT has_function_privilege('retention_worker','public.rewrap_support_feedback(uuid,character varying,character varying,character varying,bytea,character varying,character varying,character varying)','EXECUTE')")" = "t"
+          test "$(psql -X -At -c "SELECT has_function_privilege('retention_worker','public.anonymize_expired_support_feedback_guest_ip_hashes()','EXECUTE')")" = "t"
+          test "$(psql -X -At -c "SELECT has_function_privilege('retention_worker','public.submit_support_feedback(uuid,uuid,character varying,character varying,bytea,character varying,character varying,character varying,jsonb,character varying,character varying,jsonb)','EXECUTE')")" = "f"
+          test "$(psql -X -At -c "SELECT has_function_privilege('retention_worker','public.support_feedback_required_key_versions()','EXECUTE')")" = "f"
+          if psql -X -c "SELECT content_ciphertext FROM public.support_feedback" >/tmp/maintenance-support-read.log 2>&1; then
+            echo "maintenance role can read support feedback base rows" >&2
+            exit 1
+          fi
+          test "$(psql -X -At -c "SELECT public.rewrap_support_feedback('71000000-0000-4000-8000-000000000001','wrong',repeat('a',64),'hmac-v1',decode(repeat('cd',16),'hex'),'enc-v2',repeat('c',64),'hmac-v2')")" = "STALE"
+          test "$(psql -X -At -c "SELECT public.rewrap_support_feedback('71000000-0000-4000-8000-000000000001','enc-v1',repeat('a',64),'hmac-v1',decode(repeat('cd',16),'hex'),'enc-v2',repeat('c',64),'hmac-v2')")" = "REWRAPPED"
+          export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          ALTER TABLE public.support_feedback DISABLE TRIGGER support_feedback_state_machine;
+          UPDATE public.support_feedback
+            SET created_at = now() - interval '25 hours'
+            WHERE id = '71000000-0000-4000-8000-000000000001';
+          ALTER TABLE public.support_feedback ENABLE TRIGGER support_feedback_state_machine;
+          SQL
+          export PGUSER=retention_worker PGPASSWORD=ci-maintenance-password
+          test "$(psql -X -At -c "SELECT public.anonymize_expired_support_feedback_guest_ip_hashes()")" = "1"
+          export PGUSER=api_runtime PGPASSWORD=ci-runtime-password
+          test "$(psql -X -At -c "SELECT public.submit_support_feedback('71000000-0000-4000-8000-000000000001',NULL,'GUEST','PRODUCT',decode(repeat('ef',16),'hex'),'enc-v3',repeat('c',64),'hmac-v2',jsonb_build_object('hmac-v2',repeat('c',64)),repeat('b',64),'hmac-v1',jsonb_build_object('hmac-v1',repeat('b',64)))")" = "REPLAY"
+          test "$(psql -X -At -c "SELECT public.submit_support_feedback('71000000-0000-4000-8000-000000000001',NULL,'GUEST','PRODUCT',decode(repeat('ef',16),'hex'),'enc-v3',repeat('d',64),'hmac-v2',jsonb_build_object('hmac-v2',repeat('d',64)),repeat('b',64),'hmac-v1',jsonb_build_object('hmac-v1',repeat('b',64)))")" = "MISMATCH"
+          export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
+          test "$(psql -X -At -c "SELECT count(*) FROM public.support_feedback WHERE id='71000000-0000-4000-8000-000000000001' AND guest_ip_hash IS NULL AND guest_ip_hash_algorithm IS NULL AND guest_ip_hash_key_version IS NULL AND guest_ip_destroyed_at IS NOT NULL AND content_ciphertext IS NOT NULL AND encryption_key_version='enc-v3'")" = "1"
+          export PGUSER=retention_worker PGPASSWORD=ci-maintenance-password
+          if psql -X -c "SELECT public.submit_support_feedback('73000000-0000-4000-8000-000000000001',NULL,'GUEST','PRODUCT',decode(repeat('ab',16),'hex'),'enc-v1',repeat('a',64),'hmac-v1',jsonb_build_object('hmac-v1',repeat('a',64)),repeat('b',64),'hmac-v1',jsonb_build_object('hmac-v1',repeat('b',64)))" >/tmp/maintenance-support-submit.log 2>&1; then
+            echo "maintenance role can submit user feedback" >&2
+            exit 1
+          fi
+          export PGUSER=admin_api_runtime PGPASSWORD=ci-admin-runtime-password
+          test "$(psql -X -At -c "SELECT count(*) FROM unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) AS privilege WHERE has_table_privilege('admin_api_runtime','public.support_feedback',privilege)")" = "0"
+          test "$(psql -X -At -c "SELECT count(*) FROM unnest(ARRAY['SELECT','INSERT','UPDATE','REFERENCES']) AS privilege WHERE has_any_column_privilege('admin_api_runtime','public.support_feedback',privilege)")" = "0"
+          if psql -X -c "SELECT * FROM public.support_feedback_required_key_versions()" >/tmp/admin-support-key-coverage.log 2>&1; then
+            echo "administrator runtime can inspect support crypto metadata" >&2
+            exit 1
+          fi
+      - name: Exercise administrator passkey, replay, expiry and ACL gates
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: "5432"
+          PGDATABASE: chi_shen_me_ci
+        run: |
+          export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          SELECT public.admin_bootstrap_first_security_admin(
+            'a1000000-0000-0000-0000-000000000001', repeat('a',64), 'ci-v1',
+            'c1000000-0000-0000-0000-000000000001', repeat('b',64), 'ci-v1',
+            decode(repeat('ab',16),'hex'), 'ci-enc-v1',
+            decode(repeat('cd',32),'hex'), repeat('c',64), 'ci-v1',
+            repeat('d',64), 'ci-v1', true, 0
+          );
+          SQL
+          if psql -X -v ON_ERROR_STOP=1 -c "SELECT public.admin_bootstrap_first_security_admin('a1000000-0000-0000-0000-000000000002',repeat('1',64),'ci-v1','c1000000-0000-0000-0000-000000000002',repeat('2',64),'ci-v1',decode(repeat('ab',16),'hex'),'ci-enc-v1',decode(repeat('cd',32),'hex'),repeat('3',64),'ci-v1',repeat('4',64),'ci-v1',true,0)" >/tmp/admin-second-bootstrap.log 2>&1; then
+            echo "administrator bootstrap was reusable" >&2
+            exit 1
+          fi
+          export PGUSER=api_runtime PGPASSWORD=ci-runtime-password
+          if psql -X -c "SELECT public.admin_begin_login_challenge('d1000000-0000-0000-0000-000000000099',repeat('a',64),'ci-v1',repeat('e',64),'ci-v1',repeat('f',64),repeat('1',64),'ci-bind-v1')" >/tmp/user-runtime-admin.log 2>&1; then
+            echo "user API runtime can execute administrator login functions" >&2
+            exit 1
+          fi
+          if psql -X -c "SELECT * FROM public.admin_list_self_credentials(repeat('1',64),'ci-v1',repeat('2',64),repeat('3',64),'ci-bind-v1')" >/tmp/user-runtime-admin-self-list.log 2>&1; then
+            echo "user API runtime can execute administrator self-service functions" >&2
+            exit 1
+          fi
+          export PGUSER=admin_api_runtime PGPASSWORD=ci-admin-runtime-password
+          if psql -X -c "SELECT login_lookup_hash FROM public.admin_users" >/tmp/admin-base-read.log 2>&1; then
+            echo "administrator runtime can read administrator base tables" >&2
+            exit 1
+          fi
+          if psql -X -c "SELECT public.admin_bootstrap_first_security_admin('a1000000-0000-0000-0000-000000000002',repeat('1',64),'ci-v1','c1000000-0000-0000-0000-000000000002',repeat('2',64),'ci-v1',decode(repeat('ab',16),'hex'),'ci-enc-v1',decode(repeat('cd',32),'hex'),repeat('3',64),'ci-v1',repeat('4',64),'ci-v1',true,0)" >/tmp/admin-runtime-bootstrap.log 2>&1; then
+            echo "administrator runtime can call offline bootstrap" >&2
+            exit 1
+          fi
+          if psql -X -c "SELECT public.admin_revoke_credential(repeat('1',64),'ci-v1',repeat('2',64),repeat('3',64),'ci-bind-v1','c1000000-0000-0000-0000-000000000001')" >/tmp/admin-runtime-internal-credential.log 2>&1; then
+            echo "administrator runtime can revoke a credential by internal UUID" >&2
+            exit 1
+          fi
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$
+          DECLARE result_status text;
+          BEGIN
+            IF NOT public.admin_begin_login_challenge(
+              'd1000000-0000-0000-0000-000000000001', repeat('a',64), 'ci-v1',
+              repeat('e',64), 'ci-v1', repeat('f',64), repeat('1',64), 'ci-bind-v1'
+            ) THEN RAISE EXCEPTION 'valid administrator challenge was rejected'; END IF;
+            IF (SELECT count(*) FROM public.admin_get_login_credential_options(
+              'd1000000-0000-0000-0000-000000000001', repeat('e',64), 'ci-v1',
+              repeat('f',64), repeat('1',64), 'ci-bind-v1'
+            )) <> 1 THEN RAISE EXCEPTION 'credential allow-list was not resolved'; END IF;
+            SELECT security_status INTO result_status
+            FROM public.admin_complete_login_assertion(
+              'd1000000-0000-0000-0000-000000000001', repeat('e',64), 'ci-v1',
+              repeat('f',64), repeat('1',64), 'ci-bind-v1', repeat('b',64), 'ci-v1',
+              repeat('c',64), 'ci-v1', repeat('d',64), 'ci-v1', true, 1,
+              'e1000000-0000-0000-0000-000000000001', repeat('2',64), 'ci-v1'
+            );
+            IF result_status <> 'SESSION_ISSUED' THEN
+              RAISE EXCEPTION 'administrator session was not issued';
+            END IF;
+            SELECT security_status INTO result_status
+            FROM public.admin_complete_login_assertion(
+              'd1000000-0000-0000-0000-000000000001', repeat('e',64), 'ci-v1',
+              repeat('f',64), repeat('1',64), 'ci-bind-v1', repeat('b',64), 'ci-v1',
+              repeat('c',64), 'ci-v1', repeat('d',64), 'ci-v1', true, 2,
+              'e1000000-0000-0000-0000-000000000099', repeat('3',64), 'ci-v1'
+            );
+            IF result_status <> 'INVALID_PROOF' THEN
+              RAISE EXCEPTION 'consumed administrator challenge replayed';
+            END IF;
+            IF (SELECT count(*) FROM public.admin_authenticate_session(
+              repeat('2',64), 'ci-v1', repeat('f',64), repeat('1',64), 'ci-bind-v1'
+            ) WHERE 'SECURITY_ADMIN_WRITE' = ANY(permission_codes)) <> 1 THEN
+              RAISE EXCEPTION 'active administrator permissions were not resolved';
+            END IF;
+            IF NOT public.admin_begin_enroll_challenge(
+              repeat('2',64), 'ci-v1', repeat('f',64), repeat('1',64),
+              'ci-bind-v1', 'd1100000-0000-0000-0000-000000000001',
+              repeat('6',64), 'ci-v1'
+            ) THEN RAISE EXCEPTION 'self enrollment challenge was rejected'; END IF;
+            IF (SELECT count(*)
+              FROM public.admin_get_self_enroll_credential_options(
+                repeat('2',64), 'ci-v1', repeat('f',64), repeat('1',64),
+                'ci-bind-v1', 'd1100000-0000-0000-0000-000000000001',
+                repeat('6',64), 'ci-v1'
+              )) <> 1 THEN
+              RAISE EXCEPTION 'self enrollment options were not resolved';
+            END IF;
+            IF (SELECT count(*)
+              FROM public.admin_get_self_enroll_credential_options(
+                repeat('2',64), 'ci-v1', repeat('f',64), repeat('9',64),
+                'ci-bind-v1', 'd1100000-0000-0000-0000-000000000001',
+                repeat('6',64), 'ci-v1'
+              )) <> 0 THEN
+              RAISE EXCEPTION 'enrollment options crossed the device binding';
+            END IF;
+            IF (SELECT count(*)
+              FROM public.admin_get_self_enroll_credential_options(
+                repeat('2',64), 'ci-v1', repeat('9',64), repeat('1',64),
+                'ci-bind-v1', 'd1100000-0000-0000-0000-000000000001',
+                repeat('6',64), 'ci-v1'
+              )) <> 0 THEN
+              RAISE EXCEPTION 'enrollment options crossed the IP binding';
+            END IF;
+            IF (SELECT count(*) FROM public.admin_list_self_credentials(
+              repeat('2',64), 'ci-v1', repeat('f',64), repeat('1',64), 'ci-bind-v1'
+            )) <> 1 THEN RAISE EXCEPTION 'self credential list was not scoped'; END IF;
+            IF (SELECT count(*) FROM public.admin_get_self_credential_record(
+              repeat('2',64), 'ci-v1', repeat('f',64), repeat('1',64),
+              'ci-bind-v1', 'c1000000-0000-0000-0000-000000000001'
+            )) <> 1 THEN RAISE EXCEPTION 'exact self credential was not resolved'; END IF;
+            IF (SELECT count(*) FROM public.admin_list_sanitized_audit_events(
+              repeat('2',64), 'ci-v1', repeat('f',64), repeat('1',64),
+              'ci-bind-v1', NULL::timestamptz, NULL::uuid, 10
+            )) = 0 THEN RAISE EXCEPTION 'sanitized audit page was unavailable'; END IF;
+            SELECT public.admin_revoke_self_credential(
+              repeat('2',64), 'ci-v1', repeat('f',64), repeat('1',64),
+              'ci-bind-v1', repeat('Z',43)
+            ) INTO result_status;
+            IF result_status <> 'NOT_FOUND' THEN
+              RAISE EXCEPTION 'unknown self credential handle was accepted';
+            END IF;
+          END $$;
+          DO $$
+          DECLARE result_status text;
+          BEGIN
+            IF NOT public.admin_begin_login_challenge(
+              'd1000000-0000-0000-0000-000000000002', repeat('a',64), 'ci-v1',
+              repeat('4',64), 'ci-v1', repeat('f',64), repeat('1',64), 'ci-bind-v1'
+            ) THEN RAISE EXCEPTION 'failure challenge was rejected'; END IF;
+            FOR attempt_number IN 1..4 LOOP
+              SELECT public.admin_fail_login_challenge(
+                'd1000000-0000-0000-0000-000000000002', repeat('4',64), 'ci-v1',
+                repeat('f',64), repeat('1',64), 'ci-bind-v1'
+              ) INTO result_status;
+              IF result_status <> 'RETRY_ALLOWED' THEN
+                RAISE EXCEPTION 'challenge exhausted too early';
+              END IF;
+            END LOOP;
+            SELECT public.admin_fail_login_challenge(
+              'd1000000-0000-0000-0000-000000000002', repeat('4',64), 'ci-v1',
+              repeat('f',64), repeat('1',64), 'ci-bind-v1'
+            ) INTO result_status;
+            IF result_status <> 'FAILED' THEN RAISE EXCEPTION 'challenge did not close'; END IF;
+            SELECT public.admin_fail_login_challenge(
+              'd1000000-0000-0000-0000-000000000002', repeat('4',64), 'ci-v1',
+              repeat('f',64), repeat('1',64), 'ci-bind-v1'
+            ) INTO result_status;
+            IF result_status <> 'INVALID_PROOF' THEN RAISE EXCEPTION 'failed challenge replayed'; END IF;
+          END $$;
+          SQL
+          export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          BEGIN;
+          SELECT set_config('chi_shen_me.admin_security_mutation','enabled',true);
+          INSERT INTO public.admin_mfa_credentials (
+            id, admin_user_id, credential_id_hash, credential_hash_algorithm,
+            credential_hash_key_version, credential_id_ciphertext,
+            credential_encryption_key_version, public_key, signature_counter,
+            counter_mode, rp_id_hash, rp_id_hash_key_version,
+            origin_hash, origin_hash_key_version, user_verification_required,
+            self_service_handle
+          ) VALUES (
+            'c1000000-0000-0000-0000-000000000002',
+            'a1000000-0000-0000-0000-000000000001', repeat('0',64),
+            'HMAC-SHA256', 'ci-v1', decode(repeat('ef',16),'hex'), 'ci-enc-v1',
+            decode(repeat('ab',32),'hex'), 0, 'UNKNOWN', repeat('c',64),
+            'ci-v1', repeat('d',64), 'ci-v1', true, repeat('H',43)
+          );
+          COMMIT;
+          SQL
+          export PGUSER=admin_api_runtime PGPASSWORD=ci-admin-runtime-password
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM public.admin_list_self_credentials(repeat('2',64),'ci-v1',repeat('f',64),repeat('1',64),'ci-bind-v1')")" = "2"
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT public.admin_revoke_self_credential(repeat('2',64),'ci-v1',repeat('f',64),repeat('1',64),'ci-bind-v1',repeat('H',43))")" = "REVOKED"
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM public.admin_authenticate_session(repeat('2',64),'ci-v1',repeat('f',64),repeat('1',64),'ci-bind-v1')")" = "0"
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM public.admin_get_self_credential_record(repeat('2',64),'ci-v1',repeat('f',64),repeat('1',64),'ci-bind-v1','c1000000-0000-0000-0000-000000000001')")" = "0"
+          export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          BEGIN;
+          SELECT set_config('chi_shen_me.admin_security_mutation','enabled',true);
+          DO $$
+          BEGIN
+            FOR item IN 1..19 LOOP
+              INSERT INTO public.admin_mfa_credentials (
+                admin_user_id, credential_id_hash, credential_hash_algorithm,
+                credential_hash_key_version, credential_id_ciphertext,
+                credential_encryption_key_version, public_key,
+                signature_counter, counter_mode, rp_id_hash,
+                rp_id_hash_key_version, origin_hash, origin_hash_key_version,
+                user_verification_required
+              ) VALUES (
+                'a1000000-0000-0000-0000-000000000001',
+                encode(public.digest(
+                  'ci-active-limit-' || item::text, 'sha256'
+                ),'hex'),
+                'HMAC-SHA256', 'ci-v1', decode(repeat('aa',16),'hex'),
+                'ci-enc-v1', decode(repeat('bb',32),'hex'), 0, 'UNKNOWN',
+                repeat('c',64), 'ci-v1', repeat('d',64), 'ci-v1', true
+              );
+            END LOOP;
+          END $$;
+          COMMIT;
+          SQL
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM public.admin_mfa_credentials WHERE admin_user_id='a1000000-0000-0000-0000-000000000001' AND revoked_at IS NULL")" = "20"
+          if psql -X -v ON_ERROR_STOP=1 -c "SELECT set_config('chi_shen_me.admin_security_mutation','enabled',false); INSERT INTO public.admin_mfa_credentials (admin_user_id,credential_id_hash,credential_hash_algorithm,credential_hash_key_version,credential_id_ciphertext,credential_encryption_key_version,public_key,signature_counter,counter_mode,rp_id_hash,rp_id_hash_key_version,origin_hash,origin_hash_key_version,user_verification_required) VALUES ('a1000000-0000-0000-0000-000000000001',repeat('e',64),'HMAC-SHA256','ci-v1',decode(repeat('cc',16),'hex'),'ci-enc-v1',decode(repeat('dd',32),'hex'),0,'UNKNOWN',repeat('c',64),'ci-v1',repeat('d',64),'ci-v1',true)" >/tmp/admin-credential-limit.log 2>&1; then
+            echo "administrator accepted a twenty-first active credential" >&2
+            exit 1
+          fi
+          grep -q "administrator active credential limit reached" /tmp/admin-credential-limit.log
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM public.admin_mfa_credentials WHERE admin_user_id='a1000000-0000-0000-0000-000000000001' AND revoked_at IS NULL")" = "20"
+          export PGUSER=admin_api_runtime PGPASSWORD=ci-admin-runtime-password
+          psql -X -v ON_ERROR_STOP=1 -c "SELECT public.admin_begin_login_challenge('d1000000-0000-0000-0000-000000000003',repeat('a',64),'ci-v1',repeat('5',64),'ci-v1',repeat('f',64),repeat('1',64),'ci-bind-v1')"
+          export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          BEGIN;
+          SELECT set_config('chi_shen_me.admin_security_mutation','enabled',true);
+          UPDATE public.admin_webauthn_challenges
+          SET created_at = now() - interval '10 minutes',
+              expires_at = now() - interval '5 minutes',
+              retain_until = now() - interval '10 minutes' + interval '24 hours'
+          WHERE id = 'd1000000-0000-0000-0000-000000000003';
+          COMMIT;
+          SQL
+          export PGUSER=admin_api_runtime PGPASSWORD=ci-admin-runtime-password
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT security_status FROM public.admin_complete_login_assertion('d1000000-0000-0000-0000-000000000003',repeat('5',64),'ci-v1',repeat('f',64),repeat('1',64),'ci-bind-v1',repeat('b',64),'ci-v1',repeat('c',64),'ci-v1',repeat('d',64),'ci-v1',true,2,'e1000000-0000-0000-0000-000000000003',repeat('5',64),'ci-v1')")" = "EXPIRED"
+          export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          BEGIN;
+          SELECT set_config('chi_shen_me.admin_security_mutation','enabled',true);
+          INSERT INTO public.admin_users (
+            id, login_lookup_hash, login_hash_algorithm, login_hash_key_version,
+            status, created_at, status_changed_at
+          ) VALUES (
+            'a2000000-0000-0000-0000-000000000001', repeat('6',64),
+            'HMAC-SHA256', 'ci-v1', 'ACTIVE', now(), now()
+          );
+          INSERT INTO public.admin_mfa_credentials (
+            id, admin_user_id, credential_id_hash, credential_hash_algorithm,
+            credential_hash_key_version, credential_id_ciphertext,
+            credential_encryption_key_version, public_key, signature_counter,
+            counter_mode, rp_id_hash, rp_id_hash_key_version,
+            origin_hash, origin_hash_key_version, user_verification_required,
+            self_service_handle
+          ) VALUES (
+            'c2000000-0000-0000-0000-000000000001',
+            'a2000000-0000-0000-0000-000000000001', repeat('7',64),
+            'HMAC-SHA256', 'ci-v1', decode(repeat('ef',16),'hex'), 'ci-enc-v1',
+            decode(repeat('ab',32),'hex'), 0, 'UNSUPPORTED', repeat('8',64),
+            'ci-v1', repeat('9',64), 'ci-v1', true, repeat('J',43)
+          );
+          INSERT INTO public.admin_user_roles (admin_user_id, role_id, expires_at)
+          SELECT 'a2000000-0000-0000-0000-000000000001', id, now() + interval '1 day'
+          FROM public.admin_roles WHERE role_code = 'OPERATOR';
+          INSERT INTO public.admin_sessions (
+            id, admin_user_id, token_hash, token_hash_algorithm,
+            token_hash_key_version, device_hash, last_ip_hash,
+            binding_hash_key_version, created_at, last_seen_at,
+            idle_expires_at, absolute_expires_at, retain_until
+          ) VALUES (
+            'e2000000-0000-0000-0000-000000000001',
+            'a2000000-0000-0000-0000-000000000001', repeat('6',64),
+            'HMAC-SHA256', 'ci-v1', repeat('7',64), repeat('8',64),
+            'ci-bind-v1', now(), now(), now() + interval '15 minutes',
+            now() + interval '8 hours', now() + interval '30 days 8 hours'
+          );
+          COMMIT;
+          SQL
+          export PGUSER=admin_api_runtime PGPASSWORD=ci-admin-runtime-password
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM public.admin_list_sanitized_audit_events(repeat('6',64),'ci-v1',repeat('8',64),repeat('7',64),'ci-bind-v1',NULL::timestamptz,NULL::uuid,10)")" = "0"
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM public.admin_get_self_credential_record(repeat('6',64),'ci-v1',repeat('8',64),repeat('7',64),'ci-bind-v1','c2000000-0000-0000-0000-000000000001')")" = "1"
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM public.admin_get_self_credential_record(repeat('6',64),'ci-v1',repeat('8',64),repeat('7',64),'ci-bind-v1','c1000000-0000-0000-0000-000000000001')")" = "0"
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT public.admin_revoke_self_credential(repeat('6',64),'ci-v1',repeat('8',64),repeat('7',64),'ci-bind-v1',repeat('H',43))")" = "NOT_FOUND"
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT public.admin_revoke_self_credential(repeat('6',64),'ci-v1',repeat('8',64),repeat('7',64),'ci-bind-v1',repeat('J',43))")" = "LAST_ACTIVE_CREDENTIAL"
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT public.admin_grant_role(repeat('6',64),'ci-v1',repeat('8',64),repeat('7',64),'ci-bind-v1','a2000000-0000-0000-0000-000000000001','OPERATOR',now()+interval '1 day')")" = "UNAUTHORIZED"
+          export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          BEGIN;
+          SELECT set_config('chi_shen_me.admin_security_mutation','enabled',true);
+          UPDATE public.admin_user_roles
+          SET granted_at = now() - interval '2 days',
+              expires_at = now() - interval '1 day'
+          WHERE admin_user_id = 'a2000000-0000-0000-0000-000000000001';
+          COMMIT;
+          SQL
+          export PGUSER=admin_api_runtime PGPASSWORD=ci-admin-runtime-password
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM public.admin_authenticate_session(repeat('6',64),'ci-v1',repeat('8',64),repeat('7',64),'ci-bind-v1')")" = "0"
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT public.admin_begin_login_challenge('d1000000-0000-0000-0000-000000000004',repeat('a',64),'ci-v1',repeat('a',64),'ci-v1',repeat('f',64),repeat('1',64),'ci-bind-v1')")" = "t"
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT security_status FROM public.admin_complete_login_assertion('d1000000-0000-0000-0000-000000000004',repeat('a',64),'ci-v1',repeat('f',64),repeat('1',64),'ci-bind-v1',repeat('b',64),'ci-v1',repeat('c',64),'ci-v1',repeat('d',64),'ci-v1',true,1,'e1000000-0000-0000-0000-000000000004',repeat('a',64),'ci-v1')")" = "COUNTER_ROLLBACK"
+          export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
+          test "$(psql -X -At -c "SELECT status FROM public.admin_users WHERE id='a1000000-0000-0000-0000-000000000001'")" = "LOCKED"
+          test "$(psql -X -At -c "SELECT count(*) FROM public.admin_mfa_credentials WHERE id='c1000000-0000-0000-0000-000000000001' AND revoked_at IS NOT NULL")" = "1"
+          test "$(psql -X -At -c "SELECT count(*) FROM public.admin_sessions WHERE admin_user_id='a1000000-0000-0000-0000-000000000001' AND revoked_at IS NULL")" = "0"
+          test "$(psql -X -At -c "SELECT count(*) FROM public.admin_audit_log WHERE action_type IN ('ADMIN_LOGIN_FAILED','ADMIN_LOGIN_SUCCEEDED','ADMIN_SESSION_REVOKED','ADMIN_WEBAUTHN_COUNTER_ROLLBACK')")" -ge 4
+      - name: Exercise schema validators and runtime-only state transitions
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: "5432"
+          PGDATABASE: chi_shen_me_ci
+        run: |
+          export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$ BEGIN
+            IF NOT public.app_config_value_is_valid(
+              'FEATURE_FLAGS_V1', '{"enabled":true,"rolloutPercentage":25}'::jsonb
+            ) OR public.app_config_value_is_valid(
+              'FEATURE_FLAGS_V1', '{"enabled":true,"value":"13800138000"}'::jsonb
+            ) OR public.audit_context_is_valid(
+              'UNSCHEMATIZED_ACTION', '{"value":"116.3,39.9"}'::jsonb
+            ) THEN RAISE EXCEPTION 'JSON privacy/schema validator failed'; END IF;
+          END $$;
+          INSERT INTO public.users (id) VALUES ('10000000-0000-0000-0000-000000000001');
+          INSERT INTO public.data_rights_authorizations (
+            id, provider_code, authorization_reference_hash,
+            reference_hash_algorithm, reference_hash_key_version,
+            evidence_locator_ciphertext, encryption_key_version,
+            effective_at, expires_at, reviewed_by_admin_user_hash,
+            reviewer_hash_key_version
+          ) VALUES (
+            '20000000-0000-0000-0000-000000000001', 'AMAP', repeat('a',64),
+            'HMAC-SHA256', 'ci-v1', decode(repeat('ab',16),'hex'), 'ci-v1',
+            now() - interval '1 hour', now() + interval '1 day', repeat('b',64), 'ci-v1'
+          );
+          INSERT INTO public.data_rights_authorization_operations
+            (authorization_id, operation_code)
+          VALUES ('20000000-0000-0000-0000-000000000001', 'PERSIST_PLACE_REFERENCE');
+          SQL
+          export PGUSER=api_runtime PGPASSWORD=ci-runtime-password
+          if psql -X -c "SELECT provider_place_id FROM public.external_place_references" >/tmp/base-ref.log 2>&1; then
+            echo "runtime role can read provider reference base rows" >&2
+            exit 1
+          fi
+          if psql -X -c "SELECT public.persist_licensed_external_place_reference('AMAP','forbidden-direct-reference','20000000-0000-0000-0000-000000000001',now()+interval '1 hour')" >/tmp/direct-reference.log 2>&1; then
+            echo "runtime role can bypass controlled persistence entrypoints" >&2
+            exit 1
+          fi
+          if psql -X -c "INSERT INTO public.favorites (id,user_id,external_place_reference_id,favorite_group,created_at,rights_revoked_at) VALUES ('50000000-0000-0000-0000-000000000099','10000000-0000-0000-0000-000000000001',NULL,'WANT_TO_GO',now(),now())" >/tmp/direct-favorite.log 2>&1; then
+            echo "runtime role can directly write favorites" >&2
+            exit 1
+          fi
+          if psql -X -c "SET chi_shen_me.otp_state_transition='enabled'; UPDATE public.otp_challenges SET consumed_at=NULL WHERE false" >/tmp/direct-otp.log 2>&1; then
+            echo "runtime role can directly update OTP state" >&2
+            exit 1
+          fi
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          SELECT favorite_id AS first_favorite
+          FROM public.persistence_insert_favorite(
+            '10000000-0000-0000-0000-000000000001',
+            '50000000-0000-0000-0000-000000000001',
+            'AMAP', 'ci-place-one',
+            '20000000-0000-0000-0000-000000000001',
+            now() + interval '1 hour', 'WANT_TO_GO'
+          ) \gset
+          SELECT favorite_id AS second_favorite
+          FROM public.persistence_insert_favorite(
+            '10000000-0000-0000-0000-000000000001',
+            '50000000-0000-0000-0000-000000000002',
+            'AMAP', 'ci-place-one',
+            '20000000-0000-0000-0000-000000000001',
+            now() + interval '2 hours', 'REGULAR'
+          ) \gset
+          SELECT :'first_favorite' = :'second_favorite' AS same_favorite \gset
+          \if :same_favorite
+          \else
+            \quit 3
+          \endif
+          SELECT history_id FROM public.persistence_record_history(
+            '10000000-0000-0000-0000-000000000001',
+            '60000000-0000-0000-0000-000000000001',
+            'AMAP', 'ci-place-one',
+            '20000000-0000-0000-0000-000000000001',
+            now() + interval '2 hours', repeat('c',64), 'ci-v1',
+            'DETAIL', 'LUNCH'
+          );
+          SELECT feedback_id FROM public.persistence_insert_private_feedback(
+            '10000000-0000-0000-0000-000000000001',
+            '70000000-0000-0000-0000-000000000001',
+            'AMAP', 'ci-place-one',
+            '20000000-0000-0000-0000-000000000001',
+            now() + interval '2 hours', repeat('d',64), 'ci-v1', 'LIKE'
+          );
+          INSERT INTO public.otp_challenges (
+            id, channel, purpose, destination_hash, destination_hash_algorithm,
+            destination_hash_key_version, destination_dedup_hash,
+            destination_dedup_hash_algorithm, destination_dedup_key_version,
+            masked_destination, code_hash, code_hash_algorithm,
+            code_hash_key_version, idempotency_key_hash, hash_key_version,
+            request_ip_hash, device_hash, retain_until
+          ) VALUES (
+            '30000000-0000-0000-0000-000000000001', 'PHONE', 'LOGIN',
+            repeat('1',64), 'HMAC-SHA256', 'ci-v1', repeat('2',64),
+            'HMAC-SHA256', 'ci-dedup-v1', '+86138****1234', repeat('x',64),
+            'ARGON2ID-PEPPERED', 'ci-v1', repeat('3',64), 'ci-v1',
+            repeat('4',64), repeat('5',64), now() + interval '1 hour'
+          );
+          SELECT public.finalize_otp_delivery(
+            '30000000-0000-0000-0000-000000000001', 'SENT', repeat('6',64), now() + interval '10 minutes'
+          ) AS delivered \gset
+          SELECT public.record_otp_verification_attempt(
+            '30000000-0000-0000-0000-000000000001', 'LOGIN', NULL, NULL, repeat('5',64), true
+          ) AS consumed \gset
+          SELECT public.record_otp_verification_attempt(
+            '30000000-0000-0000-0000-000000000001', 'LOGIN', NULL, NULL, repeat('5',64), true
+          ) AS replayed \gset
+          \if :delivered
+          \else
+            \quit 3
+          \endif
+          \if :consumed
+          \else
+            \quit 3
+          \endif
+          \if :replayed
+            \quit 3
+          \endif
+          INSERT INTO public.oauth_states (
+            id, provider, purpose, state_hash, state_hash_algorithm,
+            flow_reference_hash, device_hash, hash_key_version, expires_at, retain_until
+          ) VALUES (
+            '40000000-0000-0000-0000-000000000001', 'WECHAT', 'LOGIN',
+            repeat('7',64), 'HMAC-SHA256', repeat('8',64), repeat('5',64), 'ci-v1',
+            now() + interval '10 minutes', now() + interval '1 hour'
+          );
+          SELECT public.consume_oauth_state(
+            '40000000-0000-0000-0000-000000000001', 'WECHAT', 'LOGIN',
+            repeat('8',64), NULL, NULL, repeat('5',64),
+            repeat('1',64), 'ci-v1', repeat('2',64), 'ci-dedup-v1'
+          ) AS oauth_consumed \gset
+          SELECT public.consume_oauth_state(
+            '40000000-0000-0000-0000-000000000001', 'WECHAT', 'LOGIN',
+            repeat('8',64), NULL, NULL, repeat('5',64),
+            repeat('3',64), 'ci-v1', repeat('4',64), 'ci-dedup-v1'
+          ) AS oauth_replayed \gset
+          \if :oauth_consumed
+          \else
+            \quit 3
+          \endif
+          \if :oauth_replayed
+            \quit 3
+          \endif
+          INSERT INTO public.otp_challenges (
+            id, channel, purpose, destination_hash, destination_hash_algorithm,
+            destination_hash_key_version, destination_dedup_hash,
+            destination_dedup_hash_algorithm, destination_dedup_key_version,
+            masked_destination, registration_flow_reference_hash, code_hash,
+            code_hash_algorithm, code_hash_key_version, idempotency_key_hash,
+            hash_key_version, request_ip_hash, device_hash, retain_until
+          ) VALUES (
+            '30000000-0000-0000-0000-000000000002', 'PHONE', 'REGISTER',
+            repeat('a',64), 'HMAC-SHA256', 'ci-v1', repeat('b',64),
+            'HMAC-SHA256', 'ci-dedup-v1', '+86139****5678', repeat('f',64),
+            repeat('y',64), 'ARGON2ID-PEPPERED', 'ci-v1', repeat('c',64),
+            'ci-v1', repeat('d',64), repeat('e',64), now() + interval '1 hour'
+          );
+          SELECT public.finalize_otp_delivery(
+            '30000000-0000-0000-0000-000000000002', 'SENT', repeat('1',64), now() + interval '10 minutes'
+          ) AS register_delivered \gset
+          SELECT public.record_otp_verification_attempt(
+            '30000000-0000-0000-0000-000000000002', 'REGISTER', NULL, NULL, repeat('e',64), true
+          ) AS register_phone_consumed \gset
+          INSERT INTO public.oauth_states (
+            id, provider, purpose, state_hash, state_hash_algorithm,
+            flow_reference_hash, device_hash, hash_key_version, expires_at, retain_until
+          ) VALUES (
+            '40000000-0000-0000-0000-000000000002', 'WECHAT', 'REGISTER',
+            repeat('e',64), 'HMAC-SHA256', repeat('f',64), repeat('e',64),
+            'ci-v1', now() + interval '10 minutes', now() + interval '1 hour'
+          );
+          SELECT public.consume_oauth_state(
+            '40000000-0000-0000-0000-000000000002', 'WECHAT', 'REGISTER',
+            repeat('f',64), NULL, NULL, repeat('e',64),
+            repeat('9',64), 'ci-v1', repeat('0',64), 'ci-dedup-v1'
+          ) AS register_oauth_consumed \gset
+          SELECT public.register_phone_wechat_account(
+            '10000000-0000-0000-0000-000000000003',
+            '30000000-0000-0000-0000-000000000002',
+            '40000000-0000-0000-0000-000000000002', repeat('f',64), repeat('e',64)
+          ) AS registration_claimed \gset
+          SELECT public.register_phone_wechat_account(
+            '10000000-0000-0000-0000-000000000004',
+            '30000000-0000-0000-0000-000000000002',
+            '40000000-0000-0000-0000-000000000002', repeat('f',64), repeat('e',64)
+          ) AS registration_replayed \gset
+          \if :register_delivered
+          \else
+            \quit 3
+          \endif
+          \if :register_phone_consumed
+          \else
+            \quit 3
+          \endif
+          \if :register_oauth_consumed
+          \else
+            \quit 3
+          \endif
+          \if :registration_claimed
+          \else
+            \quit 3
+          \endif
+          \if :registration_replayed
+            \quit 3
+          \endif
+          INSERT INTO public.otp_challenges (
+            id, channel, purpose, destination_hash, destination_hash_algorithm,
+            destination_hash_key_version, destination_dedup_hash,
+            destination_dedup_hash_algorithm, destination_dedup_key_version,
+            masked_destination, operation_target_hash, target_user_id, code_hash,
+            code_hash_algorithm, code_hash_key_version, idempotency_key_hash,
+            hash_key_version, request_ip_hash, device_hash, retain_until
+          ) VALUES (
+            '30000000-0000-0000-0000-000000000003','EMAIL','BIND',repeat('a',64),
+            'HMAC-SHA256','ci-v1',repeat('b',64),'HMAC-SHA256','ci-dedup-v1',
+            'a***@example.com',repeat('6',64),'10000000-0000-0000-0000-000000000001',
+            repeat('z',64),'ARGON2ID-PEPPERED','ci-v1',repeat('5',64),'ci-v1',
+            repeat('4',64),repeat('7',64),now()+interval '1 hour'
+          );
+          SELECT public.finalize_otp_delivery(
+            '30000000-0000-0000-0000-000000000003','SENT',repeat('3',64),now()+interval '10 minutes'
+          );
+          SELECT public.record_otp_verification_attempt(
+            '30000000-0000-0000-0000-000000000003','BIND',
+            '10000000-0000-0000-0000-000000000001',repeat('6',64),repeat('7',64),true
+          );
+          INSERT INTO public.oauth_states (
+            id, provider, purpose, state_hash, state_hash_algorithm,
+            flow_reference_hash, operation_target_hash, target_user_id, device_hash,
+            hash_key_version, expires_at, retain_until
+          ) VALUES (
+            '40000000-0000-0000-0000-000000000003','QQ','BIND',repeat('a',64),
+            'HMAC-SHA256',repeat('8',64),repeat('6',64),
+            '10000000-0000-0000-0000-000000000001',repeat('7',64),'ci-v1',
+            now()+interval '10 minutes',now()+interval '1 hour'
+          );
+          SELECT public.consume_oauth_state(
+            '40000000-0000-0000-0000-000000000003','QQ','BIND',repeat('8',64),
+            repeat('6',64),'10000000-0000-0000-0000-000000000001',repeat('7',64),
+            repeat('c',64),'ci-v1',repeat('d',64),'ci-dedup-v1'
+          );
+          DO $$
+          DECLARE bound_id uuid;
+          BEGIN
+            IF public.bind_email_identity_from_consumed_otp(
+              '10000000-0000-0000-0000-000000000003',
+              '30000000-0000-0000-0000-000000000003',repeat('6',64),repeat('7',64)
+            ) IS NOT NULL THEN RAISE EXCEPTION 'email proof crossed user boundary'; END IF;
+            bound_id := public.bind_email_identity_from_consumed_otp(
+              '10000000-0000-0000-0000-000000000001',
+              '30000000-0000-0000-0000-000000000003',repeat('6',64),repeat('7',64)
+            );
+            IF bound_id IS NULL OR NOT EXISTS (
+              SELECT 1 FROM public.identity_bindings WHERE id=bound_id
+                AND lookup_hash=repeat('a',64) AND dedup_hash=repeat('b',64)
+            ) THEN RAISE EXCEPTION 'sealed email proof was not bound'; END IF;
+            IF public.bind_email_identity_from_consumed_otp(
+              '10000000-0000-0000-0000-000000000001',
+              '30000000-0000-0000-0000-000000000003',repeat('6',64),repeat('7',64)
+            ) IS NOT NULL THEN RAISE EXCEPTION 'email proof replayed'; END IF;
+            IF public.bind_qq_identity_from_consumed_oauth_state(
+              '10000000-0000-0000-0000-000000000003',
+              '40000000-0000-0000-0000-000000000003',repeat('8',64),repeat('6',64),repeat('7',64)
+            ) IS NOT NULL THEN RAISE EXCEPTION 'QQ proof crossed user boundary'; END IF;
+            bound_id := public.bind_qq_identity_from_consumed_oauth_state(
+              '10000000-0000-0000-0000-000000000001',
+              '40000000-0000-0000-0000-000000000003',repeat('8',64),repeat('6',64),repeat('7',64)
+            );
+            IF bound_id IS NULL OR NOT EXISTS (
+              SELECT 1 FROM public.identity_bindings WHERE id=bound_id
+                AND lookup_hash=repeat('c',64) AND dedup_hash=repeat('d',64)
+            ) THEN RAISE EXCEPTION 'sealed QQ proof was not bound'; END IF;
+            IF public.bind_qq_identity_from_consumed_oauth_state(
+              '10000000-0000-0000-0000-000000000001',
+              '40000000-0000-0000-0000-000000000003',repeat('8',64),repeat('6',64),repeat('7',64)
+            ) IS NOT NULL THEN RAISE EXCEPTION 'QQ proof replayed'; END IF;
+          END $$;
+          INSERT INTO public.auth_session_families (
+            id, user_id, device_label, platform, device_hash, hash_key_version,
+            refresh_expires_at, retain_until
+          ) VALUES (
+            '50000000-0000-0000-0000-000000000001',
+            '10000000-0000-0000-0000-000000000001', 'CI Android', 'ANDROID',
+            repeat('9',64), 'ci-v1', now() + interval '1 day', now() + interval '2 days'
+          );
+          INSERT INTO public.auth_refresh_credentials (
+            id, session_family_id, generation, token_hash, token_hash_algorithm,
+            token_hash_key_version, expires_at
+          ) VALUES
+            ('60000000-0000-0000-0000-000000000001', '50000000-0000-0000-0000-000000000001', 0, repeat('a',64), 'HMAC-SHA256', 'ci-v1', now() + interval '12 hours'),
+            ('60000000-0000-0000-0000-000000000002', '50000000-0000-0000-0000-000000000001', 1, repeat('b',64), 'HMAC-SHA256', 'ci-v1', now() + interval '12 hours');
+          SELECT public.rotate_auth_refresh_credential(
+            '60000000-0000-0000-0000-000000000001',
+            '50000000-0000-0000-0000-000000000001',
+            '60000000-0000-0000-0000-000000000002'
+          ) AS rotated \gset
+          SELECT public.mark_auth_refresh_replay(
+            '50000000-0000-0000-0000-000000000001',
+            '60000000-0000-0000-0000-000000000001'
+          ) AS compromised \gset
+          \if :rotated
+          \else
+            \quit 3
+          \endif
+          \if :compromised
+          \else
+            \quit 3
+          \endif
+          SQL
+          export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          SELECT id AS email_binding_id FROM public.identity_bindings
+            WHERE user_id='10000000-0000-0000-0000-000000000001'
+              AND identity_type='EMAIL' AND revoked_at IS NULL \gset
+          SELECT public.revoke_non_primary_identity_binding(
+            :'email_binding_id','10000000-0000-0000-0000-000000000001'
+          ) AS email_revoked \gset
+          \if :email_revoked
+          \else
+            \quit 3
+          \endif
+          INSERT INTO public.otp_challenges (
+            id, channel, purpose, destination_hash, destination_hash_algorithm,
+            destination_hash_key_version, destination_dedup_hash,
+            destination_dedup_hash_algorithm, destination_dedup_key_version,
+            masked_destination, operation_target_hash, target_user_id, code_hash,
+            code_hash_algorithm, code_hash_key_version, idempotency_key_hash,
+            hash_key_version, request_ip_hash, device_hash, retain_until
+          ) VALUES (
+            '30000000-0000-0000-0000-000000000004','EMAIL','BIND',repeat('e',64),
+            'HMAC-SHA256','ci-v1',repeat('b',64),'HMAC-SHA256','ci-dedup-v1',
+            'a***@example.com',repeat('1',64),'10000000-0000-0000-0000-000000000001',
+            repeat('r',64),'ARGON2ID-PEPPERED','ci-v1',repeat('0',64),'ci-v1',
+            repeat('8',64),repeat('2',64),now()+interval '1 hour'
+          );
+          SELECT public.finalize_otp_delivery(
+            '30000000-0000-0000-0000-000000000004','SENT',repeat('3',64),now()+interval '10 minutes'
+          ) AS recovery_delivered \gset
+          SELECT public.record_otp_verification_attempt(
+            '30000000-0000-0000-0000-000000000004','BIND',
+            '10000000-0000-0000-0000-000000000001',repeat('1',64),repeat('2',64),true
+          ) AS recovery_consumed \gset
+          \if :recovery_delivered
+          \else
+            \quit 3
+          \endif
+          \if :recovery_consumed
+          \else
+            \quit 3
+          \endif
+          DO $$
+          DECLARE target_binding_id uuid;
+          BEGIN
+            SELECT id INTO target_binding_id FROM public.identity_bindings
+              WHERE user_id='10000000-0000-0000-0000-000000000001'
+                AND identity_type='EMAIL';
+            IF target_binding_id IS NULL THEN
+              RAISE EXCEPTION 'email binding fixture is missing';
+            END IF;
+            IF public.reactivate_phone_email_identity_binding(
+              target_binding_id,'10000000-0000-0000-0000-000000000003',
+              '30000000-0000-0000-0000-000000000004',repeat('1',64),repeat('2',64)
+            ) THEN RAISE EXCEPTION 'reactivation proof crossed user boundary'; END IF;
+            IF public.reactivate_phone_email_identity_binding(
+              target_binding_id,'10000000-0000-0000-0000-000000000001',
+              '30000000-0000-0000-0000-000000000004',repeat('9',64),repeat('2',64)
+            ) THEN RAISE EXCEPTION 'reactivation accepted wrong operation target'; END IF;
+            IF public.reactivate_phone_email_identity_binding(
+              target_binding_id,'10000000-0000-0000-0000-000000000001',
+              '30000000-0000-0000-0000-000000000004',repeat('1',64),repeat('9',64)
+            ) THEN RAISE EXCEPTION 'reactivation accepted wrong device'; END IF;
+            IF NOT public.reactivate_phone_email_identity_binding(
+              target_binding_id,'10000000-0000-0000-0000-000000000001',
+              '30000000-0000-0000-0000-000000000004',repeat('1',64),repeat('2',64)
+            ) THEN RAISE EXCEPTION 'valid reactivation proof was rejected'; END IF;
+            IF NOT public.revoke_non_primary_identity_binding(
+              target_binding_id,'10000000-0000-0000-0000-000000000001'
+            ) THEN RAISE EXCEPTION 'reactivated email could not be revoked'; END IF;
+            IF public.reactivate_phone_email_identity_binding(
+              target_binding_id,'10000000-0000-0000-0000-000000000001',
+              '30000000-0000-0000-0000-000000000004',repeat('1',64),repeat('2',64)
+            ) THEN RAISE EXCEPTION 'claimed reactivation proof replayed'; END IF;
+            IF EXISTS (
+              SELECT 1 FROM public.identity_bindings
+              WHERE id=target_binding_id AND revoked_at IS NULL
+            ) OR NOT EXISTS (
+              SELECT 1 FROM public.otp_challenges
+              WHERE id='30000000-0000-0000-0000-000000000004'
+                AND binding_claimed_at IS NOT NULL
+            ) THEN RAISE EXCEPTION 'reactivation replay state was not preserved'; END IF;
+          END $$;
+          SQL
+          export PGUSER=api_runtime PGPASSWORD=ci-runtime-password
+          if psql -X -c "UPDATE public.oauth_states SET consumed_at=NULL WHERE id='40000000-0000-0000-0000-000000000001'" >/tmp/direct-oauth.log 2>&1; then
+            echo "runtime role can directly reset OAuth state" >&2
+            exit 1
+          fi
+          if psql -X -c "INSERT INTO public.users (id) VALUES ('10000000-0000-0000-0000-000000000004')" >/tmp/direct-user.log 2>&1; then
+            echo "runtime role can bypass atomic registration" >&2
+            exit 1
+          fi
+          if psql -X -c "SELECT public.claim_phone_wechat_registration_flow('30000000-0000-0000-0000-000000000002','40000000-0000-0000-0000-000000000002',repeat('f',64),repeat('e',64))" >/tmp/direct-registration-claim.log 2>&1; then
+            echo "runtime role can claim registration proofs without creating the account" >&2
+            exit 1
+          fi
+          if psql -X -c "SELECT public.reactivate_phone_email_identity_binding('00000000-0000-0000-0000-000000000000','10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000004',repeat('1',64),repeat('2',64))" >/tmp/direct-reactivation.log 2>&1; then
+            echo "runtime role can call legacy identity reactivation directly" >&2
+            exit 1
+          fi
+          if psql -X -c "UPDATE public.auth_refresh_credentials SET consumed_at=NULL WHERE id='60000000-0000-0000-0000-000000000001'" >/tmp/direct-refresh.log 2>&1; then
+            echo "runtime role can directly reset refresh credentials" >&2
+            exit 1
+          fi
+          if psql -X -c "INSERT INTO public.auth_access_tokens (session_family_id,token_hash,token_hash_algorithm,token_hash_key_version,expires_at,retain_until) VALUES ('50000000-0000-0000-0000-000000000001',repeat('c',64),'HMAC-SHA256','ci-v1',now()+interval '10 minutes',now()+interval '1 hour')" >/tmp/compromised-issue.log 2>&1; then
+            echo "runtime role issued a token for a compromised family" >&2
+            exit 1
+          fi
+          test "$(psql -X -At -c "SELECT public.data_rights_authorization_allows('20000000-0000-0000-0000-000000000001','AMAP','PERSIST_PLACE_REFERENCE')")" = "t"
+          test "$(psql -X -At -c "SELECT public.data_rights_authorization_allows('20000000-0000-0000-0000-000000000001','BAIDU','PERSIST_PLACE_REFERENCE')")" = "f"
+          test "$(psql -X -At -c "SELECT public.data_rights_authorization_allows('20000000-0000-0000-0000-000000000001',NULL,'PERSIST_PLACE_REFERENCE')")" = "f"
+          test "$(psql -X -At -c "SELECT public.data_rights_authorization_allows('20000000-0000-0000-0000-000000000001',NULL,'UNLISTED_OPERATION')")" = "f"
+      - name: Exercise expiration, concurrency, revocation and cleanup gates
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: "5432"
+          PGDATABASE: chi_shen_me_ci
+        run: |
+          export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          INSERT INTO public.data_rights_authorizations (
+            id, provider_code, authorization_reference_hash,
+            reference_hash_algorithm, reference_hash_key_version,
+            evidence_locator_ciphertext, encryption_key_version,
+            effective_at, expires_at, reviewed_by_admin_user_hash,
+            reviewer_hash_key_version
+          ) VALUES
+            ('20000000-0000-0000-0000-000000000002','AMAP',repeat('c',64),'HMAC-SHA256','ci-v1',decode(repeat('cd',16),'hex'),'ci-v1',now()-interval '1 hour',now()+interval '8 seconds',repeat('d',64),'ci-v1'),
+            ('20000000-0000-0000-0000-000000000003','AMAP',repeat('e',64),'HMAC-SHA256','ci-v1',decode(repeat('ef',16),'hex'),'ci-v1',now()-interval '1 hour',now()+interval '1 day',repeat('f',64),'ci-v1');
+          INSERT INTO public.data_rights_authorization_operations
+            (authorization_id, operation_code)
+          VALUES
+            ('20000000-0000-0000-0000-000000000002','PERSIST_PLACE_REFERENCE'),
+            ('20000000-0000-0000-0000-000000000003','PERSIST_PLACE_REFERENCE');
+          SQL
+          export PGUSER=api_runtime PGPASSWORD=ci-runtime-password
+          expired_ref=$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT public.persist_licensed_external_place_reference('AMAP','short-lived','20000000-0000-0000-0000-000000000002',now()+interval '6 seconds')")
+          psql -X -At -v ON_ERROR_STOP=1 -c "SELECT public.persist_licensed_external_place_reference('AMAP','concurrent','20000000-0000-0000-0000-000000000003',now()+interval '1 hour')" >/tmp/ref-one &
+          first_pid=$!
+          psql -X -At -v ON_ERROR_STOP=1 -c "SELECT public.persist_licensed_external_place_reference('AMAP','concurrent','20000000-0000-0000-0000-000000000003',now()+interval '2 hours')" >/tmp/ref-two &
+          second_pid=$!
+          wait "$first_pid"
+          wait "$second_pid"
+          test "$(cat /tmp/ref-one)" = "$(cat /tmp/ref-two)"
+          sleep 9
+          if psql -X -v ON_ERROR_STOP=1 -c "INSERT INTO public.recommendation_history (user_id,external_place_reference_id,request_correlation_hash,hash_key_version,event_type,meal_period,occurred_at,retain_until) VALUES ('10000000-0000-0000-0000-000000000001','$expired_ref',repeat('d',64),'ci-v1','DETAIL','LUNCH',now()-interval '1 hour',now()+interval '89 days')" >/tmp/backdated.log 2>&1; then
+            echo "backdated event reused an expired authorization" >&2
+            exit 1
+          fi
+          if psql -X -c "SELECT public.persist_licensed_external_place_reference('AMAP','short-lived','20000000-0000-0000-0000-000000000002',now()+interval '1 hour')" >/tmp/revive.log 2>&1; then
+            echo "expired provider reference was revived" >&2
+            exit 1
+          fi
+          psql -X -v ON_ERROR_STOP=1 <<'SQL' >/tmp/persist-race.log &
+          BEGIN;
+          SELECT public.persist_licensed_external_place_reference(
+            'AMAP','revoke-race','20000000-0000-0000-0000-000000000003',now()+interval '2 hours'
+          );
+          SELECT pg_sleep(2);
+          COMMIT;
+          SQL
+          persist_pid=$!
+          sleep 1
+          export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
+          psql -X -v ON_ERROR_STOP=1 -c "SELECT public.revoke_data_rights_authorization('20000000-0000-0000-0000-000000000003',repeat('1',64),'ci-v1')" >/tmp/revoke-race.log &
+          revoke_pid=$!
+          wait "$persist_pid"
+          wait "$revoke_pid"
+          test "$(psql -X -At -c "SELECT count(*) FROM public.external_place_references WHERE authorization_id='20000000-0000-0000-0000-000000000003'")" = "0"
+          export PGUSER=api_runtime PGPASSWORD=ci-runtime-password
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          INSERT INTO public.auth_session_families (
+            id, user_id, device_label, platform, device_hash, hash_key_version,
+            refresh_expires_at, retain_until
+          ) VALUES (
+            '50000000-0000-0000-0000-000000000002',
+            '10000000-0000-0000-0000-000000000003', 'Deletion test', 'ANDROID',
+            repeat('4',64), 'ci-v1', now()+interval '1 day', now()+interval '2 days'
+          );
+          INSERT INTO public.auth_refresh_credentials (
+            id, session_family_id, generation, token_hash, token_hash_algorithm,
+            token_hash_key_version, expires_at
+          ) VALUES
+            ('60000000-0000-0000-0000-000000000003','50000000-0000-0000-0000-000000000002',0,repeat('d',64),'HMAC-SHA256','ci-v1',now()+interval '12 hours'),
+            ('60000000-0000-0000-0000-000000000004','50000000-0000-0000-0000-000000000002',1,repeat('e',64),'HMAC-SHA256','ci-v1',now()+interval '12 hours');
+          SELECT public.rotate_auth_refresh_credential(
+            '60000000-0000-0000-0000-000000000003',
+            '50000000-0000-0000-0000-000000000002',
+            '60000000-0000-0000-0000-000000000004'
+          ) AS deletion_family_rotated \gset
+          \if :deletion_family_rotated
+          \else
+            \quit 3
+          \endif
+          SELECT public.begin_account_deletion(
+            '10000000-0000-0000-0000-000000000003',
+            '80000000-0000-0000-0000-000000000001', repeat('5',64),
+            'ci-v1', now()+interval '1 day'
+          ) AS deletion_started \gset
+          \if :deletion_started
+          \else
+            \quit 3
+          \endif
+          SQL
+          if psql -X -c "INSERT INTO public.auth_session_families (user_id,device_label,platform,device_hash,hash_key_version,refresh_expires_at,retain_until) VALUES ('10000000-0000-0000-0000-000000000003','late session','ANDROID',repeat('6',64),'ci-v1',now()+interval '1 day',now()+interval '2 days')" >/tmp/deleting-session.log 2>&1; then
+            echo "deleting account accepted a new session" >&2
+            exit 1
+          fi
+          if psql -X -c "UPDATE public.users SET status='ACTIVE',disabled_at=NULL,updated_at=now() WHERE id='10000000-0000-0000-0000-000000000003'" >/tmp/reactivate-user.log 2>&1; then
+            echo "deleting account was reactivated" >&2
+            exit 1
+          fi
+          export PGUSER=retention_worker PGPASSWORD=ci-maintenance-password
+          test "$(psql -X -At -c "SELECT public.complete_account_deletion('80000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000003')")" = "t"
+          export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
+          test "$(psql -X -At -c "SELECT count(*) FROM public.users WHERE id='10000000-0000-0000-0000-000000000003'")" = "0"
+          test "$(psql -X -At -c "SELECT count(*) FROM public.identity_bindings WHERE user_id='10000000-0000-0000-0000-000000000003'")" = "0"
+          test "$(psql -X -At -c "SELECT count(*) FROM public.account_deletion_jobs WHERE id='80000000-0000-0000-0000-000000000001' AND status='COMPLETED' AND user_id IS NULL")" = "1"
+          export NODE_ENV=test
+          export DATABASE_MAINTENANCE_URL=postgresql://retention_worker:ci-maintenance-password@127.0.0.1:5432/chi_shen_me_ci
+          export DATABASE_MAINTENANCE_SSL_MODE=disable
+          node apps/api/dist/database/cleanup-cli.js --dry-run
+          node apps/api/dist/database/cleanup-cli.js --execute
+          export PGUSER=retention_worker PGPASSWORD=ci-maintenance-password
+          if psql -X -c "SELECT code_hash FROM public.otp_challenges" >/tmp/maintenance-select.log 2>&1; then
+            echo "maintenance role can read OTP hashes" >&2
+            exit 1
+          fi
+      - name: Verify API startup schema check as runtime role
+        env:
+          NODE_ENV: test
+          PORT: "3011"
+          DATABASE_ENABLED: "true"
+          DATABASE_URL: postgresql://api_runtime:ci-runtime-password@127.0.0.1:5432/chi_shen_me_ci
+          DATABASE_SSL_MODE: disable
+          ALLOW_DEMO_DATA: "true"
+        run: |
+          node apps/api/dist/main.js >/tmp/api-runtime.log 2>&1 &
+          api_pid=$!
+          trap 'kill "$api_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent http://127.0.0.1:3011/health >/dev/null; then
+              kill "$api_pid"
+              wait "$api_pid" || true
+              trap - EXIT
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/api-runtime.log
+          exit 1
+
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: apps/android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Install Android SDK 36
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - run: chmod +x gradlew
+      - run: ./gradlew testDebugUnitTest lintDebug assembleDebug --stacktrace
+      - name: Verify unsigned release fails closed
+        shell: bash
+        run: |
+          if ./gradlew validateReleaseConfiguration \
+            -PCHISHENME_API_BASE_URL=https://api.example.invalid/ \
+            --no-daemon; then
+            echo "Release validation unexpectedly accepted missing signing material" >&2
+            exit 1
+          fi

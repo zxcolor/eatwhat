@@ -1,0 +1,5860 @@
+{
+	"openapi": "3.1.0",
+	"jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+	"info": {
+		"title": "吃什么 Public API",
+		"version": "1.0.0",
+		"description": "吃什么公共 v1 与隔离的管理员 v1 契约。游客不需登录即可使用核心推荐；管理员只使用独立数据库角色和 WebAuthn passkey。所有响应统一发送 X-ChiShenMe-Contract-Version: 1；/admin/v1 另发送 X-ChiShenMe-Admin-Contract-Version: 1。"
+	},
+	"tags": [
+		{
+			"name": "Health"
+		},
+		{
+			"name": "Configuration"
+		},
+		{
+			"name": "Location search"
+		},
+		{
+			"name": "Place search"
+		},
+		{
+			"name": "Recommendations"
+		},
+		{
+			"name": "Recommendation events"
+		},
+		{
+			"name": "Saved recommendations"
+		},
+		{
+			"name": "Private feedback"
+		},
+		{
+			"name": "Authentication"
+		},
+		{
+			"name": "Identity and sessions"
+		},
+		{
+			"name": "Account"
+		},
+		{
+			"name": "Administrator security"
+		}
+	],
+	"security": [],
+	"paths": {
+		"/health": {
+			"get": {
+				"operationId": "getHealth",
+				"tags": ["Health"],
+				"summary": "读取进程存活状态",
+				"parameters": [
+					{
+						"$ref": "#/components/parameters/RequestCorrelationId"
+					},
+					{
+						"$ref": "#/components/parameters/ClientContractVersion"
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "服务正在运行",
+						"headers": {
+							"X-ChiShenMe-Contract-Version": {
+								"$ref": "#/components/headers/ContractVersion"
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HealthResponse"
+								}
+							}
+						}
+					},
+					"500": {
+						"$ref": "#/components/responses/InternalError"
+					}
+				}
+			}
+		},
+		"/health/ready": {
+			"get": {
+				"operationId": "getReadiness",
+				"tags": ["Health"],
+				"summary": "读取服务就绪状态",
+				"description": "仅检查本地核心依赖：启用数据库时执行有界 SELECT 1，并确认推荐供应商已配置。不会调用高德或其他外部供应商，不消耗上游配额，也不在失败响应中披露依赖名称或内部原因。",
+				"parameters": [
+					{
+						"$ref": "#/components/parameters/RequestCorrelationId"
+					},
+					{
+						"$ref": "#/components/parameters/ClientContractVersion"
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "服务已准备接收核心推荐流量",
+						"headers": {
+							"X-ChiShenMe-Contract-Version": {
+								"$ref": "#/components/headers/ContractVersion"
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/ReadinessResponse"
+								}
+							}
+						}
+					},
+					"500": {
+						"$ref": "#/components/responses/InternalError"
+					},
+					"503": {
+						"$ref": "#/components/responses/ServiceNotReady"
+					}
+				}
+			}
+		},
+		"/v1/config": {
+			"get": {
+				"operationId": "getFeatureConfig",
+				"tags": ["Configuration"],
+				"summary": "读取公开功能配置",
+				"description": "accountsEnabled 是产品总开关，具体账号通道以 authCapabilities 为准。serviceCapabilities 只声明当前配置已选中的推荐、地点搜索和餐厅关键词搜索适配器是否可用，不执行上游探测；对象或任一字段缺失时客户端必须按 false 处理，且不披露供应商身份。supportFeedbackEnabled 缺失时客户端必须按关闭处理，只有反馈服务完成启动就绪校验后才为 true。persistenceCapabilities 缺失时客户端必须按全部关闭处理；LIVE_DISPLAY_ONLY 时所有持久化能力均为 false，收藏或私有反馈写入返回 403。兼容字段 favoritesEnabled 必须与 persistenceCapabilities.favoritesEnabled 一致。",
+				"parameters": [
+					{
+						"$ref": "#/components/parameters/RequestCorrelationId"
+					},
+					{
+						"$ref": "#/components/parameters/ClientContractVersion"
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "当前公开配置",
+						"headers": {
+							"X-ChiShenMe-Contract-Version": {
+								"$ref": "#/components/headers/ContractVersion"
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/FeatureConfig"
+								}
+							}
+						}
+					},
+					"500": {
+						"$ref": "#/components/responses/InternalError"
+					}
+				}
+			}
+		},
+		"/v1/recommendations": {
+			"post": {
+				"operationId": "createRecommendations",
+				"tags": ["Recommendations"],
+				"summary": "生成一次最多三个餐厅推荐",
+				"description": "精确坐标仅作为本请求的 JSON body 字段接收，不得放入 URL、查询参数、请求头、事件或错误内容。每个客户端 IP 在单进程内最多请求 30 次/60 秒。",
+				"parameters": [
+					{
+						"$ref": "#/components/parameters/RequestCorrelationId"
+					},
+					{
+						"$ref": "#/components/parameters/ClientContractVersion"
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/RecommendationContext"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "推荐结果；试点区外也使用此结构并返回空 results",
+						"headers": {
+							"X-ChiShenMe-Contract-Version": {
+								"$ref": "#/components/headers/ContractVersion"
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/RecommendationResponse"
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "JSON 无法解析，或请求不符合 RecommendationContext",
+						"headers": {
+							"X-ChiShenMe-Contract-Version": {
+								"$ref": "#/components/headers/ContractVersion"
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"oneOf": [
+										{
+											"$ref": "#/components/schemas/InvalidRequestError"
+										},
+										{
+											"$ref": "#/components/schemas/InvalidJsonError"
+										}
+									]
+								}
+							}
+						}
+					},
+					"429": {
+						"$ref": "#/components/responses/RateLimited"
+					},
+					"413": {
+						"$ref": "#/components/responses/PayloadTooLarge"
+					},
+					"415": {
+						"$ref": "#/components/responses/UnsupportedMediaType"
+					},
+					"500": {
+						"$ref": "#/components/responses/InternalError"
+					},
+					"503": {
+						"$ref": "#/components/responses/PlaceProviderUnavailable"
+					}
+				}
+			}
+		},
+		"/v1/place-search": {
+			"post": {
+				"operationId": "searchNearbyPlacesByKeyword",
+				"tags": ["Place search"],
+				"summary": "按餐厅、菜系或食物关键词实时搜索附近餐厅",
+				"description": "这是供应商中立的关键词搜索，不是推荐排序。精确坐标和关键词只在 HTTPS JSON body 中传输，不进入自有 URL、请求头或日志。服务保持供应商原始顺序，仅执行半径、明确超预算和明确已停业等硬筛选；未知价格或营业状态不会被误判。响应不包含供应商代码、POI ID、电话、图片、AI 理由或适合度。搜索结果令牌可用于后续收藏或私有反馈，但不能提交为推荐事件或推荐历史。每个客户端 IP 最多请求 30 次/60 秒。逐请求查询且不缓存上游结果；生产环境没有正式供应商时失败关闭。",
+				"parameters": [
+					{
+						"$ref": "#/components/parameters/RequestCorrelationId"
+					},
+					{
+						"$ref": "#/components/parameters/ClientContractVersion"
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/PlaceSearchRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "北京四环试点区内最多十个供应商原序结果；区外明确返回 OUTSIDE_PILOT 和空结果",
+						"headers": {
+							"X-ChiShenMe-Contract-Version": {
+								"$ref": "#/components/headers/ContractVersion"
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/PlaceSearchResponse"
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "JSON 无法解析，或关键词、坐标、半径、筛选条件不符合严格请求约定",
+						"headers": {
+							"X-ChiShenMe-Contract-Version": {
+								"$ref": "#/components/headers/ContractVersion"
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"oneOf": [
+										{
+											"$ref": "#/components/schemas/InvalidRequestError"
+										},
+										{
+											"$ref": "#/components/schemas/InvalidJsonError"
+										}
+									]
+								}
+							}
+						}
+					},
+					"413": {
+						"$ref": "#/components/responses/PayloadTooLarge"
+					},
+					"415": {
+						"$ref": "#/components/responses/UnsupportedMediaType"
+					},
+					"429": {
+						"$ref": "#/components/responses/RateLimited"
+					},
+					"500": {
+						"$ref": "#/components/responses/InternalError"
+					},
+					"503": {
+						"$ref": "#/components/responses/PlaceSearchProviderUnavailable"
+					}
+				}
+			}
+		},
+		"/v1/location-search": {
+			"post": {
+				"operationId": "searchLocations",
+				"tags": ["Location search"],
+				"summary": "按用户主动输入的关键词实时搜索北京地点",
+				"description": "关键词只在 JSON body 中传输，不得放入自有 URL、查询参数、请求头或日志。服务不缓存关键词、供应商地点标识或坐标。明显的坐标、手机号、邮箱、控制字符和竖线会被拒绝。每个客户端 IP 在单进程内最多请求 30 次/60 秒；此额度与推荐接口按控制器隔离。启用经授权的正式实时适配器时逐请求查询；仅开发/测试且明确允许演示数据时使用虚构适配器。生产环境没有可用的正式适配器时失败关闭。",
+				"parameters": [
+					{
+						"$ref": "#/components/parameters/RequestCorrelationId"
+					},
+					{
+						"$ref": "#/components/parameters/ClientContractVersion"
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/LocationSearchRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "最多五个地点；坐标系由每项 location.crs 明确声明，响应不包含供应商地点 ID",
+						"headers": {
+							"X-ChiShenMe-Contract-Version": {
+								"$ref": "#/components/headers/ContractVersion"
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/LocationSearchResponse"
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "JSON 无法解析，或地点关键词不符合安全请求约定",
+						"headers": {
+							"X-ChiShenMe-Contract-Version": {
+								"$ref": "#/components/headers/ContractVersion"
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"oneOf": [
+										{
+											"$ref": "#/components/schemas/InvalidRequestError"
+										},
+										{
+											"$ref": "#/components/schemas/InvalidJsonError"
+										}
+									]
+								}
+							}
+						}
+					},
+					"413": {
+						"$ref": "#/components/responses/PayloadTooLarge"
+					},
+					"415": {
+						"$ref": "#/components/responses/UnsupportedMediaType"
+					},
+					"429": {
+						"$ref": "#/components/responses/RateLimited"
+					},
+					"500": {
+						"$ref": "#/components/responses/InternalError"
+					},
+					"503": {
+						"$ref": "#/components/responses/LocationProviderUnavailable"
+					}
+				}
+			}
+		},
+		"/v1/recommendation-events": {
+			"post": {
+				"operationId": "createRecommendationEvent",
+				"tags": ["Recommendation events"],
+				"summary": "接收一次推荐行为事件",
+				"description": "事件必须关联本进程登记表中仍有效（约两小时、且未因容量上限被淘汰）的真实推荐候选；进程重启后登记失效，同一请求、地点和事件类型只能消费一次。请求体是严格对象，不接受坐标或其他未声明字段。不携带 Authorization 时仅进入不含稳定餐厅引用的匿名聚合缓冲；携带 Bearer 时必须有效且在 PERSIST_PLACE_REFERENCE 授权下记录当前账号的 90 天操作历史，非法 Bearer 不会静默降级成游客。每个客户端 IP 在单进程内最多请求 180 次/60 秒。",
+				"security": [{}, { "BearerAuth": [] }],
+				"parameters": [
+					{
+						"$ref": "#/components/parameters/RequestCorrelationId"
+					},
+					{
+						"$ref": "#/components/parameters/ClientContractVersion"
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/RecommendationEvent"
+							}
+						}
+					}
+				},
+				"responses": {
+					"202": {
+						"description": "事件已接受",
+						"headers": {
+							"X-ChiShenMe-Contract-Version": {
+								"$ref": "#/components/headers/ContractVersion"
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/RecommendationEventAccepted"
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "JSON 无法解析、事件字段无效，或事件会话无效",
+						"headers": {
+							"X-ChiShenMe-Contract-Version": {
+								"$ref": "#/components/headers/ContractVersion"
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"oneOf": [
+										{
+											"$ref": "#/components/schemas/InvalidRequestError"
+										},
+										{
+											"$ref": "#/components/schemas/InvalidEventSessionError"
+										},
+										{
+											"$ref": "#/components/schemas/InvalidJsonError"
+										}
+									]
+								}
+							}
+						}
+					},
+					"401": {
+						"$ref": "#/components/responses/AuthUnauthorized"
+					},
+					"403": {
+						"$ref": "#/components/responses/PersistenceForbidden"
+					},
+					"429": {
+						"$ref": "#/components/responses/RateLimited"
+					},
+					"413": {
+						"$ref": "#/components/responses/PayloadTooLarge"
+					},
+					"415": {
+						"$ref": "#/components/responses/UnsupportedMediaType"
+					},
+					"500": {
+						"$ref": "#/components/responses/InternalError"
+					},
+					"503": {
+						"$ref": "#/components/responses/PersistenceUnavailable"
+					}
+				}
+			}
+		},
+		"/v1/support-feedback": {
+			"post": {
+				"operationId": "submitSupportFeedback",
+				"tags": ["Support feedback"],
+				"summary": "提交产品反馈、餐厅纠错、隐私问题或投诉",
+				"description": "游客和已登录用户均可提交。携带 Authorization 时 Bearer 必须有效，无效或过期凭据不会降级为游客。正文和原始 IP 不写日志、不回显；正文以专用 AES-256-GCM 密钥加密，幂等比较和游客配额只使用版本化 HMAC。submissionId 的首次写入、精确重试、冲突判断及滚动 24 小时配额在数据库单事务中完成。游客每 24 小时最多 5 条，账号每 24 小时最多 20 条；另有每 IP 每进程 10 次/60 秒突发保护。游客 IP HMAC 在配额窗口结束后由数据库时钟驱动不可逆销毁，反馈正文仍按工单规则保留。",
+				"security": [{}, { "BearerAuth": [] }],
+				"parameters": [
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" }
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/SupportFeedbackRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"202": {
+						"description": "反馈已接受；精确幂等重试返回相同公开结果",
+						"headers": {
+							"X-ChiShenMe-Contract-Version": {
+								"$ref": "#/components/headers/ContractVersion"
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SupportFeedbackResponse"
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "JSON 无法解析，或反馈字段不符合严格请求约定",
+						"headers": {
+							"X-ChiShenMe-Contract-Version": {
+								"$ref": "#/components/headers/ContractVersion"
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"oneOf": [
+										{ "$ref": "#/components/schemas/InvalidRequestError" },
+										{ "$ref": "#/components/schemas/InvalidJsonError" }
+									]
+								}
+							}
+						}
+					},
+					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
+					"409": {
+						"description": "submissionId 已被不同的正文、分类或提交者复用",
+						"headers": {
+							"X-ChiShenMe-Contract-Version": {
+								"$ref": "#/components/headers/ContractVersion"
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SupportFeedbackConflictError"
+								}
+							}
+						}
+					},
+					"413": { "$ref": "#/components/responses/PayloadTooLarge" },
+					"415": { "$ref": "#/components/responses/UnsupportedMediaType" },
+					"429": {
+						"description": "达到突发 IP 限流或持久化游客/账号日配额",
+						"headers": {
+							"X-ChiShenMe-Contract-Version": {
+								"$ref": "#/components/headers/ContractVersion"
+							},
+							"Retry-After": {
+								"description": "仅突发 IP 限流响应保证携带；日配额响应可能省略",
+								"schema": { "type": "integer", "minimum": 1 }
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"oneOf": [
+										{ "$ref": "#/components/schemas/RateLimitError" },
+										{
+											"$ref": "#/components/schemas/SupportFeedbackRateLimitError"
+										}
+									]
+								}
+							}
+						}
+					},
+					"500": { "$ref": "#/components/responses/InternalError" },
+					"503": {
+						"description": "反馈开关、数据库、密钥覆盖或安全存储未就绪",
+						"headers": {
+							"X-ChiShenMe-Contract-Version": {
+								"$ref": "#/components/headers/ContractVersion"
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/SupportFeedbackUnavailableError"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/v1/favorites": {
+			"get": {
+				"operationId": "listFavorites",
+				"tags": ["Saved recommendations"],
+				"summary": "分页读取当前账号的收藏",
+				"description": "按 createdAt、favoriteId 的稳定倒序游标分页，默认 20、最多 50 条。AVAILABLE 展示信息由服务端逐次实时解析，不落库存储第三方属性；暂时不可用或授权撤销时仍返回可删除的 App 自有 favoriteId。",
+				"security": [{ "BearerAuth": [] }],
+				"parameters": [
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" },
+					{ "$ref": "#/components/parameters/PageCursor" },
+					{ "$ref": "#/components/parameters/PageLimit" },
+					{ "$ref": "#/components/parameters/FavoriteGroupFilter" }
+				],
+				"responses": {
+					"200": { "$ref": "#/components/responses/FavoritesListed" },
+					"400": { "$ref": "#/components/responses/PersistenceBadRequest" },
+					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
+					"403": { "$ref": "#/components/responses/PersistenceForbidden" },
+					"429": { "$ref": "#/components/responses/RateLimited" },
+					"500": { "$ref": "#/components/responses/InternalError" },
+					"503": { "$ref": "#/components/responses/PersistenceUnavailable" }
+				}
+			},
+			"post": {
+				"operationId": "createFavorite",
+				"tags": ["Saved recommendations"],
+				"summary": "收藏仍有效的推荐结果",
+				"description": "resultToken 只作为约两小时内的一次创建证明，服务端解析后不得持久化该 token，也不得向客户端返回供应商地点 ID。idempotencyKey 按当前账号和本操作隔离；相同 key 与相同 body 重放返回首次结果，相同 key 携带不同 body 返回 409。LIVE_DISPLAY_ONLY 或缺少 PERSIST_PLACE_REFERENCE 权利时返回 403。",
+				"security": [{ "BearerAuth": [] }],
+				"parameters": [
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" }
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/FavoriteMutationRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"201": { "$ref": "#/components/responses/FavoriteCreated" },
+					"400": { "$ref": "#/components/responses/PersistenceBadRequest" },
+					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
+					"403": { "$ref": "#/components/responses/PersistenceForbidden" },
+					"409": { "$ref": "#/components/responses/PersistenceConflict" },
+					"410": { "$ref": "#/components/responses/ResultReferenceExpired" },
+					"413": { "$ref": "#/components/responses/PayloadTooLarge" },
+					"415": { "$ref": "#/components/responses/UnsupportedMediaType" },
+					"429": { "$ref": "#/components/responses/RateLimited" },
+					"500": { "$ref": "#/components/responses/InternalError" },
+					"503": { "$ref": "#/components/responses/PersistenceUnavailable" }
+				}
+			}
+		},
+		"/v1/favorites/{favoriteId}/group": {
+			"post": {
+				"operationId": "updateFavoriteGroup",
+				"tags": ["Saved recommendations"],
+				"summary": "修改一个收藏的分组",
+				"description": "favoriteId 只能解析到当前账号自有收藏。相同 idempotencyKey 与相同 body 重放返回首次结果；同 key 不同 body 返回 409。创建持久化能力关闭时不允许修改分组。",
+				"security": [{ "BearerAuth": [] }],
+				"parameters": [
+					{ "$ref": "#/components/parameters/FavoriteId" },
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" }
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/UpdateFavoriteGroupRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": { "$ref": "#/components/responses/FavoriteUpdated" },
+					"400": { "$ref": "#/components/responses/PersistenceBadRequest" },
+					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
+					"403": { "$ref": "#/components/responses/PersistenceForbidden" },
+					"404": {
+						"$ref": "#/components/responses/PersistenceResourceNotFound"
+					},
+					"409": { "$ref": "#/components/responses/PersistenceConflict" },
+					"413": { "$ref": "#/components/responses/PayloadTooLarge" },
+					"415": { "$ref": "#/components/responses/UnsupportedMediaType" },
+					"429": { "$ref": "#/components/responses/RateLimited" },
+					"500": { "$ref": "#/components/responses/InternalError" },
+					"503": { "$ref": "#/components/responses/PersistenceUnavailable" }
+				}
+			}
+		},
+		"/v1/favorites/{favoriteId}": {
+			"delete": {
+				"operationId": "deleteFavorite",
+				"tags": ["Saved recommendations"],
+				"summary": "删除一个收藏",
+				"description": "幂等删除；目标不存在、已删除或不属于当前账号时均返回 204，避免资源枚举。即使供应商授权撤销或持久化能力已关闭，用户仍可删除已有记录。",
+				"security": [{ "BearerAuth": [] }],
+				"parameters": [
+					{ "$ref": "#/components/parameters/FavoriteId" },
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" }
+				],
+				"responses": {
+					"204": { "$ref": "#/components/responses/PersistenceDeleted" },
+					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
+					"403": { "$ref": "#/components/responses/AuthForbidden" },
+					"429": { "$ref": "#/components/responses/RateLimited" },
+					"500": { "$ref": "#/components/responses/InternalError" },
+					"503": { "$ref": "#/components/responses/PersistenceUnavailable" }
+				}
+			}
+		},
+		"/v1/history": {
+			"get": {
+				"operationId": "listRecommendationHistory",
+				"tags": ["Saved recommendations"],
+				"summary": "分页读取 90 天推荐操作历史",
+				"description": "仅表达推荐展示、详情查看、收藏、打开导航、打开拨号器与换一批等 App 操作，不表示用户到店或实际用餐。原始历史在 occurredAt 后恰好 90 天到期；分页默认 20、最多 50 条。",
+				"security": [{ "BearerAuth": [] }],
+				"parameters": [
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" },
+					{ "$ref": "#/components/parameters/PageCursor" },
+					{ "$ref": "#/components/parameters/PageLimit" },
+					{ "$ref": "#/components/parameters/HistoryActionFilter" }
+				],
+				"responses": {
+					"200": {
+						"$ref": "#/components/responses/RecommendationHistoryListed"
+					},
+					"400": { "$ref": "#/components/responses/PersistenceBadRequest" },
+					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
+					"403": { "$ref": "#/components/responses/PersistenceForbidden" },
+					"429": { "$ref": "#/components/responses/RateLimited" },
+					"500": { "$ref": "#/components/responses/InternalError" },
+					"503": { "$ref": "#/components/responses/PersistenceUnavailable" }
+				}
+			},
+			"delete": {
+				"operationId": "clearRecommendationHistory",
+				"tags": ["Saved recommendations"],
+				"summary": "清空当前账号的推荐历史",
+				"description": "幂等删除当前账号全部原始推荐历史；目标为空也返回 204。授权或记录能力关闭不影响用户清空已有数据。去标识汇总指标不再能关联该账号，并按独立 12 个月汇总保留策略处理。",
+				"security": [{ "BearerAuth": [] }],
+				"parameters": [
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" }
+				],
+				"responses": {
+					"204": { "$ref": "#/components/responses/PersistenceDeleted" },
+					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
+					"403": { "$ref": "#/components/responses/AuthForbidden" },
+					"429": { "$ref": "#/components/responses/RateLimited" },
+					"500": { "$ref": "#/components/responses/InternalError" },
+					"503": { "$ref": "#/components/responses/PersistenceUnavailable" }
+				}
+			}
+		},
+		"/v1/private-feedback": {
+			"get": {
+				"operationId": "listPrivateRecommendationFeedback",
+				"tags": ["Private feedback"],
+				"summary": "分页读取当前账号的私有结构化反馈",
+				"description": "反馈始终为 PRIVATE，不形成公共餐厅评分。按 createdAt、feedbackId 稳定倒序分页，默认 20、最多 50 条。",
+				"security": [{ "BearerAuth": [] }],
+				"parameters": [
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" },
+					{ "$ref": "#/components/parameters/PageCursor" },
+					{ "$ref": "#/components/parameters/PageLimit" },
+					{ "$ref": "#/components/parameters/PrivateFeedbackTypeFilter" }
+				],
+				"responses": {
+					"200": { "$ref": "#/components/responses/PrivateFeedbackListed" },
+					"400": { "$ref": "#/components/responses/PersistenceBadRequest" },
+					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
+					"403": { "$ref": "#/components/responses/PersistenceForbidden" },
+					"429": { "$ref": "#/components/responses/RateLimited" },
+					"500": { "$ref": "#/components/responses/InternalError" },
+					"503": { "$ref": "#/components/responses/PersistenceUnavailable" }
+				}
+			},
+			"post": {
+				"operationId": "createPrivateRecommendationFeedback",
+				"tags": ["Private feedback"],
+				"summary": "记录一条私有结构化反馈",
+				"description": "resultToken 只作为仍有效推荐的一次创建证明且绝不落库。公开 RECENTLY_ATE/AVOID_CUISINE 必须由服务端显式映射到内部 ATE_RECENTLY/EXCLUDE_CUISINE。相同 idempotencyKey 与相同 body 重放返回首次结果，同 key 不同 body 返回 409。LIVE_DISPLAY_ONLY 或缺少持久化权利时返回 403。",
+				"security": [{ "BearerAuth": [] }],
+				"parameters": [
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" }
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/CreatePrivateFeedbackRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"201": { "$ref": "#/components/responses/PrivateFeedbackCreated" },
+					"400": { "$ref": "#/components/responses/PersistenceBadRequest" },
+					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
+					"403": { "$ref": "#/components/responses/PersistenceForbidden" },
+					"409": { "$ref": "#/components/responses/PersistenceConflict" },
+					"410": { "$ref": "#/components/responses/ResultReferenceExpired" },
+					"413": { "$ref": "#/components/responses/PayloadTooLarge" },
+					"415": { "$ref": "#/components/responses/UnsupportedMediaType" },
+					"429": { "$ref": "#/components/responses/RateLimited" },
+					"500": { "$ref": "#/components/responses/InternalError" },
+					"503": { "$ref": "#/components/responses/PersistenceUnavailable" }
+				}
+			},
+			"delete": {
+				"operationId": "clearPrivateRecommendationFeedback",
+				"tags": ["Private feedback"],
+				"summary": "清空当前账号的全部私有反馈",
+				"description": "幂等删除；没有反馈时也返回 204。授权或记录能力关闭不影响用户清空已有数据。",
+				"security": [{ "BearerAuth": [] }],
+				"parameters": [
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" }
+				],
+				"responses": {
+					"204": { "$ref": "#/components/responses/PersistenceDeleted" },
+					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
+					"403": { "$ref": "#/components/responses/AuthForbidden" },
+					"429": { "$ref": "#/components/responses/RateLimited" },
+					"500": { "$ref": "#/components/responses/InternalError" },
+					"503": { "$ref": "#/components/responses/PersistenceUnavailable" }
+				}
+			}
+		},
+		"/v1/private-feedback/{feedbackId}": {
+			"delete": {
+				"operationId": "deletePrivateRecommendationFeedback",
+				"tags": ["Private feedback"],
+				"summary": "删除一条私有反馈",
+				"description": "幂等删除；目标不存在、已删除或不属于当前账号时均返回 204。授权或记录能力关闭不影响用户删除已有数据。",
+				"security": [{ "BearerAuth": [] }],
+				"parameters": [
+					{ "$ref": "#/components/parameters/FeedbackId" },
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" }
+				],
+				"responses": {
+					"204": { "$ref": "#/components/responses/PersistenceDeleted" },
+					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
+					"403": { "$ref": "#/components/responses/AuthForbidden" },
+					"429": { "$ref": "#/components/responses/RateLimited" },
+					"500": { "$ref": "#/components/responses/InternalError" },
+					"503": { "$ref": "#/components/responses/PersistenceUnavailable" }
+				}
+			}
+		},
+		"/v1/auth/phone/request-code": {
+			"post": {
+				"operationId": "requestPhoneCode",
+				"tags": ["Authentication"],
+				"summary": "请求手机验证码",
+				"description": "首期只接受 +86 E.164 中国大陆手机号，且只支持 REGISTER 与 LOGIN。REGISTER 只创建手机 challenge，还必须与微信 code/state 一起提交注册。统一响应避免枚举账号。",
+				"parameters": [
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" }
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": { "$ref": "#/components/schemas/PhoneRequestCode" }
+						}
+					}
+				},
+				"responses": {
+					"202": { "$ref": "#/components/responses/PhoneCodeAccepted" },
+					"400": { "$ref": "#/components/responses/AuthBadRequest" },
+					"403": { "$ref": "#/components/responses/AuthForbidden" },
+					"409": { "$ref": "#/components/responses/AuthConflict" },
+					"413": { "$ref": "#/components/responses/PayloadTooLarge" },
+					"415": { "$ref": "#/components/responses/UnsupportedMediaType" },
+					"429": { "$ref": "#/components/responses/RateLimited" },
+					"500": { "$ref": "#/components/responses/InternalError" },
+					"503": { "$ref": "#/components/responses/AuthUnavailable" }
+				}
+			}
+		},
+		"/v1/auth/email/request-code": {
+			"post": {
+				"operationId": "requestEmailCode",
+				"tags": ["Authentication"],
+				"summary": "请求邮箱验证码",
+				"description": "邮箱只支持 LOGIN 与 BIND，不能用于创建或恢复账号。BIND 必须带有效 Bearer 会话；统一响应避免枚举账号。",
+				"security": [{}, { "BearerAuth": [] }],
+				"parameters": [
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" }
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": { "$ref": "#/components/schemas/EmailRequestCode" }
+						}
+					}
+				},
+				"responses": {
+					"202": { "$ref": "#/components/responses/EmailCodeAccepted" },
+					"400": { "$ref": "#/components/responses/AuthBadRequest" },
+					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
+					"403": { "$ref": "#/components/responses/AuthForbidden" },
+					"409": { "$ref": "#/components/responses/AuthConflict" },
+					"413": { "$ref": "#/components/responses/PayloadTooLarge" },
+					"415": { "$ref": "#/components/responses/UnsupportedMediaType" },
+					"429": { "$ref": "#/components/responses/RateLimited" },
+					"500": { "$ref": "#/components/responses/InternalError" },
+					"503": { "$ref": "#/components/responses/AuthUnavailable" }
+				}
+			}
+		},
+		"/v1/auth/oauth/state": {
+			"post": {
+				"operationId": "createOAuthState",
+				"tags": ["Authentication"],
+				"summary": "签发一次性 OAuth state",
+				"description": "WECHAT 只允许 REGISTER/LOGIN，QQ 只允许 LOGIN/BIND。BIND 用途必须带有效 Bearer 会话；REGISTER/LOGIN 不要求会话。",
+				"security": [{}, { "BearerAuth": [] }],
+				"parameters": [
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" }
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": { "$ref": "#/components/schemas/OAuthStateRequest" }
+						}
+					}
+				},
+				"responses": {
+					"201": { "$ref": "#/components/responses/OAuthStateCreated" },
+					"400": { "$ref": "#/components/responses/AuthBadRequest" },
+					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
+					"403": { "$ref": "#/components/responses/AuthForbidden" },
+					"409": { "$ref": "#/components/responses/AuthConflict" },
+					"413": { "$ref": "#/components/responses/PayloadTooLarge" },
+					"415": { "$ref": "#/components/responses/UnsupportedMediaType" },
+					"429": { "$ref": "#/components/responses/RateLimited" },
+					"500": { "$ref": "#/components/responses/InternalError" },
+					"503": { "$ref": "#/components/responses/AuthUnavailable" }
+				}
+			}
+		},
+		"/v1/auth/register/phone-wechat": {
+			"post": {
+				"operationId": "registerPhoneWechat",
+				"tags": ["Authentication"],
+				"summary": "以手机验证和微信授权共同注册",
+				"description": "原子消费 REGISTER 手机 challenge 与 WECHAT REGISTER state。任一身份已属于其他账号时整体冲突，绝不静默合并。",
+				"parameters": [
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" }
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/RegisterPhoneWechatRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"201": { "$ref": "#/components/responses/AuthSessionCreated" },
+					"400": { "$ref": "#/components/responses/AuthBadRequest" },
+					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
+					"403": { "$ref": "#/components/responses/AuthForbidden" },
+					"409": { "$ref": "#/components/responses/AuthConflict" },
+					"413": { "$ref": "#/components/responses/PayloadTooLarge" },
+					"415": { "$ref": "#/components/responses/UnsupportedMediaType" },
+					"429": { "$ref": "#/components/responses/RateLimited" },
+					"500": { "$ref": "#/components/responses/InternalError" },
+					"503": { "$ref": "#/components/responses/AuthUnavailable" }
+				}
+			}
+		},
+		"/v1/auth/login": {
+			"post": {
+				"operationId": "login",
+				"tags": ["Authentication"],
+				"summary": "登录已有账号",
+				"description": "PHONE/WECHAT 可登录已有账号；EMAIL/QQ 只在该身份已绑定时登录。身份不存在时不自动注册。",
+				"parameters": [
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" }
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": { "$ref": "#/components/schemas/LoginRequest" }
+						}
+					}
+				},
+				"responses": {
+					"200": { "$ref": "#/components/responses/AuthSession" },
+					"400": { "$ref": "#/components/responses/AuthBadRequest" },
+					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
+					"403": { "$ref": "#/components/responses/AuthForbidden" },
+					"409": { "$ref": "#/components/responses/AuthConflict" },
+					"413": { "$ref": "#/components/responses/PayloadTooLarge" },
+					"415": { "$ref": "#/components/responses/UnsupportedMediaType" },
+					"429": { "$ref": "#/components/responses/RateLimited" },
+					"500": { "$ref": "#/components/responses/InternalError" },
+					"503": { "$ref": "#/components/responses/AuthUnavailable" }
+				}
+			}
+		},
+		"/v1/auth/refresh": {
+			"post": {
+				"operationId": "refreshSession",
+				"tags": ["Authentication"],
+				"summary": "轮换 App 刷新令牌",
+				"description": "成功后旧 refresh token 立即失效；重放将撤销整个令牌家族。",
+				"parameters": [
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" }
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": { "$ref": "#/components/schemas/RefreshRequest" }
+						}
+					}
+				},
+				"responses": {
+					"200": { "$ref": "#/components/responses/AuthSession" },
+					"400": { "$ref": "#/components/responses/AuthBadRequest" },
+					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
+					"403": { "$ref": "#/components/responses/AuthForbidden" },
+					"409": { "$ref": "#/components/responses/AuthConflict" },
+					"413": { "$ref": "#/components/responses/PayloadTooLarge" },
+					"415": { "$ref": "#/components/responses/UnsupportedMediaType" },
+					"429": { "$ref": "#/components/responses/RateLimited" },
+					"500": { "$ref": "#/components/responses/InternalError" },
+					"503": { "$ref": "#/components/responses/AuthUnavailable" }
+				}
+			}
+		},
+		"/v1/auth/logout": {
+			"post": {
+				"operationId": "logoutCurrentSession",
+				"tags": ["Authentication"],
+				"summary": "退出当前会话",
+				"security": [{ "BearerAuth": [] }],
+				"parameters": [
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" }
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": { "$ref": "#/components/schemas/LogoutRequest" }
+						}
+					}
+				},
+				"responses": {
+					"200": { "$ref": "#/components/responses/LoggedOut" },
+					"400": { "$ref": "#/components/responses/AuthBadRequest" },
+					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
+					"403": { "$ref": "#/components/responses/AuthForbidden" },
+					"413": { "$ref": "#/components/responses/PayloadTooLarge" },
+					"415": { "$ref": "#/components/responses/UnsupportedMediaType" },
+					"429": { "$ref": "#/components/responses/RateLimited" },
+					"500": { "$ref": "#/components/responses/InternalError" },
+					"503": { "$ref": "#/components/responses/AuthUnavailable" }
+				}
+			}
+		},
+		"/v1/auth/identities": {
+			"get": {
+				"operationId": "listIdentityBindings",
+				"tags": ["Identity and sessions"],
+				"summary": "读取脱敏身份绑定",
+				"security": [{ "BearerAuth": [] }],
+				"parameters": [
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" }
+				],
+				"responses": {
+					"200": { "$ref": "#/components/responses/IdentityBindings" },
+					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
+					"403": { "$ref": "#/components/responses/AuthForbidden" },
+					"429": { "$ref": "#/components/responses/RateLimited" },
+					"500": { "$ref": "#/components/responses/InternalError" },
+					"503": { "$ref": "#/components/responses/AuthUnavailable" }
+				}
+			},
+			"post": {
+				"operationId": "bindIdentity",
+				"tags": ["Identity and sessions"],
+				"summary": "绑定已验证身份",
+				"description": "邮箱消费 BIND challenge，QQ 消费 BIND state 与临时平台材料。手机号和微信不提供绑定入口；已属于其他账号时返回冲突，不披露其他账号。",
+				"security": [{ "BearerAuth": [] }],
+				"parameters": [
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" }
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": { "$ref": "#/components/schemas/BindIdentityRequest" }
+						}
+					}
+				},
+				"responses": {
+					"201": { "$ref": "#/components/responses/IdentityBound" },
+					"400": { "$ref": "#/components/responses/AuthBadRequest" },
+					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
+					"403": { "$ref": "#/components/responses/AuthForbidden" },
+					"409": { "$ref": "#/components/responses/AuthConflict" },
+					"413": { "$ref": "#/components/responses/PayloadTooLarge" },
+					"415": { "$ref": "#/components/responses/UnsupportedMediaType" },
+					"429": { "$ref": "#/components/responses/RateLimited" },
+					"500": { "$ref": "#/components/responses/InternalError" },
+					"503": { "$ref": "#/components/responses/AuthUnavailable" }
+				}
+			}
+		},
+		"/v1/auth/identities/{bindingId}": {
+			"delete": {
+				"operationId": "unbindIdentity",
+				"tags": ["Identity and sessions"],
+				"summary": "解绑非必需身份",
+				"description": "至少保留手机与微信两个注册必需身份。不允许解绑时返回 403/409。",
+				"security": [{ "BearerAuth": [] }],
+				"parameters": [
+					{ "$ref": "#/components/parameters/BindingId" },
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" }
+				],
+				"responses": {
+					"200": { "$ref": "#/components/responses/IdentityUnbound" },
+					"400": { "$ref": "#/components/responses/AuthBadRequest" },
+					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
+					"403": { "$ref": "#/components/responses/AuthForbidden" },
+					"409": { "$ref": "#/components/responses/AuthConflict" },
+					"429": { "$ref": "#/components/responses/RateLimited" },
+					"500": { "$ref": "#/components/responses/InternalError" },
+					"503": { "$ref": "#/components/responses/AuthUnavailable" }
+				}
+			}
+		},
+		"/v1/auth/sessions": {
+			"get": {
+				"operationId": "listSessions",
+				"tags": ["Identity and sessions"],
+				"summary": "读取登录设备列表",
+				"security": [{ "BearerAuth": [] }],
+				"parameters": [
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" }
+				],
+				"responses": {
+					"200": { "$ref": "#/components/responses/Sessions" },
+					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
+					"403": { "$ref": "#/components/responses/AuthForbidden" },
+					"429": { "$ref": "#/components/responses/RateLimited" },
+					"500": { "$ref": "#/components/responses/InternalError" },
+					"503": { "$ref": "#/components/responses/AuthUnavailable" }
+				}
+			}
+		},
+		"/v1/auth/sessions/{sessionId}": {
+			"delete": {
+				"operationId": "revokeSession",
+				"tags": ["Identity and sessions"],
+				"summary": "撤销指定登录设备",
+				"description": "只根据当前 Bearer 账号与路径 sessionId 裁决，不接受客户端用户 ID。",
+				"security": [{ "BearerAuth": [] }],
+				"parameters": [
+					{ "$ref": "#/components/parameters/SessionId" },
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" }
+				],
+				"responses": {
+					"200": { "$ref": "#/components/responses/SessionRevoked" },
+					"400": { "$ref": "#/components/responses/AuthBadRequest" },
+					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
+					"403": { "$ref": "#/components/responses/AuthForbidden" },
+					"409": { "$ref": "#/components/responses/AuthConflict" },
+					"429": { "$ref": "#/components/responses/RateLimited" },
+					"500": { "$ref": "#/components/responses/InternalError" },
+					"503": { "$ref": "#/components/responses/AuthUnavailable" }
+				}
+			}
+		},
+		"/v1/account/export": {
+			"post": {
+				"operationId": "requestAccountExport",
+				"tags": ["Account"],
+				"summary": "请求账号数据导出",
+				"description": "导出工件七天后过期；此响应不返回可在日志中泄漏的下载 URL。",
+				"security": [{ "BearerAuth": [] }],
+				"parameters": [
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" }
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": { "$ref": "#/components/schemas/AccountExportRequest" }
+						}
+					}
+				},
+				"responses": {
+					"202": { "$ref": "#/components/responses/AccountExportQueued" },
+					"400": { "$ref": "#/components/responses/AuthBadRequest" },
+					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
+					"403": { "$ref": "#/components/responses/AuthForbidden" },
+					"409": { "$ref": "#/components/responses/AuthConflict" },
+					"413": { "$ref": "#/components/responses/PayloadTooLarge" },
+					"415": { "$ref": "#/components/responses/UnsupportedMediaType" },
+					"429": { "$ref": "#/components/responses/RateLimited" },
+					"500": { "$ref": "#/components/responses/InternalError" },
+					"503": { "$ref": "#/components/responses/AuthUnavailable" }
+				}
+			}
+		},
+		"/v1/account/exports/latest": {
+			"get": {
+				"operationId": "getLatestAccountExport",
+				"tags": ["Account"],
+				"summary": "查询当前账号最近一次数据导出",
+				"description": "没有历史导出时 item 为 null；只按 Bearer 对应账号查询，不接受客户端用户 ID。",
+				"security": [{ "BearerAuth": [] }],
+				"parameters": [
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" }
+				],
+				"responses": {
+					"200": { "$ref": "#/components/responses/LatestAccountExportRead" },
+					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
+					"403": { "$ref": "#/components/responses/AuthForbidden" },
+					"429": { "$ref": "#/components/responses/RateLimited" },
+					"500": { "$ref": "#/components/responses/InternalError" },
+					"503": { "$ref": "#/components/responses/AuthUnavailable" }
+				}
+			}
+		},
+		"/v1/account/exports/{exportId}": {
+			"get": {
+				"operationId": "getAccountExport",
+				"tags": ["Account"],
+				"summary": "查询指定数据导出状态",
+				"description": "仅返回当前账号自有导出；不存在与属于其他账号使用同一 404。",
+				"security": [{ "BearerAuth": [] }],
+				"parameters": [
+					{ "$ref": "#/components/parameters/ExportId" },
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" }
+				],
+				"responses": {
+					"200": { "$ref": "#/components/responses/AccountExportRead" },
+					"400": { "$ref": "#/components/responses/AuthBadRequest" },
+					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
+					"403": { "$ref": "#/components/responses/AuthForbidden" },
+					"404": { "$ref": "#/components/responses/AccountExportNotFound" },
+					"429": { "$ref": "#/components/responses/RateLimited" },
+					"500": { "$ref": "#/components/responses/InternalError" },
+					"503": { "$ref": "#/components/responses/AuthUnavailable" }
+				}
+			}
+		},
+		"/v1/account/exports/{exportId}/content": {
+			"get": {
+				"operationId": "downloadAccountExportContent",
+				"tags": ["Account"],
+				"summary": "下载已就绪的账号数据导出",
+				"description": "Bearer 鉴权的同源二进制代理；响应不返回对象存储地址、对象键或 bearer-equivalent URL token。服务端在打开私有工件前重新核验 owner、READY、有效期与删除状态。",
+				"security": [{ "BearerAuth": [] }],
+				"parameters": [
+					{ "$ref": "#/components/parameters/ExportId" },
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" }
+				],
+				"responses": {
+					"200": { "$ref": "#/components/responses/AccountExportContent" },
+					"400": { "$ref": "#/components/responses/AuthBadRequest" },
+					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
+					"403": { "$ref": "#/components/responses/AuthForbidden" },
+					"404": { "$ref": "#/components/responses/AccountExportNotFound" },
+					"409": { "$ref": "#/components/responses/AccountExportNotReady" },
+					"410": { "$ref": "#/components/responses/AccountExportExpired" },
+					"429": { "$ref": "#/components/responses/RateLimited" },
+					"500": { "$ref": "#/components/responses/InternalError" },
+					"503": { "$ref": "#/components/responses/AuthUnavailable" }
+				}
+			}
+		},
+		"/v1/account": {
+			"delete": {
+				"operationId": "deleteAccount",
+				"tags": ["Account"],
+				"summary": "注销账号",
+				"description": "验证后立即失效全部会话；滚动备份中可恢复个人信息最迟在既定 30 天窗口内清除。",
+				"security": [{ "BearerAuth": [] }],
+				"parameters": [
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" }
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": { "$ref": "#/components/schemas/DeleteAccountRequest" }
+						}
+					}
+				},
+				"responses": {
+					"202": { "$ref": "#/components/responses/AccountDeleted" },
+					"400": { "$ref": "#/components/responses/AuthBadRequest" },
+					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
+					"403": { "$ref": "#/components/responses/AuthForbidden" },
+					"409": { "$ref": "#/components/responses/AuthConflict" },
+					"413": { "$ref": "#/components/responses/PayloadTooLarge" },
+					"415": { "$ref": "#/components/responses/UnsupportedMediaType" },
+					"429": { "$ref": "#/components/responses/RateLimited" },
+					"500": { "$ref": "#/components/responses/InternalError" },
+					"503": { "$ref": "#/components/responses/AuthUnavailable" }
+				}
+			}
+		},
+		"/admin/v1/auth/login/options": {
+			"post": {
+				"operationId": "createAdminLoginOptions",
+				"tags": ["Administrator security"],
+				"summary": "创建管理员 passkey 登录选项",
+				"description": "未知和已知登录名均返回同形状且 allowCredentials 固定为空的 discoverable credential 选项；登录名、challenge、IP、设备标识和凭据 ID 不进入日志或审计。",
+				"parameters": [
+					{ "$ref": "#/components/parameters/AdminDeviceId" },
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" },
+					{ "$ref": "#/components/parameters/ClientAdminContractVersion" }
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/AdminLoginOptionsRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": { "$ref": "#/components/responses/AdminLoginOptionsIssued" },
+					"400": { "$ref": "#/components/responses/AdminBadRequest" },
+					"413": { "$ref": "#/components/responses/AdminPayloadTooLarge" },
+					"415": { "$ref": "#/components/responses/AdminUnsupportedMediaType" },
+					"429": { "$ref": "#/components/responses/AdminRateLimited" },
+					"500": { "$ref": "#/components/responses/AdminInternalError" },
+					"503": { "$ref": "#/components/responses/AdminUnavailable" }
+				}
+			}
+		},
+		"/admin/v1/auth/login/verify": {
+			"post": {
+				"operationId": "verifyAdminLogin",
+				"tags": ["Administrator security"],
+				"summary": "验证管理员 passkey 并签发一次性返回的会话 token",
+				"description": "服务端使用 @simplewebauthn/server 验证签名、固定 RP ID、精确 Origin 和用户验证。成功后只在本响应返回一次 32 字节 opaque token，供同源 Next BFF 写入 HttpOnly cookie；数据库只保存 HMAC。",
+				"parameters": [
+					{ "$ref": "#/components/parameters/AdminDeviceId" },
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" },
+					{ "$ref": "#/components/parameters/ClientAdminContractVersion" }
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/AdminLoginVerifyRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": { "$ref": "#/components/responses/AdminLoginVerified" },
+					"400": { "$ref": "#/components/responses/AdminBadRequest" },
+					"401": { "$ref": "#/components/responses/AdminUnauthorized" },
+					"413": { "$ref": "#/components/responses/AdminPayloadTooLarge" },
+					"415": { "$ref": "#/components/responses/AdminUnsupportedMediaType" },
+					"423": { "$ref": "#/components/responses/AdminSecurityLocked" },
+					"429": { "$ref": "#/components/responses/AdminRateLimited" },
+					"500": { "$ref": "#/components/responses/AdminInternalError" },
+					"503": { "$ref": "#/components/responses/AdminUnavailable" }
+				}
+			}
+		},
+		"/admin/v1/session": {
+			"get": {
+				"operationId": "getCurrentAdminSession",
+				"tags": ["Administrator security"],
+				"summary": "读取当前管理员会话和实时权限",
+				"security": [{ "AdminBearerAuth": [] }],
+				"parameters": [
+					{ "$ref": "#/components/parameters/AdminDeviceId" },
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" },
+					{ "$ref": "#/components/parameters/ClientAdminContractVersion" }
+				],
+				"responses": {
+					"200": { "$ref": "#/components/responses/AdminSessionRead" },
+					"401": { "$ref": "#/components/responses/AdminUnauthorized" },
+					"429": { "$ref": "#/components/responses/AdminRateLimited" },
+					"500": { "$ref": "#/components/responses/AdminInternalError" },
+					"503": { "$ref": "#/components/responses/AdminUnavailable" }
+				}
+			}
+		},
+		"/admin/v1/session/logout": {
+			"post": {
+				"operationId": "logoutCurrentAdminSession",
+				"tags": ["Administrator security"],
+				"summary": "撤销当前管理员会话",
+				"security": [{ "AdminBearerAuth": [] }],
+				"parameters": [
+					{ "$ref": "#/components/parameters/AdminDeviceId" },
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" },
+					{ "$ref": "#/components/parameters/ClientAdminContractVersion" }
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/AdminEmptyMutationRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"204": { "$ref": "#/components/responses/AdminNoContent" },
+					"400": { "$ref": "#/components/responses/AdminBadRequest" },
+					"401": { "$ref": "#/components/responses/AdminUnauthorized" },
+					"413": { "$ref": "#/components/responses/AdminPayloadTooLarge" },
+					"415": { "$ref": "#/components/responses/AdminUnsupportedMediaType" },
+					"429": { "$ref": "#/components/responses/AdminRateLimited" },
+					"500": { "$ref": "#/components/responses/AdminInternalError" },
+					"503": { "$ref": "#/components/responses/AdminUnavailable" }
+				}
+			}
+		},
+		"/admin/v1/credentials": {
+			"get": {
+				"operationId": "listCurrentAdminCredentials",
+				"tags": ["Administrator security"],
+				"summary": "列出当前管理员的有效 passkey",
+				"description": "只返回自助 opaque handle 和时间，不返回内部 UUID、凭据 ID、凭据哈希、公钥、IP 或设备哈希。",
+				"security": [{ "AdminBearerAuth": [] }],
+				"parameters": [
+					{ "$ref": "#/components/parameters/AdminDeviceId" },
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" },
+					{ "$ref": "#/components/parameters/ClientAdminContractVersion" }
+				],
+				"responses": {
+					"200": { "$ref": "#/components/responses/AdminCredentialsListed" },
+					"401": { "$ref": "#/components/responses/AdminUnauthorized" },
+					"403": { "$ref": "#/components/responses/AdminForbidden" },
+					"429": { "$ref": "#/components/responses/AdminRateLimited" },
+					"500": { "$ref": "#/components/responses/AdminInternalError" },
+					"503": { "$ref": "#/components/responses/AdminUnavailable" }
+				}
+			}
+		},
+		"/admin/v1/credentials/enroll/options": {
+			"post": {
+				"operationId": "createAdminCredentialEnrollOptions",
+				"tags": ["Administrator security"],
+				"summary": "为当前管理员创建新增 passkey 选项",
+				"description": "必须已有至少一枚有效 passkey；首次管理员及首枚 passkey 只能通过离线 bootstrap。",
+				"security": [{ "AdminBearerAuth": [] }],
+				"parameters": [
+					{ "$ref": "#/components/parameters/AdminDeviceId" },
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" },
+					{ "$ref": "#/components/parameters/ClientAdminContractVersion" }
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/AdminEmptyMutationRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": { "$ref": "#/components/responses/AdminEnrollOptionsIssued" },
+					"400": { "$ref": "#/components/responses/AdminBadRequest" },
+					"401": { "$ref": "#/components/responses/AdminUnauthorized" },
+					"403": { "$ref": "#/components/responses/AdminForbidden" },
+					"413": { "$ref": "#/components/responses/AdminPayloadTooLarge" },
+					"415": { "$ref": "#/components/responses/AdminUnsupportedMediaType" },
+					"429": { "$ref": "#/components/responses/AdminRateLimited" },
+					"500": { "$ref": "#/components/responses/AdminInternalError" },
+					"503": { "$ref": "#/components/responses/AdminUnavailable" }
+				}
+			}
+		},
+		"/admin/v1/credentials/enroll/verify": {
+			"post": {
+				"operationId": "verifyAdminCredentialEnrollment",
+				"tags": ["Administrator security"],
+				"summary": "验证并原子保存当前管理员的新 passkey",
+				"security": [{ "AdminBearerAuth": [] }],
+				"parameters": [
+					{ "$ref": "#/components/parameters/AdminDeviceId" },
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" },
+					{ "$ref": "#/components/parameters/ClientAdminContractVersion" }
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/AdminCredentialEnrollVerifyRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"201": { "$ref": "#/components/responses/AdminCredentialEnrolled" },
+					"400": { "$ref": "#/components/responses/AdminBadRequest" },
+					"401": { "$ref": "#/components/responses/AdminUnauthorized" },
+					"403": { "$ref": "#/components/responses/AdminForbidden" },
+					"409": { "$ref": "#/components/responses/AdminConflict" },
+					"413": { "$ref": "#/components/responses/AdminPayloadTooLarge" },
+					"415": { "$ref": "#/components/responses/AdminUnsupportedMediaType" },
+					"429": { "$ref": "#/components/responses/AdminRateLimited" },
+					"500": { "$ref": "#/components/responses/AdminInternalError" },
+					"503": { "$ref": "#/components/responses/AdminUnavailable" }
+				}
+			}
+		},
+		"/admin/v1/credentials/{credentialHandle}": {
+			"delete": {
+				"operationId": "revokeCurrentAdminCredential",
+				"tags": ["Administrator security"],
+				"summary": "撤销当前管理员的一枚 passkey",
+				"description": "只能使用当前管理员自有 opaque handle；不能删除最后一枚有效凭据。成功会撤销该管理员全部会话。",
+				"security": [{ "AdminBearerAuth": [] }],
+				"parameters": [
+					{ "$ref": "#/components/parameters/AdminCredentialHandle" },
+					{ "$ref": "#/components/parameters/AdminDeviceId" },
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" },
+					{ "$ref": "#/components/parameters/ClientAdminContractVersion" }
+				],
+				"responses": {
+					"204": { "$ref": "#/components/responses/AdminNoContent" },
+					"400": { "$ref": "#/components/responses/AdminBadRequest" },
+					"401": { "$ref": "#/components/responses/AdminUnauthorized" },
+					"403": { "$ref": "#/components/responses/AdminForbidden" },
+					"404": { "$ref": "#/components/responses/AdminNotFound" },
+					"409": { "$ref": "#/components/responses/AdminConflict" },
+					"429": { "$ref": "#/components/responses/AdminRateLimited" },
+					"500": { "$ref": "#/components/responses/AdminInternalError" },
+					"503": { "$ref": "#/components/responses/AdminUnavailable" }
+				}
+			}
+		},
+		"/admin/v1/audit": {
+			"get": {
+				"operationId": "listSanitizedAdminAudit",
+				"tags": ["Administrator security"],
+				"summary": "分页读取固定字段的脱敏管理员审计事件",
+				"description": "仅 AUDIT_READ 可用。响应不含 actor/target 哈希、context JSON、登录名、IP、设备、凭据 ID 或 token。",
+				"security": [{ "AdminBearerAuth": [] }],
+				"parameters": [
+					{ "$ref": "#/components/parameters/AdminDeviceId" },
+					{ "$ref": "#/components/parameters/AdminAuditCursor" },
+					{ "$ref": "#/components/parameters/AdminAuditLimit" },
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" },
+					{ "$ref": "#/components/parameters/ClientAdminContractVersion" }
+				],
+				"responses": {
+					"200": { "$ref": "#/components/responses/AdminAuditListed" },
+					"400": { "$ref": "#/components/responses/AdminBadRequest" },
+					"401": { "$ref": "#/components/responses/AdminUnauthorized" },
+					"403": { "$ref": "#/components/responses/AdminForbidden" },
+					"429": { "$ref": "#/components/responses/AdminRateLimited" },
+					"500": { "$ref": "#/components/responses/AdminInternalError" },
+					"503": { "$ref": "#/components/responses/AdminUnavailable" }
+				}
+			}
+		}
+	},
+	"components": {
+		"schemas": {
+			"ContractUuid": {
+				"type": "string",
+				"format": "uuid",
+				"pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+			},
+			"ErrorRequestId": {
+				"type": "string",
+				"format": "uuid",
+				"pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+			},
+			"RandomUuid": {
+				"type": "string",
+				"format": "uuid",
+				"pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+			},
+			"UtcDateTime": {
+				"type": "string",
+				"format": "date-time",
+				"pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+			},
+			"CuisinePreference": {
+				"type": "string",
+				"enum": [
+					"中式快餐",
+					"面食",
+					"米饭",
+					"火锅",
+					"川湘菜",
+					"清真",
+					"素食",
+					"西餐"
+				]
+			},
+			"CoordinateInput": {
+				"type": "object",
+				"properties": {
+					"latitude": {
+						"type": "number",
+						"minimum": -90,
+						"maximum": 90
+					},
+					"longitude": {
+						"type": "number",
+						"minimum": -180,
+						"maximum": 180
+					},
+					"accuracyMeters": {
+						"type": "number",
+						"minimum": 0,
+						"maximum": 10000
+					},
+					"crs": {
+						"default": "WGS84",
+						"type": "string",
+						"enum": ["WGS84", "GCJ02"]
+					}
+				},
+				"required": ["latitude", "longitude"]
+			},
+			"CoordinateOutput": {
+				"type": "object",
+				"properties": {
+					"latitude": {
+						"type": "number",
+						"minimum": -90,
+						"maximum": 90
+					},
+					"longitude": {
+						"type": "number",
+						"minimum": -180,
+						"maximum": 180
+					},
+					"accuracyMeters": {
+						"type": "number",
+						"minimum": 0,
+						"maximum": 10000
+					},
+					"crs": {
+						"default": "WGS84",
+						"type": "string",
+						"enum": ["WGS84", "GCJ02"]
+					}
+				},
+				"required": ["latitude", "longitude", "crs"],
+				"additionalProperties": false
+			},
+			"RecommendationContext": {
+				"type": "object",
+				"description": "未知字段会由当前 Zod object 在解析时剥离。requestTime 是兼容字段，服务端始终以自己的 generatedAt 覆盖它来判断营业时间。",
+				"properties": {
+					"location": {
+						"$ref": "#/components/schemas/CoordinateInput",
+						"description": "单次请求的精确位置；只允许出现在此 POST JSON body 中。",
+						"writeOnly": true,
+						"x-sensitive": "precise-location"
+					},
+					"locationLabel": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 80
+					},
+					"mealPeriod": {
+						"type": "string",
+						"enum": ["BREAKFAST", "LUNCH", "DINNER"]
+					},
+					"decisionMode": {
+						"default": "QUICK",
+						"type": "string",
+						"enum": ["QUICK", "GUIDED"]
+					},
+					"travelMode": {
+						"default": "WALK",
+						"type": "string",
+						"enum": ["WALK", "BIKE", "TRANSIT"]
+					},
+					"explorationMode": {
+						"default": "BALANCED",
+						"type": "string",
+						"enum": ["SAFE", "BALANCED", "ADVENTUROUS"]
+					},
+					"aiAssistanceEnabled": {
+						"default": true,
+						"type": "boolean"
+					},
+					"budgetMaxYuan": {
+						"default": null,
+						"anyOf": [
+							{
+								"type": "integer",
+								"exclusiveMinimum": 0,
+								"maximum": 2000
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"availableMinutes": {
+						"default": 60,
+						"type": "integer",
+						"minimum": 15,
+						"maximum": 240
+					},
+					"radiusMeters": {
+						"type": "integer",
+						"minimum": 200,
+						"maximum": 10000
+					},
+					"partySize": {
+						"default": 1,
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 30
+					},
+					"excludedCuisines": {
+						"default": [],
+						"maxItems": 20,
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/CuisinePreference"
+						}
+					},
+					"preferredCuisines": {
+						"default": [],
+						"maxItems": 20,
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/CuisinePreference"
+						}
+					},
+					"requestTime": {
+						"$ref": "#/components/schemas/UtcDateTime",
+						"description": "可选客户端时间，仅兼容传输；不参与服务端营业时间判断。"
+					}
+				},
+				"required": ["location", "mealPeriod", "radiusMeters"]
+			},
+			"LocationSearchRequest": {
+				"type": "object",
+				"description": "严格对象。query 会先 trim；除长度限制外，运行时还拒绝明显的坐标、手机号、邮箱、控制字符和竖线。",
+				"properties": {
+					"query": {
+						"type": "string",
+						"minLength": 2,
+						"maxLength": 80,
+						"description": "用户本次主动输入的地点名称；仅用于实时查询，不持久化。",
+						"writeOnly": true,
+						"x-sensitive": "user-location-query"
+					}
+				},
+				"required": ["query"],
+				"additionalProperties": false
+			},
+			"LocationSearchResult": {
+				"type": "object",
+				"description": "供应商中立的地点结果；不含任何供应商 POI 标识。",
+				"properties": {
+					"name": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 120
+					},
+					"address": {
+						"anyOf": [
+							{
+								"type": "string",
+								"maxLength": 200
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"location": {
+						"$ref": "#/components/schemas/CoordinateOutput"
+					},
+					"sourceLabel": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 80
+					},
+					"providerRank": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 5
+					}
+				},
+				"required": [
+					"name",
+					"address",
+					"location",
+					"sourceLabel",
+					"providerRank"
+				],
+				"additionalProperties": false
+			},
+			"LocationSearchResponse": {
+				"type": "object",
+				"properties": {
+					"requestId": {
+						"$ref": "#/components/schemas/ContractUuid"
+					},
+					"dataSource": {
+						"type": "string",
+						"pattern": "^[A-Z][A-Z0-9_]{1,31}$"
+					},
+					"dataMode": {
+						"type": "string",
+						"enum": ["LIVE", "DEMO"]
+					},
+					"results": {
+						"maxItems": 5,
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/LocationSearchResult"
+						}
+					}
+				},
+				"required": ["requestId", "dataSource", "dataMode", "results"],
+				"additionalProperties": false
+			},
+			"PlaceSearchCoordinate": {
+				"type": "object",
+				"properties": {
+					"latitude": {
+						"type": "number",
+						"minimum": -90,
+						"maximum": 90
+					},
+					"longitude": {
+						"type": "number",
+						"minimum": -180,
+						"maximum": 180
+					},
+					"crs": {
+						"type": "string",
+						"enum": ["WGS84", "GCJ02"]
+					}
+				},
+				"required": ["latitude", "longitude", "crs"],
+				"additionalProperties": false
+			},
+			"PlaceSearchRequest": {
+				"type": "object",
+				"description": "严格对象。精确坐标必须显式声明 CRS；keyword 会先 trim，并拒绝明显坐标、手机号、邮箱、控制字符和竖线。",
+				"properties": {
+					"location": {
+						"$ref": "#/components/schemas/PlaceSearchCoordinate",
+						"writeOnly": true,
+						"x-sensitive": "precise-location"
+					},
+					"mealPeriod": {
+						"type": "string",
+						"enum": ["BREAKFAST", "LUNCH", "DINNER"]
+					},
+					"keyword": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 80,
+						"writeOnly": true,
+						"x-sensitive": "user-place-keyword"
+					},
+					"radiusMeters": {
+						"type": "integer",
+						"minimum": 500,
+						"maximum": 5000
+					},
+					"maxAverageCostYuan": {
+						"type": "integer",
+						"exclusiveMinimum": 0,
+						"maximum": 20000
+					},
+					"openNow": {
+						"default": false,
+						"type": "boolean"
+					},
+					"limit": {
+						"default": 10,
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 10
+					}
+				},
+				"required": ["location", "mealPeriod", "keyword", "radiusMeters"],
+				"additionalProperties": false
+			},
+			"PlaceSearchResult": {
+				"type": "object",
+				"description": "供应商中立的实时餐厅搜索结果。rank 保留供应商原序，且不含供应商代码或稳定 POI ID。",
+				"properties": {
+					"resultToken": {
+						"type": "string",
+						"minLength": 43,
+						"maxLength": 43,
+						"pattern": "^[A-Za-z0-9_-]{43}$"
+					},
+					"rank": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 25
+					},
+					"name": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 160
+					},
+					"address": {
+						"anyOf": [
+							{
+								"type": "string",
+								"maxLength": 240
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"location": {
+						"$ref": "#/components/schemas/PlaceSearchCoordinate"
+					},
+					"distanceMeters": {
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 100000
+					},
+					"sourceLabel": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 80
+					},
+					"sourceRating": {
+						"anyOf": [
+							{
+								"type": "number",
+								"minimum": 0,
+								"maximum": 5
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"averageCostYuan": {
+						"anyOf": [
+							{
+								"type": "number",
+								"minimum": 0,
+								"maximum": 20000
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"openStatus": {
+						"type": "string",
+						"enum": ["OPEN", "CLOSED", "UNKNOWN"]
+					},
+					"tags": {
+						"maxItems": 20,
+						"type": "array",
+						"items": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 80
+						}
+					},
+					"dataMode": {
+						"type": "string",
+						"enum": ["LIVE", "DEMO"]
+					},
+					"actions": {
+						"$ref": "#/components/schemas/RecommendationActions"
+					}
+				},
+				"required": [
+					"resultToken",
+					"rank",
+					"name",
+					"address",
+					"location",
+					"distanceMeters",
+					"sourceLabel",
+					"sourceRating",
+					"averageCostYuan",
+					"openStatus",
+					"tags",
+					"dataMode",
+					"actions"
+				],
+				"additionalProperties": false
+			},
+			"PlaceSearchResponse": {
+				"type": "object",
+				"properties": {
+					"requestId": {
+						"$ref": "#/components/schemas/ContractUuid"
+					},
+					"coverage": {
+						"type": "string",
+						"enum": ["BEIJING_FOURTH_RING", "OUTSIDE_PILOT"]
+					},
+					"results": {
+						"maxItems": 10,
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/PlaceSearchResult"
+						}
+					},
+					"notice": {
+						"anyOf": [
+							{
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 160
+							},
+							{
+								"type": "null"
+							}
+						]
+					}
+				},
+				"required": ["requestId", "coverage", "results", "notice"],
+				"additionalProperties": false
+			},
+			"RecommendationReason": {
+				"type": "object",
+				"properties": {
+					"code": {
+						"type": "string",
+						"enum": [
+							"TIME_FIT",
+							"BUDGET_FIT",
+							"DISTANCE_FIT",
+							"MEAL_FIT",
+							"QUALITY_SIGNAL",
+							"DIVERSITY"
+						]
+					},
+					"text": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 120
+					}
+				},
+				"required": ["code", "text"],
+				"additionalProperties": false
+			},
+			"RecommendationActions": {
+				"type": "object",
+				"properties": {
+					"navigate": {
+						"type": "boolean"
+					},
+					"call": {
+						"type": "boolean"
+					},
+					"copyAddress": {
+						"type": "boolean"
+					},
+					"share": {
+						"type": "boolean"
+					}
+				},
+				"required": ["navigate", "call", "copyAddress", "share"],
+				"additionalProperties": false
+			},
+			"RecommendationResult": {
+				"type": "object",
+				"properties": {
+					"provider": {
+						"type": "string",
+						"pattern": "^[A-Z][A-Z0-9_]{1,31}$"
+					},
+					"resultToken": {
+						"type": "string",
+						"minLength": 43,
+						"maxLength": 43,
+						"pattern": "^[A-Za-z0-9_-]{43}$"
+					},
+					"dataMode": {
+						"type": "string",
+						"enum": ["LIVE", "DEMO"]
+					},
+					"actions": {
+						"$ref": "#/components/schemas/RecommendationActions"
+					},
+					"name": {
+						"type": "string",
+						"minLength": 1
+					},
+					"address": {
+						"type": "string"
+					},
+					"rank": {
+						"type": "integer",
+						"exclusiveMinimum": 0,
+						"maximum": 9007199254740991
+					},
+					"fitScore": {
+						"anyOf": [
+							{
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"sourceRating": {
+						"anyOf": [
+							{
+								"type": "number",
+								"minimum": 0,
+								"maximum": 5
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"averageCostYuan": {
+						"anyOf": [
+							{
+								"type": "number",
+								"minimum": 0
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"distanceMeters": {
+						"type": "number",
+						"minimum": 0
+					},
+					"estimatedTravelMinutes": {
+						"type": "number",
+						"minimum": 0
+					},
+					"estimatedMealMinutes": {
+						"type": "number",
+						"exclusiveMinimum": 0
+					},
+					"openStatus": {
+						"type": "string",
+						"enum": ["OPEN", "CLOSED", "UNKNOWN"]
+					},
+					"tags": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"imageUrl": {
+						"anyOf": [
+							{
+								"type": "string",
+								"format": "uri"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"phone": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"location": {
+						"$ref": "#/components/schemas/CoordinateOutput"
+					},
+					"reasons": {
+						"minItems": 1,
+						"maxItems": 4,
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/RecommendationReason"
+						}
+					},
+					"warnings": {
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"confidence": {
+						"type": "string",
+						"enum": ["LOW", "MEDIUM", "HIGH"]
+					},
+					"aiAssisted": {
+						"type": "boolean"
+					},
+					"sourceAttribution": {
+						"type": "string"
+					}
+				},
+				"required": [
+					"provider",
+					"resultToken",
+					"dataMode",
+					"actions",
+					"name",
+					"address",
+					"rank",
+					"fitScore",
+					"sourceRating",
+					"averageCostYuan",
+					"distanceMeters",
+					"estimatedTravelMinutes",
+					"estimatedMealMinutes",
+					"openStatus",
+					"tags",
+					"imageUrl",
+					"phone",
+					"location",
+					"reasons",
+					"warnings",
+					"confidence",
+					"aiAssisted",
+					"sourceAttribution"
+				],
+				"additionalProperties": false
+			},
+			"RecommendationResponse": {
+				"type": "object",
+				"properties": {
+					"requestId": {
+						"$ref": "#/components/schemas/ContractUuid"
+					},
+					"generatedAt": {
+						"$ref": "#/components/schemas/UtcDateTime"
+					},
+					"coverage": {
+						"type": "string",
+						"enum": ["BEIJING_FOURTH_RING", "OUTSIDE_PILOT"]
+					},
+					"dataRightsMode": {
+						"type": "string",
+						"enum": ["LIVE_DISPLAY_ONLY", "LICENSED_ENRICHMENT"]
+					},
+					"ruleVersion": {
+						"type": "string"
+					},
+					"promptVersion": {
+						"type": "string"
+					},
+					"modelVersion": {
+						"type": "string"
+					},
+					"aiFallbackUsed": {
+						"type": "boolean"
+					},
+					"results": {
+						"maxItems": 3,
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/RecommendationResult"
+						}
+					},
+					"notice": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						]
+					}
+				},
+				"required": [
+					"requestId",
+					"generatedAt",
+					"coverage",
+					"dataRightsMode",
+					"ruleVersion",
+					"promptVersion",
+					"modelVersion",
+					"aiFallbackUsed",
+					"results",
+					"notice"
+				],
+				"additionalProperties": false
+			},
+			"RecommendationEvent": {
+				"type": "object",
+				"properties": {
+					"requestId": {
+						"$ref": "#/components/schemas/ContractUuid"
+					},
+					"resultToken": {
+						"type": "string",
+						"minLength": 43,
+						"maxLength": 43,
+						"pattern": "^[A-Za-z0-9_-]{43}$"
+					},
+					"type": {
+						"type": "string",
+						"enum": [
+							"IMPRESSION",
+							"DETAIL",
+							"FAVORITE",
+							"NAVIGATION",
+							"CALL",
+							"REROLL"
+						]
+					},
+					"occurredAt": {
+						"$ref": "#/components/schemas/UtcDateTime",
+						"description": "不得早于服务端当前时间前两小时，也不得晚于当前时间后五分钟。"
+					}
+				},
+				"required": ["requestId", "resultToken", "type", "occurredAt"],
+				"additionalProperties": false
+			},
+			"SupportFeedbackCategory": {
+				"type": "string",
+				"enum": ["PRODUCT", "PLACE_CORRECTION", "PRIVACY", "COMPLAINT"]
+			},
+			"SupportFeedbackRequest": {
+				"type": "object",
+				"properties": {
+					"submissionId": {
+						"type": "string",
+						"pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
+						"writeOnly": true,
+						"x-sensitive": "idempotency-key",
+						"description": "客户端为一次逻辑提交生成的随机 UUIDv4；服务端在加密、HMAC 与响应前统一为小写。"
+					},
+					"category": {
+						"$ref": "#/components/schemas/SupportFeedbackCategory"
+					},
+					"message": {
+						"type": "string",
+						"minLength": 10,
+						"maxLength": 2000,
+						"writeOnly": true,
+						"x-sensitive": "support-message",
+						"description": "按 Unicode code point 计 10–2000 个字符；CRLF 规范化为 LF，首尾空白删除，并拒绝 C0/C1 控制字符（换行与制表符除外）。"
+					}
+				},
+				"required": ["submissionId", "category", "message"],
+				"additionalProperties": false
+			},
+			"SupportFeedbackResponse": {
+				"type": "object",
+				"properties": {
+					"feedbackId": { "$ref": "#/components/schemas/ContractUuid" },
+					"accepted": { "type": "boolean", "const": true },
+					"retentionAfterClosureDays": {
+						"type": "number",
+						"const": 180
+					}
+				},
+				"required": ["feedbackId", "accepted", "retentionAfterClosureDays"],
+				"additionalProperties": false
+			},
+			"SupportFeedbackConflictError": {
+				"type": "object",
+				"properties": {
+					"requestId": { "$ref": "#/components/schemas/ErrorRequestId" },
+					"code": {
+						"type": "string",
+						"const": "SUPPORT_FEEDBACK_IDEMPOTENCY_CONFLICT"
+					},
+					"message": {
+						"type": "string",
+						"const": "反馈提交标识已被其他内容使用，请重新提交"
+					}
+				},
+				"required": ["requestId", "code", "message"],
+				"additionalProperties": false
+			},
+			"SupportFeedbackRateLimitError": {
+				"type": "object",
+				"properties": {
+					"requestId": { "$ref": "#/components/schemas/ErrorRequestId" },
+					"code": {
+						"type": "string",
+						"const": "SUPPORT_FEEDBACK_RATE_LIMITED"
+					},
+					"message": {
+						"type": "string",
+						"const": "反馈提交过于频繁，请稍后再试"
+					}
+				},
+				"required": ["requestId", "code", "message"],
+				"additionalProperties": false
+			},
+			"SupportFeedbackUnavailableError": {
+				"type": "object",
+				"properties": {
+					"requestId": { "$ref": "#/components/schemas/ErrorRequestId" },
+					"code": { "type": "string", "const": "SUPPORT_FEEDBACK_UNAVAILABLE" },
+					"message": {
+						"type": "string",
+						"const": "反馈服务暂时不可用，请稍后重试"
+					}
+				},
+				"required": ["requestId", "code", "message"],
+				"additionalProperties": false
+			},
+			"PageCursor": {
+				"type": "string",
+				"minLength": 43,
+				"maxLength": 43,
+				"pattern": "^[A-Za-z0-9_-]{43}$",
+				"description": "服务端签发且不可解析的分页游标；不得包含资源 ID 或个人信息。"
+			},
+			"RecommendationResultReferenceInput": {
+				"type": "object",
+				"properties": {
+					"requestId": { "$ref": "#/components/schemas/ContractUuid" },
+					"resultToken": {
+						"type": "string",
+						"minLength": 43,
+						"maxLength": 43,
+						"pattern": "^[A-Za-z0-9_-]{43}$",
+						"writeOnly": true,
+						"x-sensitive": "short-lived-result-reference",
+						"description": "只允许在服务端约两小时结果登记仍有效时用于创建；不得持久化为长期引用。"
+					}
+				},
+				"required": ["requestId", "resultToken"],
+				"additionalProperties": false
+			},
+			"FavoriteGroup": {
+				"type": "string",
+				"enum": ["WANT_TO_GO", "REGULAR"]
+			},
+			"FavoriteMutationRequest": {
+				"type": "object",
+				"properties": {
+					"idempotencyKey": {
+						"$ref": "#/components/schemas/ContractUuid",
+						"writeOnly": true,
+						"x-sensitive": "idempotency-key"
+					},
+					"result": {
+						"$ref": "#/components/schemas/RecommendationResultReferenceInput"
+					},
+					"group": { "$ref": "#/components/schemas/FavoriteGroup" }
+				},
+				"required": ["idempotencyKey", "result", "group"],
+				"additionalProperties": false
+			},
+			"UpdateFavoriteGroupRequest": {
+				"type": "object",
+				"properties": {
+					"idempotencyKey": {
+						"$ref": "#/components/schemas/ContractUuid",
+						"writeOnly": true,
+						"x-sensitive": "idempotency-key"
+					},
+					"group": { "$ref": "#/components/schemas/FavoriteGroup" }
+				},
+				"required": ["idempotencyKey", "group"],
+				"additionalProperties": false
+			},
+			"PersistedPlacePresentation": {
+				"description": "非持久化的实时展示投影。AVAILABLE 只能来自已授权正式实时供应商；不含供应商 ID、resultToken、坐标、电话或可执行动作。",
+				"oneOf": [
+					{
+						"type": "object",
+						"properties": {
+							"presentationStatus": { "type": "string", "const": "AVAILABLE" },
+							"name": { "type": "string", "minLength": 1, "maxLength": 160 },
+							"address": {
+								"anyOf": [
+									{ "type": "string", "maxLength": 240 },
+									{ "type": "null" }
+								]
+							},
+							"sourceLabel": {
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 80
+							},
+							"dataMode": { "type": "string", "const": "LIVE" },
+							"openStatus": {
+								"type": "string",
+								"enum": ["OPEN", "CLOSED", "UNKNOWN"]
+							},
+							"averageCostYuan": {
+								"anyOf": [
+									{ "type": "number", "minimum": 0, "maximum": 20000 },
+									{ "type": "null" }
+								]
+							},
+							"tags": {
+								"maxItems": 8,
+								"type": "array",
+								"items": { "type": "string", "minLength": 1, "maxLength": 40 }
+							},
+							"resolvedAt": { "$ref": "#/components/schemas/UtcDateTime" }
+						},
+						"required": [
+							"presentationStatus",
+							"name",
+							"address",
+							"sourceLabel",
+							"dataMode",
+							"openStatus",
+							"averageCostYuan",
+							"tags",
+							"resolvedAt"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"presentationStatus": {
+								"type": "string",
+								"const": "TEMPORARILY_UNAVAILABLE"
+							},
+							"retryable": { "type": "boolean", "const": true }
+						},
+						"required": ["presentationStatus", "retryable"],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"presentationStatus": {
+								"type": "string",
+								"const": "RIGHTS_REVOKED"
+							},
+							"retryable": { "type": "boolean", "const": false }
+						},
+						"required": ["presentationStatus", "retryable"],
+						"additionalProperties": false
+					}
+				]
+			},
+			"FavoriteRecord": {
+				"type": "object",
+				"properties": {
+					"favoriteId": {
+						"$ref": "#/components/schemas/ContractUuid",
+						"description": "仅属于当前账号的 App 自有收藏资源 ID；不是供应商或全局地点 ID。"
+					},
+					"group": { "$ref": "#/components/schemas/FavoriteGroup" },
+					"createdAt": { "$ref": "#/components/schemas/UtcDateTime" },
+					"presentation": {
+						"$ref": "#/components/schemas/PersistedPlacePresentation"
+					}
+				},
+				"required": ["favoriteId", "group", "createdAt", "presentation"],
+				"additionalProperties": false
+			},
+			"ListFavoritesQuery": {
+				"type": "object",
+				"properties": {
+					"cursor": { "$ref": "#/components/schemas/PageCursor" },
+					"limit": {
+						"default": "20",
+						"type": "string",
+						"pattern": "^(?:[1-9]|[1-4][0-9]|50)$"
+					},
+					"group": { "$ref": "#/components/schemas/FavoriteGroup" }
+				},
+				"additionalProperties": false
+			},
+			"FavoritesPage": {
+				"type": "object",
+				"properties": {
+					"items": {
+						"maxItems": 50,
+						"type": "array",
+						"items": { "$ref": "#/components/schemas/FavoriteRecord" }
+					},
+					"nextCursor": {
+						"anyOf": [
+							{ "$ref": "#/components/schemas/PageCursor" },
+							{ "type": "null" }
+						]
+					}
+				},
+				"required": ["items", "nextCursor"],
+				"additionalProperties": false
+			},
+			"RecommendationHistoryAction": {
+				"type": "string",
+				"enum": [
+					"RECOMMENDATION_SHOWN",
+					"DETAIL_VIEWED",
+					"FAVORITE_ADDED",
+					"NAVIGATION_OPENED",
+					"PHONE_DIALER_OPENED",
+					"REROLL_REQUESTED"
+				],
+				"description": "仅表示 App 内操作，不证明到店、下单或实际用餐。"
+			},
+			"RecommendationHistoryItem": {
+				"type": "object",
+				"properties": {
+					"historyId": { "$ref": "#/components/schemas/ContractUuid" },
+					"action": {
+						"$ref": "#/components/schemas/RecommendationHistoryAction"
+					},
+					"mealPeriod": {
+						"type": "string",
+						"enum": ["BREAKFAST", "LUNCH", "DINNER"]
+					},
+					"occurredAt": { "$ref": "#/components/schemas/UtcDateTime" },
+					"expiresAt": {
+						"$ref": "#/components/schemas/UtcDateTime",
+						"description": "必须严格等于 occurredAt 加 90 天。"
+					},
+					"presentation": {
+						"anyOf": [
+							{ "$ref": "#/components/schemas/PersistedPlacePresentation" },
+							{ "type": "null" }
+						]
+					}
+				},
+				"required": [
+					"historyId",
+					"action",
+					"mealPeriod",
+					"occurredAt",
+					"expiresAt",
+					"presentation"
+				],
+				"additionalProperties": false
+			},
+			"ListRecommendationHistoryQuery": {
+				"type": "object",
+				"properties": {
+					"cursor": { "$ref": "#/components/schemas/PageCursor" },
+					"limit": {
+						"default": "20",
+						"type": "string",
+						"pattern": "^(?:[1-9]|[1-4][0-9]|50)$"
+					},
+					"action": {
+						"$ref": "#/components/schemas/RecommendationHistoryAction"
+					}
+				},
+				"additionalProperties": false
+			},
+			"RecommendationHistoryPage": {
+				"type": "object",
+				"properties": {
+					"items": {
+						"maxItems": 50,
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/RecommendationHistoryItem"
+						}
+					},
+					"nextCursor": {
+						"anyOf": [
+							{ "$ref": "#/components/schemas/PageCursor" },
+							{ "type": "null" }
+						]
+					},
+					"retentionDays": { "type": "number", "const": 90 }
+				},
+				"required": ["items", "nextCursor", "retentionDays"],
+				"additionalProperties": false
+			},
+			"PrivateFeedbackType": {
+				"type": "string",
+				"enum": [
+					"WANT_TO_EAT",
+					"ATE",
+					"LIKE",
+					"DISLIKE",
+					"TOO_FAR",
+					"TOO_EXPENSIVE",
+					"RECENTLY_ATE",
+					"AVOID_CUISINE"
+				]
+			},
+			"CreatePrivateFeedbackRequest": {
+				"type": "object",
+				"properties": {
+					"idempotencyKey": {
+						"$ref": "#/components/schemas/ContractUuid",
+						"writeOnly": true,
+						"x-sensitive": "idempotency-key"
+					},
+					"result": {
+						"$ref": "#/components/schemas/RecommendationResultReferenceInput"
+					},
+					"type": { "$ref": "#/components/schemas/PrivateFeedbackType" }
+				},
+				"required": ["idempotencyKey", "result", "type"],
+				"additionalProperties": false
+			},
+			"PrivateFeedbackRecord": {
+				"type": "object",
+				"properties": {
+					"feedbackId": { "$ref": "#/components/schemas/ContractUuid" },
+					"type": { "$ref": "#/components/schemas/PrivateFeedbackType" },
+					"visibility": { "type": "string", "const": "PRIVATE" },
+					"createdAt": { "$ref": "#/components/schemas/UtcDateTime" },
+					"presentation": {
+						"anyOf": [
+							{ "$ref": "#/components/schemas/PersistedPlacePresentation" },
+							{ "type": "null" }
+						]
+					}
+				},
+				"required": [
+					"feedbackId",
+					"type",
+					"visibility",
+					"createdAt",
+					"presentation"
+				],
+				"additionalProperties": false
+			},
+			"ListPrivateFeedbackQuery": {
+				"type": "object",
+				"properties": {
+					"cursor": { "$ref": "#/components/schemas/PageCursor" },
+					"limit": {
+						"default": "20",
+						"type": "string",
+						"pattern": "^(?:[1-9]|[1-4][0-9]|50)$"
+					},
+					"type": { "$ref": "#/components/schemas/PrivateFeedbackType" }
+				},
+				"additionalProperties": false
+			},
+			"PrivateFeedbackPage": {
+				"type": "object",
+				"properties": {
+					"items": {
+						"maxItems": 50,
+						"type": "array",
+						"items": { "$ref": "#/components/schemas/PrivateFeedbackRecord" }
+					},
+					"nextCursor": {
+						"anyOf": [
+							{ "$ref": "#/components/schemas/PageCursor" },
+							{ "type": "null" }
+						]
+					}
+				},
+				"required": ["items", "nextCursor"],
+				"additionalProperties": false
+			},
+			"FavoriteIdPath": {
+				"type": "object",
+				"properties": {
+					"favoriteId": { "$ref": "#/components/schemas/ContractUuid" }
+				},
+				"required": ["favoriteId"],
+				"additionalProperties": false
+			},
+			"FeedbackIdPath": {
+				"type": "object",
+				"properties": {
+					"feedbackId": { "$ref": "#/components/schemas/ContractUuid" }
+				},
+				"required": ["feedbackId"],
+				"additionalProperties": false
+			},
+			"PersistenceCapabilities": {
+				"type": "object",
+				"properties": {
+					"favoritesEnabled": { "type": "boolean" },
+					"historyEnabled": { "type": "boolean" },
+					"privateFeedbackEnabled": { "type": "boolean" },
+					"savedResourceIdsEnabled": { "type": "boolean" }
+				},
+				"required": [
+					"favoritesEnabled",
+					"historyEnabled",
+					"privateFeedbackEnabled",
+					"savedResourceIdsEnabled"
+				],
+				"additionalProperties": false
+			},
+			"ServiceCapabilities": {
+				"type": "object",
+				"properties": {
+					"recommendationsEnabled": {
+						"default": false,
+						"type": "boolean"
+					},
+					"locationSearchEnabled": {
+						"default": false,
+						"type": "boolean"
+					},
+					"placeSearchEnabled": {
+						"default": false,
+						"type": "boolean"
+					}
+				},
+				"required": [
+					"recommendationsEnabled",
+					"locationSearchEnabled",
+					"placeSearchEnabled"
+				],
+				"additionalProperties": false
+			},
+			"FeatureConfig": {
+				"type": "object",
+				"properties": {
+					"coverageName": {
+						"type": "string"
+					},
+					"dataRightsMode": {
+						"type": "string",
+						"enum": ["LIVE_DISPLAY_ONLY", "LICENSED_ENRICHMENT"]
+					},
+					"aiEnabled": {
+						"type": "boolean"
+					},
+					"accountsEnabled": {
+						"type": "boolean"
+					},
+					"favoritesEnabled": {
+						"type": "boolean"
+					},
+					"supportFeedbackEnabled": {
+						"type": "boolean",
+						"default": false,
+						"description": "问题反馈服务是否已经完成数据库与密钥覆盖启动校验；旧 v1 响应缺失时按 false 处理。"
+					},
+					"minimumSupportedVersion": {
+						"type": "string"
+					},
+					"ruleVersion": {
+						"type": "string"
+					},
+					"promptVersion": {
+						"type": "string"
+					},
+					"modelVersion": {
+						"type": "string"
+					},
+					"persistenceCapabilities": {
+						"$ref": "#/components/schemas/PersistenceCapabilities",
+						"description": "可选兼容字段；缺失时按全部关闭处理。LIVE_DISPLAY_ONLY 时所有字段必须为 false，且写接口返回 403。"
+					},
+					"authCapabilities": {
+						"$ref": "#/components/schemas/AuthCapabilities",
+						"description": "可选的账号通道能力；旧 v1 服务可以缺省此字段。不含任何供应商密钥、签名或模板。"
+					},
+					"serviceCapabilities": {
+						"$ref": "#/components/schemas/ServiceCapabilities",
+						"default": {
+							"recommendationsEnabled": false,
+							"locationSearchEnabled": false,
+							"placeSearchEnabled": false
+						},
+						"description": "当前配置选中的核心数据适配器能力；不做实时上游探测、不披露供应商身份。旧 v1 响应缺失对象或客户端遇到缺失字段时均按 false 处理。"
+					}
+				},
+				"required": [
+					"coverageName",
+					"dataRightsMode",
+					"aiEnabled",
+					"accountsEnabled",
+					"favoritesEnabled",
+					"supportFeedbackEnabled",
+					"minimumSupportedVersion",
+					"ruleVersion",
+					"promptVersion",
+					"modelVersion",
+					"serviceCapabilities"
+				],
+				"additionalProperties": false
+			},
+			"AuthCapabilities": {
+				"type": "object",
+				"properties": {
+					"accountsEnabled": { "type": "boolean" },
+					"registrationEnabled": { "type": "boolean" },
+					"phoneEnabled": { "type": "boolean" },
+					"wechatEnabled": { "type": "boolean" },
+					"emailEnabled": { "type": "boolean" },
+					"qqEnabled": { "type": "boolean" },
+					"dataExportEnabled": { "type": "boolean", "default": false }
+				},
+				"required": [
+					"accountsEnabled",
+					"registrationEnabled",
+					"phoneEnabled",
+					"wechatEnabled",
+					"emailEnabled",
+					"qqEnabled",
+					"dataExportEnabled"
+				],
+				"additionalProperties": false
+			},
+			"OtpCode": {
+				"type": "string",
+				"pattern": "^\\d{6}$",
+				"writeOnly": true,
+				"x-sensitive": "one-time-code"
+			},
+			"OAuthStateValue": {
+				"type": "string",
+				"minLength": 43,
+				"maxLength": 43,
+				"pattern": "^[A-Za-z0-9_-]{43}$"
+			},
+			"ThirdPartyAuthorizationCode": {
+				"type": "string",
+				"minLength": 8,
+				"maxLength": 2048,
+				"pattern": "^[A-Za-z0-9._~+/=-]+$",
+				"writeOnly": true,
+				"x-sensitive": "third-party-authorization-code"
+			},
+			"ThirdPartyAccessToken": {
+				"type": "string",
+				"minLength": 16,
+				"maxLength": 2048,
+				"pattern": "^[A-Za-z0-9._~+/=-]+$",
+				"writeOnly": true,
+				"x-sensitive": "third-party-access-token"
+			},
+			"AppAccessToken": {
+				"type": "string",
+				"minLength": 43,
+				"maxLength": 43,
+				"pattern": "^[A-Za-z0-9_-]{43}$",
+				"readOnly": true,
+				"x-sensitive": "app-access-token"
+			},
+			"AppRefreshToken": {
+				"type": "string",
+				"minLength": 43,
+				"maxLength": 43,
+				"pattern": "^[A-Za-z0-9_-]{43}$",
+				"readOnly": true,
+				"x-sensitive": "app-refresh-token",
+				"description": "32 字节密码学随机值的无填充 base64url；服务端以令牌类型/哈希域与 access token 分离。"
+			},
+			"AuthDeviceContext": {
+				"type": "object",
+				"properties": {
+					"installationId": {
+						"$ref": "#/components/schemas/ContractUuid",
+						"writeOnly": true,
+						"x-sensitive": "device-installation-id"
+					},
+					"label": { "type": "string", "minLength": 1, "maxLength": 80 },
+					"platform": { "type": "string", "const": "ANDROID" },
+					"appVersion": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 32,
+						"pattern": "^\\d+(?:\\.\\d+){0,3}(?:[-+][A-Za-z0-9.-]+)?$"
+					}
+				},
+				"required": ["installationId", "label", "platform", "appVersion"],
+				"additionalProperties": false
+			},
+			"PhoneRequestCode": {
+				"type": "object",
+				"properties": {
+					"phoneNumber": {
+						"type": "string",
+						"pattern": "^\\+861[3-9]\\d{9}$",
+						"writeOnly": true,
+						"x-sensitive": "phone-number"
+					},
+					"purpose": {
+						"type": "string",
+						"enum": ["REGISTER", "LOGIN"]
+					},
+					"installationId": {
+						"$ref": "#/components/schemas/ContractUuid",
+						"writeOnly": true,
+						"x-sensitive": "device-installation-id"
+					}
+				},
+				"required": ["phoneNumber", "purpose", "installationId"],
+				"additionalProperties": false
+			},
+			"EmailRequestCode": {
+				"type": "object",
+				"description": "邮箱不存在 REGISTER 用途，不能创建账号。",
+				"properties": {
+					"email": {
+						"type": "string",
+						"minLength": 3,
+						"maxLength": 254,
+						"format": "email",
+						"pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+						"writeOnly": true,
+						"x-sensitive": "email-address"
+					},
+					"purpose": {
+						"type": "string",
+						"enum": ["LOGIN", "BIND"]
+					},
+					"installationId": {
+						"$ref": "#/components/schemas/ContractUuid",
+						"writeOnly": true,
+						"x-sensitive": "device-installation-id"
+					}
+				},
+				"required": ["email", "purpose", "installationId"],
+				"additionalProperties": false
+			},
+			"PhoneCodeChallengeResponse": {
+				"type": "object",
+				"properties": {
+					"challengeId": { "$ref": "#/components/schemas/ContractUuid" },
+					"targetType": { "type": "string", "const": "PHONE" },
+					"maskedTarget": {
+						"type": "string",
+						"pattern": "^\\+861\\d{2}\\*{4}\\d{4}$"
+					},
+					"expiresAt": { "$ref": "#/components/schemas/UtcDateTime" },
+					"resendAvailableAt": { "$ref": "#/components/schemas/UtcDateTime" }
+				},
+				"required": [
+					"challengeId",
+					"targetType",
+					"maskedTarget",
+					"expiresAt",
+					"resendAvailableAt"
+				],
+				"additionalProperties": false
+			},
+			"EmailCodeChallengeResponse": {
+				"type": "object",
+				"properties": {
+					"challengeId": { "$ref": "#/components/schemas/ContractUuid" },
+					"targetType": { "type": "string", "const": "EMAIL" },
+					"maskedTarget": {
+						"type": "string",
+						"minLength": 5,
+						"maxLength": 254,
+						"pattern": "^[^@\\s]*\\*+[^@\\s]*@[A-Za-z0-9.-]{1,190}$"
+					},
+					"expiresAt": { "$ref": "#/components/schemas/UtcDateTime" },
+					"resendAvailableAt": { "$ref": "#/components/schemas/UtcDateTime" }
+				},
+				"required": [
+					"challengeId",
+					"targetType",
+					"maskedTarget",
+					"expiresAt",
+					"resendAvailableAt"
+				],
+				"additionalProperties": false
+			},
+			"OAuthStateRequest": {
+				"oneOf": [
+					{
+						"type": "object",
+						"properties": {
+							"provider": { "type": "string", "const": "WECHAT" },
+							"purpose": { "type": "string", "const": "REGISTER" },
+							"installationId": {
+								"type": "string",
+								"format": "uuid",
+								"pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+							},
+							"phoneChallengeId": {
+								"type": "string",
+								"format": "uuid",
+								"pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+							}
+						},
+						"required": [
+							"provider",
+							"purpose",
+							"installationId",
+							"phoneChallengeId"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"provider": {
+								"type": "string",
+								"enum": ["WECHAT", "QQ"]
+							},
+							"purpose": { "type": "string", "const": "LOGIN" },
+							"installationId": {
+								"type": "string",
+								"format": "uuid",
+								"pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+							}
+						},
+						"required": ["provider", "purpose", "installationId"],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"provider": { "type": "string", "const": "QQ" },
+							"purpose": { "type": "string", "const": "BIND" },
+							"installationId": {
+								"type": "string",
+								"format": "uuid",
+								"pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+							}
+						},
+						"required": ["provider", "purpose", "installationId"],
+						"additionalProperties": false
+					}
+				]
+			},
+			"OAuthStateResponse": {
+				"oneOf": [
+					{
+						"type": "object",
+						"properties": {
+							"provider": { "type": "string", "const": "WECHAT" },
+							"purpose": {
+								"type": "string",
+								"enum": ["REGISTER", "LOGIN"]
+							},
+							"state": {
+								"$ref": "#/components/schemas/OAuthStateValue",
+								"readOnly": true,
+								"x-sensitive": "one-time-oauth-state"
+							},
+							"expiresAt": { "$ref": "#/components/schemas/UtcDateTime" }
+						},
+						"required": ["provider", "purpose", "state", "expiresAt"],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"provider": { "type": "string", "const": "QQ" },
+							"purpose": { "type": "string", "enum": ["LOGIN", "BIND"] },
+							"state": {
+								"$ref": "#/components/schemas/OAuthStateValue",
+								"readOnly": true,
+								"x-sensitive": "one-time-oauth-state"
+							},
+							"expiresAt": { "$ref": "#/components/schemas/UtcDateTime" }
+						},
+						"required": ["provider", "purpose", "state", "expiresAt"],
+						"additionalProperties": false
+					}
+				]
+			},
+			"RegisterPhoneWechatRequest": {
+				"type": "object",
+				"description": "唯一注册契约：已验证手机 challenge 与微信临时 code/state 必须同时提交。",
+				"properties": {
+					"phoneChallengeId": {
+						"$ref": "#/components/schemas/ContractUuid",
+						"writeOnly": true
+					},
+					"phoneOtpCode": { "$ref": "#/components/schemas/OtpCode" },
+					"wechatOAuthState": {
+						"$ref": "#/components/schemas/OAuthStateValue",
+						"writeOnly": true,
+						"x-sensitive": "one-time-oauth-state"
+					},
+					"wechatAuthorizationCode": {
+						"$ref": "#/components/schemas/ThirdPartyAuthorizationCode"
+					},
+					"device": { "$ref": "#/components/schemas/AuthDeviceContext" }
+				},
+				"required": [
+					"phoneChallengeId",
+					"phoneOtpCode",
+					"wechatOAuthState",
+					"wechatAuthorizationCode",
+					"device"
+				],
+				"additionalProperties": false
+			},
+			"LoginRequest": {
+				"oneOf": [
+					{
+						"type": "object",
+						"properties": {
+							"challengeId": {
+								"$ref": "#/components/schemas/ContractUuid",
+								"writeOnly": true
+							},
+							"otpCode": { "$ref": "#/components/schemas/OtpCode" },
+							"device": { "$ref": "#/components/schemas/AuthDeviceContext" },
+							"method": { "type": "string", "const": "PHONE" }
+						},
+						"required": ["challengeId", "otpCode", "device", "method"],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"description": "邮箱必须已绑定到现有账号。",
+						"properties": {
+							"challengeId": {
+								"$ref": "#/components/schemas/ContractUuid",
+								"writeOnly": true
+							},
+							"otpCode": { "$ref": "#/components/schemas/OtpCode" },
+							"device": { "$ref": "#/components/schemas/AuthDeviceContext" },
+							"method": { "type": "string", "const": "EMAIL" }
+						},
+						"required": ["challengeId", "otpCode", "device", "method"],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"oauthState": {
+								"$ref": "#/components/schemas/OAuthStateValue",
+								"writeOnly": true,
+								"x-sensitive": "one-time-oauth-state"
+							},
+							"authorizationCode": {
+								"$ref": "#/components/schemas/ThirdPartyAuthorizationCode"
+							},
+							"method": { "type": "string", "const": "WECHAT" },
+							"device": { "$ref": "#/components/schemas/AuthDeviceContext" }
+						},
+						"required": ["oauthState", "authorizationCode", "method", "device"],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"description": "QQ 必须已绑定到现有账号；平台材料由服务端再验证。",
+						"properties": {
+							"oauthState": {
+								"$ref": "#/components/schemas/OAuthStateValue",
+								"writeOnly": true,
+								"x-sensitive": "one-time-oauth-state"
+							},
+							"accessToken": {
+								"$ref": "#/components/schemas/ThirdPartyAccessToken"
+							},
+							"method": { "type": "string", "const": "QQ" },
+							"device": { "$ref": "#/components/schemas/AuthDeviceContext" }
+						},
+						"required": ["oauthState", "accessToken", "method", "device"],
+						"additionalProperties": false
+					}
+				]
+			},
+			"AuthTokenResponse": {
+				"type": "object",
+				"description": "只返回 App 内部 UUID 和 App 自有不透明令牌；不含第三方 code/token/openid。",
+				"properties": {
+					"userId": {
+						"$ref": "#/components/schemas/ContractUuid",
+						"readOnly": true
+					},
+					"sessionId": {
+						"$ref": "#/components/schemas/ContractUuid",
+						"readOnly": true
+					},
+					"tokenType": { "type": "string", "const": "Bearer" },
+					"accessToken": { "$ref": "#/components/schemas/AppAccessToken" },
+					"accessTokenExpiresAt": {
+						"$ref": "#/components/schemas/UtcDateTime"
+					},
+					"refreshToken": { "$ref": "#/components/schemas/AppRefreshToken" },
+					"refreshTokenExpiresAt": {
+						"$ref": "#/components/schemas/UtcDateTime"
+					}
+				},
+				"required": [
+					"userId",
+					"sessionId",
+					"tokenType",
+					"accessToken",
+					"accessTokenExpiresAt",
+					"refreshToken",
+					"refreshTokenExpiresAt"
+				],
+				"additionalProperties": false
+			},
+			"RefreshRequest": {
+				"type": "object",
+				"properties": {
+					"refreshToken": {
+						"$ref": "#/components/schemas/AppRefreshToken",
+						"writeOnly": true
+					},
+					"installationId": {
+						"$ref": "#/components/schemas/ContractUuid",
+						"writeOnly": true,
+						"x-sensitive": "device-installation-id"
+					}
+				},
+				"required": ["refreshToken", "installationId"],
+				"additionalProperties": false
+			},
+			"LogoutRequest": {
+				"type": "object",
+				"properties": {},
+				"additionalProperties": false
+			},
+			"LogoutResponse": {
+				"type": "object",
+				"properties": {
+					"sessionId": { "$ref": "#/components/schemas/ContractUuid" },
+					"loggedOutAt": { "$ref": "#/components/schemas/UtcDateTime" }
+				},
+				"required": ["sessionId", "loggedOutAt"],
+				"additionalProperties": false
+			},
+			"IdentityBinding": {
+				"oneOf": [
+					{
+						"type": "object",
+						"properties": {
+							"bindingId": { "$ref": "#/components/schemas/ContractUuid" },
+							"type": { "type": "string", "const": "PHONE" },
+							"maskedValue": {
+								"type": "string",
+								"pattern": "^\\+861\\d{2}\\*{4}\\d{4}$"
+							},
+							"boundAt": { "$ref": "#/components/schemas/UtcDateTime" },
+							"primary": { "type": "boolean" },
+							"canUnbind": { "type": "boolean" }
+						},
+						"required": [
+							"bindingId",
+							"type",
+							"maskedValue",
+							"boundAt",
+							"primary",
+							"canUnbind"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"bindingId": { "$ref": "#/components/schemas/ContractUuid" },
+							"type": { "type": "string", "const": "WECHAT" },
+							"maskedValue": { "type": "string", "const": "微信账号" },
+							"boundAt": { "$ref": "#/components/schemas/UtcDateTime" },
+							"primary": { "type": "boolean" },
+							"canUnbind": { "type": "boolean" }
+						},
+						"required": [
+							"bindingId",
+							"type",
+							"maskedValue",
+							"boundAt",
+							"primary",
+							"canUnbind"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"bindingId": { "$ref": "#/components/schemas/ContractUuid" },
+							"type": { "type": "string", "const": "EMAIL" },
+							"maskedValue": {
+								"type": "string",
+								"minLength": 5,
+								"maxLength": 254,
+								"pattern": "^[^@\\s]*\\*+[^@\\s]*@[A-Za-z0-9.-]{1,190}$"
+							},
+							"boundAt": { "$ref": "#/components/schemas/UtcDateTime" },
+							"primary": { "type": "boolean" },
+							"canUnbind": { "type": "boolean" }
+						},
+						"required": [
+							"bindingId",
+							"type",
+							"maskedValue",
+							"boundAt",
+							"primary",
+							"canUnbind"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"bindingId": { "$ref": "#/components/schemas/ContractUuid" },
+							"type": { "type": "string", "const": "QQ" },
+							"maskedValue": { "type": "string", "const": "QQ 账号" },
+							"boundAt": { "$ref": "#/components/schemas/UtcDateTime" },
+							"primary": { "type": "boolean" },
+							"canUnbind": { "type": "boolean" }
+						},
+						"required": [
+							"bindingId",
+							"type",
+							"maskedValue",
+							"boundAt",
+							"primary",
+							"canUnbind"
+						],
+						"additionalProperties": false
+					}
+				]
+			},
+			"IdentityBindingsResponse": {
+				"type": "object",
+				"properties": {
+					"items": {
+						"type": "array",
+						"maxItems": 8,
+						"items": { "$ref": "#/components/schemas/IdentityBinding" }
+					}
+				},
+				"required": ["items"],
+				"additionalProperties": false
+			},
+			"BindIdentityRequest": {
+				"oneOf": [
+					{
+						"type": "object",
+						"properties": {
+							"type": { "type": "string", "const": "EMAIL" },
+							"challengeId": {
+								"$ref": "#/components/schemas/ContractUuid",
+								"writeOnly": true
+							},
+							"otpCode": { "$ref": "#/components/schemas/OtpCode" }
+						},
+						"required": ["type", "challengeId", "otpCode"],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"oauthState": {
+								"$ref": "#/components/schemas/OAuthStateValue",
+								"writeOnly": true,
+								"x-sensitive": "one-time-oauth-state"
+							},
+							"accessToken": {
+								"$ref": "#/components/schemas/ThirdPartyAccessToken"
+							},
+							"type": { "type": "string", "const": "QQ" }
+						},
+						"required": ["oauthState", "accessToken", "type"],
+						"additionalProperties": false
+					}
+				]
+			},
+			"BindIdentityResponse": {
+				"type": "object",
+				"properties": {
+					"binding": { "$ref": "#/components/schemas/IdentityBinding" }
+				},
+				"required": ["binding"],
+				"additionalProperties": false
+			},
+			"BindingIdPath": {
+				"type": "object",
+				"properties": {
+					"bindingId": { "$ref": "#/components/schemas/ContractUuid" }
+				},
+				"required": ["bindingId"],
+				"additionalProperties": false
+			},
+			"UnbindIdentityResponse": {
+				"type": "object",
+				"properties": {
+					"bindingId": { "$ref": "#/components/schemas/ContractUuid" },
+					"unboundAt": { "$ref": "#/components/schemas/UtcDateTime" }
+				},
+				"required": ["bindingId", "unboundAt"],
+				"additionalProperties": false
+			},
+			"SessionSummary": {
+				"type": "object",
+				"properties": {
+					"sessionId": { "$ref": "#/components/schemas/ContractUuid" },
+					"deviceLabel": { "type": "string", "minLength": 1, "maxLength": 80 },
+					"platform": { "type": "string", "const": "ANDROID" },
+					"current": { "type": "boolean" },
+					"createdAt": { "$ref": "#/components/schemas/UtcDateTime" },
+					"lastActiveAt": { "$ref": "#/components/schemas/UtcDateTime" },
+					"expiresAt": { "$ref": "#/components/schemas/UtcDateTime" }
+				},
+				"required": [
+					"sessionId",
+					"deviceLabel",
+					"platform",
+					"current",
+					"createdAt",
+					"lastActiveAt",
+					"expiresAt"
+				],
+				"additionalProperties": false
+			},
+			"SessionsResponse": {
+				"type": "object",
+				"properties": {
+					"items": {
+						"type": "array",
+						"maxItems": 50,
+						"items": { "$ref": "#/components/schemas/SessionSummary" }
+					}
+				},
+				"required": ["items"],
+				"additionalProperties": false
+			},
+			"SessionIdPath": {
+				"type": "object",
+				"properties": {
+					"sessionId": { "$ref": "#/components/schemas/ContractUuid" }
+				},
+				"required": ["sessionId"],
+				"additionalProperties": false
+			},
+			"RevokeSessionResponse": {
+				"type": "object",
+				"properties": {
+					"sessionId": { "$ref": "#/components/schemas/ContractUuid" },
+					"revokedAt": { "$ref": "#/components/schemas/UtcDateTime" }
+				},
+				"required": ["sessionId", "revokedAt"],
+				"additionalProperties": false
+			},
+			"AccountExportIdPath": {
+				"type": "object",
+				"properties": {
+					"exportId": { "$ref": "#/components/schemas/ContractUuid" }
+				},
+				"required": ["exportId"],
+				"additionalProperties": false
+			},
+			"AccountExportRequest": {
+				"type": "object",
+				"properties": {
+					"format": { "default": "JSON", "type": "string", "const": "JSON" },
+					"includeBehaviorHistory": { "default": true, "type": "boolean" }
+				},
+				"additionalProperties": false
+			},
+			"AccountExportResponse": {
+				"type": "object",
+				"properties": {
+					"exportId": { "$ref": "#/components/schemas/ContractUuid" },
+					"status": { "type": "string", "const": "QUEUED" },
+					"requestedAt": { "$ref": "#/components/schemas/UtcDateTime" },
+					"expiresAt": { "$ref": "#/components/schemas/UtcDateTime" },
+					"includeBehaviorHistory": { "type": "boolean" }
+				},
+				"required": [
+					"exportId",
+					"status",
+					"requestedAt",
+					"expiresAt",
+					"includeBehaviorHistory"
+				],
+				"additionalProperties": false
+			},
+			"AccountExportStatusResponse": {
+				"oneOf": [
+					{
+						"type": "object",
+						"properties": {
+							"exportId": { "$ref": "#/components/schemas/ContractUuid" },
+							"status": {
+								"type": "string",
+								"enum": ["QUEUED", "PROCESSING"]
+							},
+							"requestedAt": { "$ref": "#/components/schemas/UtcDateTime" },
+							"expiresAt": { "$ref": "#/components/schemas/UtcDateTime" },
+							"includeBehaviorHistory": { "type": "boolean" },
+							"downloadAvailable": { "type": "boolean", "const": false }
+						},
+						"required": [
+							"exportId",
+							"requestedAt",
+							"expiresAt",
+							"includeBehaviorHistory",
+							"status",
+							"downloadAvailable"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"exportId": { "$ref": "#/components/schemas/ContractUuid" },
+							"status": { "type": "string", "const": "READY" },
+							"requestedAt": { "$ref": "#/components/schemas/UtcDateTime" },
+							"readyAt": { "$ref": "#/components/schemas/UtcDateTime" },
+							"expiresAt": { "$ref": "#/components/schemas/UtcDateTime" },
+							"includeBehaviorHistory": { "type": "boolean" },
+							"sizeBytes": {
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 10485760
+							},
+							"sha256": {
+								"type": "string",
+								"pattern": "^[0-9a-f]{64}$"
+							},
+							"contentType": { "type": "string", "const": "application/json" },
+							"downloadAvailable": { "type": "boolean", "const": true }
+						},
+						"required": [
+							"exportId",
+							"requestedAt",
+							"expiresAt",
+							"includeBehaviorHistory",
+							"status",
+							"readyAt",
+							"sizeBytes",
+							"sha256",
+							"contentType",
+							"downloadAvailable"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"exportId": { "$ref": "#/components/schemas/ContractUuid" },
+							"status": { "type": "string", "const": "FAILED" },
+							"requestedAt": { "$ref": "#/components/schemas/UtcDateTime" },
+							"expiresAt": { "$ref": "#/components/schemas/UtcDateTime" },
+							"includeBehaviorHistory": { "type": "boolean" },
+							"failureCode": { "type": "string", "const": "GENERATION_FAILED" },
+							"downloadAvailable": { "type": "boolean", "const": false }
+						},
+						"required": [
+							"exportId",
+							"requestedAt",
+							"expiresAt",
+							"includeBehaviorHistory",
+							"status",
+							"failureCode",
+							"downloadAvailable"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"exportId": { "$ref": "#/components/schemas/ContractUuid" },
+							"status": { "type": "string", "const": "EXPIRED" },
+							"requestedAt": { "$ref": "#/components/schemas/UtcDateTime" },
+							"expiresAt": { "$ref": "#/components/schemas/UtcDateTime" },
+							"includeBehaviorHistory": { "type": "boolean" },
+							"downloadAvailable": { "type": "boolean", "const": false }
+						},
+						"required": [
+							"exportId",
+							"requestedAt",
+							"expiresAt",
+							"includeBehaviorHistory",
+							"status",
+							"downloadAvailable"
+						],
+						"additionalProperties": false
+					}
+				]
+			},
+			"LatestAccountExportResponse": {
+				"type": "object",
+				"properties": {
+					"item": {
+						"anyOf": [
+							{ "$ref": "#/components/schemas/AccountExportStatusResponse" },
+							{ "type": "null" }
+						]
+					}
+				},
+				"required": ["item"],
+				"additionalProperties": false
+			},
+			"DeleteAccountRequest": {
+				"type": "object",
+				"properties": {
+					"confirmation": { "type": "string", "const": "DELETE_MY_ACCOUNT" }
+				},
+				"required": ["confirmation"],
+				"additionalProperties": false
+			},
+			"DeleteAccountResponse": {
+				"type": "object",
+				"properties": {
+					"deletionId": { "$ref": "#/components/schemas/ContractUuid" },
+					"userId": { "$ref": "#/components/schemas/ContractUuid" },
+					"status": { "type": "string", "const": "DEACTIVATED" },
+					"invalidatedAt": { "$ref": "#/components/schemas/UtcDateTime" },
+					"backupDeletionDeadline": {
+						"$ref": "#/components/schemas/UtcDateTime"
+					}
+				},
+				"required": [
+					"deletionId",
+					"userId",
+					"status",
+					"invalidatedAt",
+					"backupDeletionDeadline"
+				],
+				"additionalProperties": false
+			},
+			"HealthResponse": {
+				"type": "object",
+				"properties": {
+					"status": {
+						"const": "ok"
+					},
+					"timestamp": {
+						"type": "string",
+						"format": "date-time"
+					}
+				},
+				"required": ["status", "timestamp"],
+				"additionalProperties": false
+			},
+			"ReadinessResponse": {
+				"type": "object",
+				"properties": {
+					"status": {
+						"const": "ready"
+					},
+					"timestamp": {
+						"type": "string",
+						"format": "date-time"
+					}
+				},
+				"required": ["status", "timestamp"],
+				"additionalProperties": false
+			},
+			"ServiceNotReadyError": {
+				"type": "object",
+				"properties": {
+					"requestId": {
+						"$ref": "#/components/schemas/ErrorRequestId"
+					},
+					"code": {
+						"const": "SERVICE_NOT_READY"
+					},
+					"message": {
+						"const": "服务尚未就绪，请稍后重试"
+					}
+				},
+				"required": ["requestId", "code", "message"],
+				"additionalProperties": false
+			},
+			"RecommendationEventAccepted": {
+				"type": "object",
+				"properties": {
+					"eventId": {
+						"$ref": "#/components/schemas/RandomUuid"
+					},
+					"accepted": {
+						"const": true
+					}
+				},
+				"required": ["eventId", "accepted"],
+				"additionalProperties": false
+			},
+			"ValidationIssue": {
+				"type": "object",
+				"properties": {
+					"path": {
+						"type": "string"
+					},
+					"message": {
+						"type": "string"
+					}
+				},
+				"required": ["path", "message"],
+				"additionalProperties": false
+			},
+			"InvalidRequestError": {
+				"type": "object",
+				"properties": {
+					"requestId": {
+						"$ref": "#/components/schemas/ErrorRequestId"
+					},
+					"code": {
+						"const": "INVALID_REQUEST"
+					},
+					"message": {
+						"const": "请求参数不符合接口约定"
+					},
+					"issues": {
+						"type": "array",
+						"minItems": 1,
+						"items": {
+							"$ref": "#/components/schemas/ValidationIssue"
+						}
+					}
+				},
+				"required": ["requestId", "code", "message", "issues"],
+				"additionalProperties": false
+			},
+			"InvalidJsonError": {
+				"type": "object",
+				"properties": {
+					"requestId": {
+						"$ref": "#/components/schemas/ErrorRequestId"
+					},
+					"code": {
+						"const": "INVALID_JSON"
+					},
+					"message": {
+						"const": "请求体不是有效的 JSON"
+					}
+				},
+				"required": ["requestId", "code", "message"],
+				"additionalProperties": false
+			},
+			"PayloadTooLargeError": {
+				"type": "object",
+				"properties": {
+					"requestId": {
+						"$ref": "#/components/schemas/ErrorRequestId"
+					},
+					"code": {
+						"const": "PAYLOAD_TOO_LARGE"
+					},
+					"message": {
+						"const": "请求体不能超过 100 KiB"
+					}
+				},
+				"required": ["requestId", "code", "message"],
+				"additionalProperties": false
+			},
+			"UnsupportedMediaTypeError": {
+				"type": "object",
+				"properties": {
+					"requestId": {
+						"$ref": "#/components/schemas/ErrorRequestId"
+					},
+					"code": {
+						"const": "UNSUPPORTED_MEDIA_TYPE"
+					},
+					"message": {
+						"type": "string",
+						"enum": [
+							"Content-Type 必须为 application/json",
+							"请求体编码不受支持"
+						]
+					}
+				},
+				"required": ["requestId", "code", "message"],
+				"additionalProperties": false
+			},
+			"InvalidEventSessionError": {
+				"type": "object",
+				"properties": {
+					"requestId": {
+						"$ref": "#/components/schemas/ErrorRequestId"
+					},
+					"code": {
+						"const": "INVALID_EVENT_SESSION"
+					},
+					"message": {
+						"const": "推荐事件已过期、重复或不属于本次推荐"
+					}
+				},
+				"required": ["requestId", "code", "message"],
+				"additionalProperties": false
+			},
+			"RateLimitError": {
+				"type": "object",
+				"properties": {
+					"requestId": {
+						"$ref": "#/components/schemas/ErrorRequestId"
+					},
+					"code": {
+						"const": "RATE_LIMITED"
+					},
+					"message": {
+						"const": "请求过于频繁，请稍后重试"
+					},
+					"retryAfterSeconds": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 60
+					}
+				},
+				"required": ["requestId", "code", "message", "retryAfterSeconds"],
+				"additionalProperties": false
+			},
+			"PlaceProviderUnavailableError": {
+				"type": "object",
+				"properties": {
+					"requestId": {
+						"$ref": "#/components/schemas/ErrorRequestId"
+					},
+					"code": {
+						"const": "PLACE_PROVIDER_UNAVAILABLE"
+					},
+					"message": {
+						"const": "餐厅数据服务暂时不可用，请稍后重试"
+					}
+				},
+				"required": ["requestId", "code", "message"],
+				"additionalProperties": false
+			},
+			"LocationProviderUnavailableError": {
+				"type": "object",
+				"properties": {
+					"requestId": {
+						"$ref": "#/components/schemas/ErrorRequestId"
+					},
+					"code": {
+						"const": "LOCATION_PROVIDER_UNAVAILABLE"
+					},
+					"message": {
+						"const": "地点数据服务暂时不可用，请稍后重试"
+					}
+				},
+				"required": ["requestId", "code", "message"],
+				"additionalProperties": false
+			},
+			"PlaceSearchProviderUnavailableError": {
+				"type": "object",
+				"properties": {
+					"requestId": {
+						"$ref": "#/components/schemas/ErrorRequestId"
+					},
+					"code": {
+						"const": "PLACE_SEARCH_PROVIDER_UNAVAILABLE"
+					},
+					"message": {
+						"const": "餐厅搜索服务暂时不可用，请稍后重试"
+					}
+				},
+				"required": ["requestId", "code", "message"],
+				"additionalProperties": false
+			},
+			"AuthUnauthorizedError": {
+				"type": "object",
+				"properties": {
+					"requestId": { "$ref": "#/components/schemas/ErrorRequestId" },
+					"code": {
+						"type": "string",
+						"enum": [
+							"AUTHENTICATION_REQUIRED",
+							"INVALID_CREDENTIALS",
+							"IDENTITY_NOT_BOUND",
+							"SESSION_EXPIRED",
+							"TOKEN_REPLAY_DETECTED"
+						]
+					},
+					"message": { "const": "身份验证失败或会话已失效" }
+				},
+				"required": ["requestId", "code", "message"],
+				"additionalProperties": false
+			},
+			"AuthForbiddenError": {
+				"type": "object",
+				"properties": {
+					"requestId": { "$ref": "#/components/schemas/ErrorRequestId" },
+					"code": {
+						"type": "string",
+						"enum": [
+							"ACTION_NOT_ALLOWED",
+							"REAUTH_REQUIRED",
+							"RISK_CHECK_FAILED"
+						]
+					},
+					"message": { "const": "当前账号或设备不允许执行此操作" }
+				},
+				"required": ["requestId", "code", "message"],
+				"additionalProperties": false
+			},
+			"AuthConflictError": {
+				"type": "object",
+				"description": "冲突响应不包含其他账号信息。",
+				"properties": {
+					"requestId": { "$ref": "#/components/schemas/ErrorRequestId" },
+					"code": {
+						"type": "string",
+						"enum": [
+							"IDENTITY_ALREADY_BOUND",
+							"IDENTITY_BINDING_CONFLICT",
+							"CHALLENGE_ALREADY_CONSUMED",
+							"SESSION_CONFLICT",
+							"ACCOUNT_DELETION_PENDING"
+						]
+					},
+					"message": { "const": "身份、验证流程或会话状态冲突" }
+				},
+				"required": ["requestId", "code", "message"],
+				"additionalProperties": false
+			},
+			"AuthUnavailableError": {
+				"type": "object",
+				"properties": {
+					"requestId": { "$ref": "#/components/schemas/ErrorRequestId" },
+					"code": { "const": "AUTH_CHANNEL_UNAVAILABLE" },
+					"message": { "const": "该账号能力暂未开放或暂时不可用" }
+				},
+				"required": ["requestId", "code", "message"],
+				"additionalProperties": false
+			},
+			"AccountExportNotFoundError": {
+				"type": "object",
+				"properties": {
+					"requestId": { "$ref": "#/components/schemas/ErrorRequestId" },
+					"code": { "type": "string", "const": "EXPORT_NOT_FOUND" },
+					"message": { "type": "string", "const": "数据导出记录不存在" }
+				},
+				"required": ["requestId", "code", "message"],
+				"additionalProperties": false
+			},
+			"AccountExportNotReadyError": {
+				"type": "object",
+				"properties": {
+					"requestId": { "$ref": "#/components/schemas/ErrorRequestId" },
+					"code": { "type": "string", "const": "EXPORT_NOT_READY" },
+					"message": { "type": "string", "const": "数据导出尚未可下载" }
+				},
+				"required": ["requestId", "code", "message"],
+				"additionalProperties": false
+			},
+			"AccountExportExpiredError": {
+				"type": "object",
+				"properties": {
+					"requestId": { "$ref": "#/components/schemas/ErrorRequestId" },
+					"code": { "type": "string", "const": "EXPORT_EXPIRED" },
+					"message": { "type": "string", "const": "数据导出文件已过期" }
+				},
+				"required": ["requestId", "code", "message"],
+				"additionalProperties": false
+			},
+			"PersistenceForbiddenError": {
+				"type": "object",
+				"properties": {
+					"requestId": { "$ref": "#/components/schemas/ErrorRequestId" },
+					"code": { "const": "PERSISTENCE_CAPABILITY_DISABLED" },
+					"message": { "const": "当前数据授权不允许保存或读取餐厅引用" }
+				},
+				"required": ["requestId", "code", "message"],
+				"additionalProperties": false
+			},
+			"PersistenceConflictError": {
+				"type": "object",
+				"properties": {
+					"requestId": { "$ref": "#/components/schemas/ErrorRequestId" },
+					"code": {
+						"type": "string",
+						"enum": ["IDEMPOTENCY_KEY_REUSED", "RESOURCE_STATE_CONFLICT"]
+					},
+					"message": { "const": "幂等键已用于不同请求或资源状态冲突" }
+				},
+				"required": ["requestId", "code", "message"],
+				"additionalProperties": false
+			},
+			"ResultReferenceExpiredError": {
+				"type": "object",
+				"properties": {
+					"requestId": { "$ref": "#/components/schemas/ErrorRequestId" },
+					"code": { "const": "RESULT_REFERENCE_EXPIRED" },
+					"message": { "const": "该推荐结果引用已失效，请重新获取推荐" }
+				},
+				"required": ["requestId", "code", "message"],
+				"additionalProperties": false
+			},
+			"PersistenceResourceNotFoundError": {
+				"type": "object",
+				"properties": {
+					"requestId": { "$ref": "#/components/schemas/ErrorRequestId" },
+					"code": { "const": "RESOURCE_NOT_FOUND" },
+					"message": { "const": "资源不存在或不属于当前账号" }
+				},
+				"required": ["requestId", "code", "message"],
+				"additionalProperties": false
+			},
+			"PersistenceUnavailableError": {
+				"type": "object",
+				"properties": {
+					"requestId": { "$ref": "#/components/schemas/ErrorRequestId" },
+					"code": { "const": "PERSISTENCE_UNAVAILABLE" },
+					"message": { "const": "收藏、历史或私有反馈服务暂时不可用" }
+				},
+				"required": ["requestId", "code", "message"],
+				"additionalProperties": false
+			},
+			"AdminOpaqueToken": {
+				"type": "string",
+				"minLength": 43,
+				"maxLength": 43,
+				"pattern": "^[A-Za-z0-9_-]{43}$"
+			},
+			"AdminPermissionCode": {
+				"type": "string",
+				"enum": [
+					"AUDIT_READ",
+					"OPERATIONS_READ",
+					"FEEDBACK_MANAGE",
+					"PLACE_DATA_MANAGE",
+					"ALGORITHM_CONFIG_READ",
+					"ALGORITHM_CONFIG_WRITE",
+					"SECURITY_ADMIN_READ",
+					"SECURITY_ADMIN_WRITE",
+					"CREDENTIAL_SELF_MANAGE"
+				]
+			},
+			"AdminAuthenticatorTransport": {
+				"type": "string",
+				"enum": [
+					"ble",
+					"cable",
+					"hybrid",
+					"internal",
+					"nfc",
+					"smart-card",
+					"usb"
+				]
+			},
+			"AdminWebAuthnCredentialDescriptor": {
+				"type": "object",
+				"properties": {
+					"id": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 2048,
+						"pattern": "^[A-Za-z0-9_-]+$",
+						"x-sensitive": "webauthn-credential-id"
+					},
+					"type": { "type": "string", "const": "public-key" },
+					"transports": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/AdminAuthenticatorTransport"
+						},
+						"maxItems": 7
+					}
+				},
+				"required": ["id", "type"],
+				"additionalProperties": false
+			},
+			"AdminLoginOptionsRequest": {
+				"type": "object",
+				"properties": {
+					"login": {
+						"type": "string",
+						"minLength": 3,
+						"maxLength": 128,
+						"pattern": "^[\\p{L}\\p{N}._@+-]+$",
+						"writeOnly": true,
+						"x-sensitive": "admin-login"
+					}
+				},
+				"required": ["login"],
+				"additionalProperties": false
+			},
+			"AdminAuthenticationOptions": {
+				"type": "object",
+				"properties": {
+					"challenge": {
+						"type": "string",
+						"minLength": 32,
+						"maxLength": 128,
+						"pattern": "^[A-Za-z0-9_-]+$",
+						"x-sensitive": "webauthn-challenge"
+					},
+					"timeout": { "type": "integer", "minimum": 1000, "maximum": 300000 },
+					"rpId": { "type": "string", "minLength": 1, "maxLength": 253 },
+					"allowCredentials": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/AdminWebAuthnCredentialDescriptor"
+						},
+						"minItems": 0,
+						"maxItems": 0,
+						"description": "固定为空；只允许 discoverable credential，防止登录名枚举。"
+					},
+					"userVerification": { "type": "string", "const": "required" }
+				},
+				"required": [
+					"challenge",
+					"timeout",
+					"rpId",
+					"allowCredentials",
+					"userVerification"
+				],
+				"additionalProperties": false
+			},
+			"AdminLoginOptionsResponse": {
+				"type": "object",
+				"properties": {
+					"ceremonyId": { "$ref": "#/components/schemas/ContractUuid" },
+					"expiresAt": { "$ref": "#/components/schemas/UtcDateTime" },
+					"publicKey": {
+						"$ref": "#/components/schemas/AdminAuthenticationOptions"
+					}
+				},
+				"required": ["ceremonyId", "expiresAt", "publicKey"],
+				"additionalProperties": false
+			},
+			"AdminAuthenticationResponseJSON": {
+				"type": "object",
+				"properties": {
+					"id": { "$ref": "#/components/schemas/AdminOpaqueCredentialId" },
+					"rawId": { "$ref": "#/components/schemas/AdminOpaqueCredentialId" },
+					"response": {
+						"type": "object",
+						"properties": {
+							"clientDataJSON": {
+								"$ref": "#/components/schemas/AdminWebAuthnClientData"
+							},
+							"authenticatorData": {
+								"$ref": "#/components/schemas/AdminWebAuthnAuthenticatorData"
+							},
+							"signature": {
+								"$ref": "#/components/schemas/AdminWebAuthnSignature"
+							},
+							"userHandle": {
+								"oneOf": [
+									{ "$ref": "#/components/schemas/AdminOpaqueCredentialId" },
+									{ "type": "null" }
+								]
+							}
+						},
+						"required": [
+							"clientDataJSON",
+							"authenticatorData",
+							"signature",
+							"userHandle"
+						],
+						"additionalProperties": false
+					},
+					"type": { "const": "public-key" },
+					"clientExtensionResults": {
+						"type": "object",
+						"additionalProperties": true
+					},
+					"authenticatorAttachment": {
+						"type": "string",
+						"enum": ["cross-platform", "platform"]
+					}
+				},
+				"required": [
+					"id",
+					"rawId",
+					"response",
+					"type",
+					"clientExtensionResults"
+				],
+				"additionalProperties": false
+			},
+			"AdminOpaqueCredentialId": {
+				"type": "string",
+				"minLength": 1,
+				"maxLength": 2048,
+				"pattern": "^[A-Za-z0-9_-]+$",
+				"writeOnly": true,
+				"x-sensitive": "webauthn-credential-id"
+			},
+			"AdminWebAuthnClientData": {
+				"type": "string",
+				"minLength": 1,
+				"maxLength": 8192,
+				"pattern": "^[A-Za-z0-9_-]+$",
+				"writeOnly": true,
+				"x-sensitive": "webauthn-client-data"
+			},
+			"AdminWebAuthnAuthenticatorData": {
+				"type": "string",
+				"minLength": 1,
+				"maxLength": 16384,
+				"pattern": "^[A-Za-z0-9_-]+$",
+				"writeOnly": true,
+				"x-sensitive": "webauthn-authenticator-data"
+			},
+			"AdminWebAuthnSignature": {
+				"type": "string",
+				"minLength": 1,
+				"maxLength": 16384,
+				"pattern": "^[A-Za-z0-9_-]+$",
+				"writeOnly": true,
+				"x-sensitive": "webauthn-signature"
+			},
+			"AdminLoginVerifyRequest": {
+				"type": "object",
+				"properties": {
+					"ceremonyId": { "$ref": "#/components/schemas/ContractUuid" },
+					"response": {
+						"$ref": "#/components/schemas/AdminAuthenticationResponseJSON"
+					}
+				},
+				"required": ["ceremonyId", "response"],
+				"additionalProperties": false
+			},
+			"AdminLoginVerifyResponse": {
+				"type": "object",
+				"properties": {
+					"adminToken": {
+						"$ref": "#/components/schemas/AdminOpaqueToken",
+						"x-sensitive": "admin-session-token",
+						"description": "只返回一次；Next BFF 必须立即放入 Secure HttpOnly SameSite=Strict cookie。"
+					},
+					"tokenType": { "type": "string", "const": "Bearer" },
+					"absoluteExpiresAt": { "$ref": "#/components/schemas/UtcDateTime" },
+					"idleTimeoutSeconds": { "type": "number", "const": 900 },
+					"permissions": {
+						"type": "array",
+						"items": { "$ref": "#/components/schemas/AdminPermissionCode" },
+						"maxItems": 9
+					}
+				},
+				"required": [
+					"adminToken",
+					"tokenType",
+					"absoluteExpiresAt",
+					"idleTimeoutSeconds",
+					"permissions"
+				],
+				"additionalProperties": false
+			},
+			"AdminCurrentSessionResponse": {
+				"type": "object",
+				"properties": {
+					"absoluteExpiresAt": { "$ref": "#/components/schemas/UtcDateTime" },
+					"idleTimeoutSeconds": { "type": "number", "const": 900 },
+					"permissions": {
+						"type": "array",
+						"items": { "$ref": "#/components/schemas/AdminPermissionCode" },
+						"maxItems": 9
+					}
+				},
+				"required": ["absoluteExpiresAt", "idleTimeoutSeconds", "permissions"],
+				"additionalProperties": false
+			},
+			"AdminEmptyMutationRequest": {
+				"type": "object",
+				"properties": {},
+				"additionalProperties": false
+			},
+			"AdminRegistrationOptions": {
+				"type": "object",
+				"properties": {
+					"rp": {
+						"type": "object",
+						"properties": {
+							"id": { "type": "string", "minLength": 1, "maxLength": 253 },
+							"name": { "type": "string", "minLength": 1, "maxLength": 80 }
+						},
+						"required": ["id", "name"],
+						"additionalProperties": false
+					},
+					"user": {
+						"type": "object",
+						"properties": {
+							"id": {
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 128,
+								"pattern": "^[A-Za-z0-9_-]+$"
+							},
+							"name": { "type": "string", "minLength": 1, "maxLength": 80 },
+							"displayName": {
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 80
+							}
+						},
+						"required": ["id", "name", "displayName"],
+						"additionalProperties": false
+					},
+					"challenge": {
+						"type": "string",
+						"minLength": 32,
+						"maxLength": 128,
+						"pattern": "^[A-Za-z0-9_-]+$",
+						"x-sensitive": "webauthn-challenge"
+					},
+					"pubKeyCredParams": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"alg": { "type": "integer" },
+								"type": { "const": "public-key" }
+							},
+							"required": ["alg", "type"],
+							"additionalProperties": false
+						},
+						"minItems": 1,
+						"maxItems": 20
+					},
+					"timeout": { "type": "integer", "minimum": 1000, "maximum": 300000 },
+					"excludeCredentials": {
+						"type": "array",
+						"items": {
+							"$ref": "#/components/schemas/AdminWebAuthnCredentialDescriptor"
+						},
+						"maxItems": 20
+					},
+					"authenticatorSelection": {
+						"type": "object",
+						"properties": {
+							"residentKey": { "const": "required" },
+							"userVerification": { "const": "required" }
+						},
+						"required": ["residentKey", "userVerification"],
+						"additionalProperties": false
+					},
+					"attestation": { "const": "none" }
+				},
+				"required": [
+					"rp",
+					"user",
+					"challenge",
+					"pubKeyCredParams",
+					"timeout",
+					"excludeCredentials",
+					"authenticatorSelection",
+					"attestation"
+				],
+				"additionalProperties": false
+			},
+			"AdminCredentialEnrollOptionsResponse": {
+				"type": "object",
+				"properties": {
+					"ceremonyId": { "$ref": "#/components/schemas/ContractUuid" },
+					"expiresAt": { "$ref": "#/components/schemas/UtcDateTime" },
+					"publicKey": {
+						"$ref": "#/components/schemas/AdminRegistrationOptions"
+					}
+				},
+				"required": ["ceremonyId", "expiresAt", "publicKey"],
+				"additionalProperties": false
+			},
+			"AdminRegistrationResponseJSON": {
+				"type": "object",
+				"properties": {
+					"id": { "$ref": "#/components/schemas/AdminOpaqueCredentialId" },
+					"rawId": { "$ref": "#/components/schemas/AdminOpaqueCredentialId" },
+					"response": {
+						"type": "object",
+						"properties": {
+							"clientDataJSON": {
+								"$ref": "#/components/schemas/AdminWebAuthnClientData"
+							},
+							"attestationObject": {
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 90000,
+								"pattern": "^[A-Za-z0-9_-]+$",
+								"writeOnly": true,
+								"x-sensitive": "webauthn-attestation-object"
+							},
+							"transports": {
+								"type": "array",
+								"items": {
+									"$ref": "#/components/schemas/AdminAuthenticatorTransport"
+								},
+								"maxItems": 7
+							},
+							"authenticatorData": {
+								"$ref": "#/components/schemas/AdminWebAuthnAuthenticatorData"
+							},
+							"publicKey": {
+								"$ref": "#/components/schemas/AdminWebAuthnSignature"
+							},
+							"publicKeyAlgorithm": { "type": "integer" }
+						},
+						"required": ["clientDataJSON", "attestationObject"],
+						"additionalProperties": false
+					},
+					"type": { "const": "public-key" },
+					"clientExtensionResults": {
+						"type": "object",
+						"additionalProperties": true
+					},
+					"authenticatorAttachment": {
+						"type": "string",
+						"enum": ["cross-platform", "platform"]
+					}
+				},
+				"required": [
+					"id",
+					"rawId",
+					"response",
+					"type",
+					"clientExtensionResults"
+				],
+				"additionalProperties": false
+			},
+			"AdminCredentialEnrollVerifyRequest": {
+				"type": "object",
+				"properties": {
+					"ceremonyId": { "$ref": "#/components/schemas/ContractUuid" },
+					"response": {
+						"$ref": "#/components/schemas/AdminRegistrationResponseJSON"
+					}
+				},
+				"required": ["ceremonyId", "response"],
+				"additionalProperties": false
+			},
+			"AdminCredentialRecord": {
+				"type": "object",
+				"properties": {
+					"credentialHandle": {
+						"$ref": "#/components/schemas/AdminOpaqueToken"
+					},
+					"createdAt": { "$ref": "#/components/schemas/UtcDateTime" },
+					"lastUsedAt": {
+						"anyOf": [
+							{ "$ref": "#/components/schemas/UtcDateTime" },
+							{ "type": "null" }
+						]
+					}
+				},
+				"required": ["credentialHandle", "createdAt", "lastUsedAt"],
+				"additionalProperties": false
+			},
+			"AdminCredentialsResponse": {
+				"type": "object",
+				"properties": {
+					"items": {
+						"type": "array",
+						"items": { "$ref": "#/components/schemas/AdminCredentialRecord" },
+						"maxItems": 20
+					}
+				},
+				"required": ["items"],
+				"additionalProperties": false
+			},
+			"AdminCredentialEnrollVerifyResponse": {
+				"type": "object",
+				"properties": {
+					"credential": { "$ref": "#/components/schemas/AdminCredentialRecord" }
+				},
+				"required": ["credential"],
+				"additionalProperties": false
+			},
+			"AdminAuditAction": {
+				"type": "string",
+				"enum": [
+					"ADMIN_LOGIN_FAILED",
+					"ADMIN_LOGIN_SUCCEEDED",
+					"ADMIN_WEBAUTHN_COUNTER_ROLLBACK",
+					"ADMIN_SESSION_REVOKED",
+					"ADMIN_CREDENTIAL_ENROLLED",
+					"ADMIN_CREDENTIAL_REVOKED",
+					"ADMIN_ROLE_GRANTED_AUDITOR",
+					"ADMIN_ROLE_GRANTED_OPERATOR",
+					"ADMIN_ROLE_GRANTED_ALGORITHM_ADMIN",
+					"ADMIN_ROLE_GRANTED_SECURITY_ADMIN",
+					"ADMIN_ROLE_REVOKED_AUDITOR",
+					"ADMIN_ROLE_REVOKED_OPERATOR",
+					"ADMIN_ROLE_REVOKED_ALGORITHM_ADMIN",
+					"ADMIN_ROLE_REVOKED_SECURITY_ADMIN",
+					"ADMIN_STATUS_CHANGED_ACTIVE",
+					"ADMIN_STATUS_CHANGED_LOCKED",
+					"ADMIN_STATUS_CHANGED_DISABLED",
+					"ADMIN_BOOTSTRAP_COMPLETED"
+				]
+			},
+			"AdminAuditEvent": {
+				"type": "object",
+				"properties": {
+					"auditEventId": { "$ref": "#/components/schemas/ContractUuid" },
+					"action": { "$ref": "#/components/schemas/AdminAuditAction" },
+					"targetType": {
+						"type": "string",
+						"enum": ["ADMIN_USER", "ADMIN_SESSION", "ADMIN_CREDENTIAL"]
+					},
+					"occurredAt": { "$ref": "#/components/schemas/UtcDateTime" }
+				},
+				"required": ["auditEventId", "action", "targetType", "occurredAt"],
+				"additionalProperties": false
+			},
+			"AdminAuditPageResponse": {
+				"type": "object",
+				"properties": {
+					"items": {
+						"type": "array",
+						"items": { "$ref": "#/components/schemas/AdminAuditEvent" },
+						"maxItems": 100
+					},
+					"nextCursor": {
+						"anyOf": [
+							{ "$ref": "#/components/schemas/AdminOpaqueToken" },
+							{ "type": "null" }
+						]
+					}
+				},
+				"required": ["items", "nextCursor"],
+				"additionalProperties": false
+			},
+			"AdminError": {
+				"type": "object",
+				"properties": {
+					"requestId": { "$ref": "#/components/schemas/ErrorRequestId" },
+					"code": {
+						"type": "string",
+						"enum": [
+							"INVALID_REQUEST",
+							"INVALID_JSON",
+							"PAYLOAD_TOO_LARGE",
+							"UNSUPPORTED_MEDIA_TYPE",
+							"INVALID_ADMIN_DEVICE",
+							"INVALID_ADMIN_REQUEST_CONTEXT",
+							"INVALID_ADMIN_CURSOR",
+							"ADMIN_AUTHENTICATION_FAILED",
+							"ADMIN_SESSION_INVALID",
+							"ADMIN_FORBIDDEN",
+							"ADMIN_SECURITY_LOCKED",
+							"ADMIN_CREDENTIAL_CONFLICT",
+							"ADMIN_LAST_CREDENTIAL",
+							"ADMIN_CREDENTIAL_NOT_FOUND",
+							"ADMIN_RATE_LIMITED",
+							"ADMIN_API_UNAVAILABLE",
+							"INTERNAL_ERROR"
+						]
+					},
+					"message": { "type": "string", "minLength": 1, "maxLength": 160 },
+					"retryAfterSeconds": { "type": "integer", "minimum": 1 },
+					"issues": {
+						"type": "array",
+						"maxItems": 100,
+						"items": {
+							"type": "object",
+							"properties": {
+								"path": { "type": "string", "maxLength": 300 },
+								"message": { "type": "string", "maxLength": 300 }
+							},
+							"required": ["path", "message"],
+							"additionalProperties": false
+						}
+					}
+				},
+				"required": ["requestId", "code", "message"],
+				"additionalProperties": false
+			},
+			"InternalError": {
+				"type": "object",
+				"properties": {
+					"requestId": {
+						"$ref": "#/components/schemas/ErrorRequestId"
+					},
+					"code": {
+						"const": "INTERNAL_ERROR"
+					},
+					"message": {
+						"const": "服务暂时不可用，请稍后重试"
+					}
+				},
+				"required": ["requestId", "code", "message"],
+				"additionalProperties": false
+			}
+		},
+		"securitySchemes": {
+			"BearerAuth": {
+				"type": "http",
+				"scheme": "bearer",
+				"bearerFormat": "opaque",
+				"description": "仅接受吃什么 App 自有短期不透明 access token；不接受微信、QQ 或其他供应商 token。"
+			},
+			"AdminBearerAuth": {
+				"type": "http",
+				"scheme": "bearer",
+				"bearerFormat": "32-byte opaque admin session",
+				"description": "仅接受管理员登录验证响应一次性签发的 32 字节 opaque token。普通用户 token、第三方 token 和 WebAuthn 原始材料均无效。"
+			}
+		},
+		"headers": {
+			"ContractVersion": {
+				"description": "服务端当前公共 API 重大契约版本。固定由服务端生成，不反射客户端请求头。",
+				"required": true,
+				"schema": {
+					"type": "string",
+					"const": "1"
+				}
+			},
+			"AdminContractVersion": {
+				"description": "服务端当前管理员 API 重大契约版本；仅 /admin/v1 响应发送。",
+				"required": true,
+				"schema": { "type": "string", "const": "1" }
+			}
+		},
+		"parameters": {
+			"RequestCorrelationId": {
+				"name": "x-request-id",
+				"in": "header",
+				"required": false,
+				"description": "仅用于错误 body 关联：符合 UUID v1-v8/RFC variant 的值会被复用，其他值会被忽略并由服务端生成 UUID。成功响应不回显此请求头。",
+				"schema": {
+					"type": "string"
+				}
+			},
+			"ClientContractVersion": {
+				"name": "X-ChiShenMe-Contract-Version",
+				"in": "header",
+				"required": false,
+				"description": "可选兼容性提示。当前服务接受并忽略任意值；缺失或不匹配不会拒绝请求，响应始终返回服务端当前版本。不得在此头放置秘密或个人信息。",
+				"schema": {
+					"type": "string",
+					"maxLength": 64
+				}
+			},
+			"ClientAdminContractVersion": {
+				"name": "X-ChiShenMe-Admin-Contract-Version",
+				"in": "header",
+				"required": false,
+				"description": "可选管理员契约版本提示；服务端不反射客户端值。不得放置秘密。",
+				"schema": { "type": "string", "maxLength": 64 }
+			},
+			"AdminDeviceId": {
+				"name": "X-Admin-Device-Id",
+				"in": "header",
+				"required": true,
+				"description": "Next BFF 为当前管理设备保存的 32 字节随机 opaque 标识；服务端只保存 HMAC，不记录原文。",
+				"schema": { "$ref": "#/components/schemas/AdminOpaqueToken" },
+				"x-sensitive": "admin-device-id"
+			},
+			"AdminCredentialHandle": {
+				"name": "credentialHandle",
+				"in": "path",
+				"required": true,
+				"description": "当前管理员自有随机 opaque handle；不是凭据 ID、哈希或数据库 UUID。",
+				"schema": { "$ref": "#/components/schemas/AdminOpaqueToken" }
+			},
+			"AdminAuditCursor": {
+				"name": "cursor",
+				"in": "query",
+				"required": false,
+				"description": "15 分钟有效、绑定当前管理员的不可解析分页游标。",
+				"schema": { "$ref": "#/components/schemas/AdminOpaqueToken" }
+			},
+			"AdminAuditLimit": {
+				"name": "limit",
+				"in": "query",
+				"required": false,
+				"description": "规范十进制字符串 1..100，默认 50；拒绝空白、前导零、小数和科学计数法。",
+				"schema": {
+					"type": "string",
+					"default": "50",
+					"pattern": "^(?:[1-9]|[1-9][0-9]|100)$"
+				}
+			},
+			"BindingId": {
+				"name": "bindingId",
+				"in": "path",
+				"required": true,
+				"description": "当前账号的 App 内部身份绑定 UUID。",
+				"schema": { "$ref": "#/components/schemas/ContractUuid" }
+			},
+			"SessionId": {
+				"name": "sessionId",
+				"in": "path",
+				"required": true,
+				"description": "当前账号的 App 内部会话 UUID。",
+				"schema": { "$ref": "#/components/schemas/ContractUuid" }
+			},
+			"ExportId": {
+				"name": "exportId",
+				"in": "path",
+				"required": true,
+				"description": "当前账号自有数据导出 UUID；不是对象存储键或第三方标识。",
+				"schema": { "$ref": "#/components/schemas/ContractUuid" }
+			},
+			"FavoriteId": {
+				"name": "favoriteId",
+				"in": "path",
+				"required": true,
+				"description": "当前账号自有收藏 UUID；不是供应商或全局地点 ID。",
+				"schema": { "$ref": "#/components/schemas/ContractUuid" }
+			},
+			"FeedbackId": {
+				"name": "feedbackId",
+				"in": "path",
+				"required": true,
+				"description": "当前账号自有私有反馈 UUID。",
+				"schema": { "$ref": "#/components/schemas/ContractUuid" }
+			},
+			"PageCursor": {
+				"name": "cursor",
+				"in": "query",
+				"required": false,
+				"description": "上页返回的不可解析游标；重复参数或非规范值返回 400。",
+				"schema": { "$ref": "#/components/schemas/PageCursor" }
+			},
+			"PageLimit": {
+				"name": "limit",
+				"in": "query",
+				"required": false,
+				"description": "规范十进制字符串 1..50，默认 20；拒绝重复、空白、前导零、小数和科学计数法。",
+				"schema": {
+					"type": "string",
+					"default": "20",
+					"pattern": "^(?:[1-9]|[1-4][0-9]|50)$"
+				}
+			},
+			"FavoriteGroupFilter": {
+				"name": "group",
+				"in": "query",
+				"required": false,
+				"schema": { "$ref": "#/components/schemas/FavoriteGroup" }
+			},
+			"HistoryActionFilter": {
+				"name": "action",
+				"in": "query",
+				"required": false,
+				"schema": { "$ref": "#/components/schemas/RecommendationHistoryAction" }
+			},
+			"PrivateFeedbackTypeFilter": {
+				"name": "type",
+				"in": "query",
+				"required": false,
+				"schema": { "$ref": "#/components/schemas/PrivateFeedbackType" }
+			}
+		},
+		"responses": {
+			"AdminLoginOptionsIssued": {
+				"description": "固定形状、不可用于枚举账号的 discoverable credential 登录选项。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					},
+					"X-ChiShenMe-Admin-Contract-Version": {
+						"$ref": "#/components/headers/AdminContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": {
+							"$ref": "#/components/schemas/AdminLoginOptionsResponse"
+						}
+					}
+				}
+			},
+			"AdminLoginVerified": {
+				"description": "管理员 passkey 验证成功；adminToken 只在本响应返回一次。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					},
+					"X-ChiShenMe-Admin-Contract-Version": {
+						"$ref": "#/components/headers/AdminContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": {
+							"$ref": "#/components/schemas/AdminLoginVerifyResponse"
+						}
+					}
+				}
+			},
+			"AdminSessionRead": {
+				"description": "当前管理员会话与数据库实时计算的权限。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					},
+					"X-ChiShenMe-Admin-Contract-Version": {
+						"$ref": "#/components/headers/AdminContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": {
+							"$ref": "#/components/schemas/AdminCurrentSessionResponse"
+						}
+					}
+				}
+			},
+			"AdminCredentialsListed": {
+				"description": "当前管理员有效 passkey 的脱敏列表。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					},
+					"X-ChiShenMe-Admin-Contract-Version": {
+						"$ref": "#/components/headers/AdminContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": {
+							"$ref": "#/components/schemas/AdminCredentialsResponse"
+						}
+					}
+				}
+			},
+			"AdminEnrollOptionsIssued": {
+				"description": "当前管理员新增 discoverable passkey 的注册选项。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					},
+					"X-ChiShenMe-Admin-Contract-Version": {
+						"$ref": "#/components/headers/AdminContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": {
+							"$ref": "#/components/schemas/AdminCredentialEnrollOptionsResponse"
+						}
+					}
+				}
+			},
+			"AdminCredentialEnrolled": {
+				"description": "新 passkey 已验证并原子保存。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					},
+					"X-ChiShenMe-Admin-Contract-Version": {
+						"$ref": "#/components/headers/AdminContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": {
+							"$ref": "#/components/schemas/AdminCredentialEnrollVerifyResponse"
+						}
+					}
+				}
+			},
+			"AdminAuditListed": {
+				"description": "固定四字段、无哈希或 context 的管理员审计页。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					},
+					"X-ChiShenMe-Admin-Contract-Version": {
+						"$ref": "#/components/headers/AdminContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/AdminAuditPageResponse" }
+					}
+				}
+			},
+			"AdminNoContent": {
+				"description": "管理员操作完成；无响应体。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					},
+					"X-ChiShenMe-Admin-Contract-Version": {
+						"$ref": "#/components/headers/AdminContractVersion"
+					}
+				}
+			},
+			"AdminBadRequest": {
+				"description": "管理员请求结构或上下文无效。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					},
+					"X-ChiShenMe-Admin-Contract-Version": {
+						"$ref": "#/components/headers/AdminContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/AdminError" }
+					}
+				}
+			},
+			"AdminUnauthorized": {
+				"description": "管理员 passkey 或会话无效。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					},
+					"X-ChiShenMe-Admin-Contract-Version": {
+						"$ref": "#/components/headers/AdminContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/AdminError" }
+					}
+				}
+			},
+			"AdminForbidden": {
+				"description": "当前实时 RBAC 权限不足。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					},
+					"X-ChiShenMe-Admin-Contract-Version": {
+						"$ref": "#/components/headers/AdminContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/AdminError" }
+					}
+				}
+			},
+			"AdminNotFound": {
+				"description": "当前管理员自有 credential handle 不存在。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					},
+					"X-ChiShenMe-Admin-Contract-Version": {
+						"$ref": "#/components/headers/AdminContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/AdminError" }
+					}
+				}
+			},
+			"AdminConflict": {
+				"description": "凭据重复、超过 20 枚或试图删除最后一枚有效凭据。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					},
+					"X-ChiShenMe-Admin-Contract-Version": {
+						"$ref": "#/components/headers/AdminContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/AdminError" }
+					}
+				}
+			},
+			"AdminSecurityLocked": {
+				"description": "签名验证后的计数器回退触发凭据撤销、会话撤销和账号锁定。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					},
+					"X-ChiShenMe-Admin-Contract-Version": {
+						"$ref": "#/components/headers/AdminContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/AdminError" }
+					}
+				}
+			},
+			"AdminRateLimited": {
+				"description": "独立管理员限流已触发。",
+				"headers": {
+					"Retry-After": {
+						"required": true,
+						"schema": { "type": "string", "pattern": "^[1-9][0-9]*$" }
+					},
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					},
+					"X-ChiShenMe-Admin-Contract-Version": {
+						"$ref": "#/components/headers/AdminContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/AdminError" }
+					}
+				}
+			},
+			"AdminPayloadTooLarge": {
+				"description": "管理员 JSON 请求体超过 100 KiB。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					},
+					"X-ChiShenMe-Admin-Contract-Version": {
+						"$ref": "#/components/headers/AdminContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/AdminError" }
+					}
+				}
+			},
+			"AdminUnsupportedMediaType": {
+				"description": "管理员 JSON mutation 必须使用 application/json。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					},
+					"X-ChiShenMe-Admin-Contract-Version": {
+						"$ref": "#/components/headers/AdminContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/AdminError" }
+					}
+				}
+			},
+			"AdminInternalError": {
+				"description": "管理员服务内部错误；不返回堆栈或验证器错误。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					},
+					"X-ChiShenMe-Admin-Contract-Version": {
+						"$ref": "#/components/headers/AdminContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/AdminError" }
+					}
+				}
+			},
+			"AdminUnavailable": {
+				"description": "管理员 API 默认关闭、独立数据库不可用或安全配置失效。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					},
+					"X-ChiShenMe-Admin-Contract-Version": {
+						"$ref": "#/components/headers/AdminContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/AdminError" }
+					}
+				}
+			},
+			"FavoritesListed": {
+				"description": "当前账号的收藏页；展示投影不落库。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/FavoritesPage" }
+					}
+				}
+			},
+			"FavoriteCreated": {
+				"description": "收藏已创建；同一账号同一餐厅只保留一个收藏。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/FavoriteRecord" }
+					}
+				}
+			},
+			"FavoriteUpdated": {
+				"description": "收藏分组已更新。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/FavoriteRecord" }
+					}
+				}
+			},
+			"RecommendationHistoryListed": {
+				"description": "90 天原始推荐操作历史页。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": {
+							"$ref": "#/components/schemas/RecommendationHistoryPage"
+						}
+					}
+				}
+			},
+			"PrivateFeedbackListed": {
+				"description": "当前账号私有结构化反馈页。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/PrivateFeedbackPage" }
+					}
+				}
+			},
+			"PrivateFeedbackCreated": {
+				"description": "私有反馈已创建，不进入公共评分。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/PrivateFeedbackRecord" }
+					}
+				}
+			},
+			"PersistenceDeleted": {
+				"description": "幂等删除完成；响应没有 body。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				}
+			},
+			"PersistenceBadRequest": {
+				"description": "JSON、路径或查询参数不符合严格契约。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": {
+							"oneOf": [
+								{ "$ref": "#/components/schemas/InvalidRequestError" },
+								{ "$ref": "#/components/schemas/InvalidJsonError" }
+							]
+						}
+					}
+				}
+			},
+			"PersistenceForbidden": {
+				"description": "LIVE_DISPLAY_ONLY、授权能力缺失或功能开关关闭；失败关闭，不保存引用。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": {
+							"$ref": "#/components/schemas/PersistenceForbiddenError"
+						}
+					}
+				}
+			},
+			"PersistenceConflict": {
+				"description": "相同幂等键用于不同 body，或资源状态冲突。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": {
+							"$ref": "#/components/schemas/PersistenceConflictError"
+						}
+					}
+				}
+			},
+			"ResultReferenceExpired": {
+				"description": "resultToken 已过期、进程重启失效或不属于 requestId；客户端必须重新推荐，不得长期重试旧 token。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": {
+							"$ref": "#/components/schemas/ResultReferenceExpiredError"
+						}
+					}
+				}
+			},
+			"PersistenceResourceNotFound": {
+				"description": "资源不存在或不属于当前账号，不披露其他账号。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": {
+							"$ref": "#/components/schemas/PersistenceResourceNotFoundError"
+						}
+					}
+				}
+			},
+			"PersistenceUnavailable": {
+				"description": "数据库、权利策略或实时展示解析暂时不可用。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": {
+							"$ref": "#/components/schemas/PersistenceUnavailableError"
+						}
+					}
+				}
+			},
+			"PhoneCodeAccepted": {
+				"description": "手机 challenge 已创建；响应不包含验证码。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": {
+							"$ref": "#/components/schemas/PhoneCodeChallengeResponse"
+						}
+					}
+				}
+			},
+			"EmailCodeAccepted": {
+				"description": "邮箱 challenge 已创建；响应不包含验证码。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": {
+							"$ref": "#/components/schemas/EmailCodeChallengeResponse"
+						}
+					}
+				}
+			},
+			"OAuthStateCreated": {
+				"description": "App 自有一次性 state；不包含平台密钥或 token。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/OAuthStateResponse" }
+					}
+				}
+			},
+			"AuthSessionCreated": {
+				"description": "账号和首个会话已原子创建。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/AuthTokenResponse" }
+					}
+				}
+			},
+			"AuthSession": {
+				"description": "App 自有会话令牌；不返回第三方 code/token。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/AuthTokenResponse" }
+					}
+				}
+			},
+			"LoggedOut": {
+				"description": "当前会话已撤销。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/LogoutResponse" }
+					}
+				}
+			},
+			"IdentityBindings": {
+				"description": "当前账号的脱敏身份绑定。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": {
+							"$ref": "#/components/schemas/IdentityBindingsResponse"
+						}
+					}
+				}
+			},
+			"IdentityBound": {
+				"description": "身份已绑定到当前账号。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/BindIdentityResponse" }
+					}
+				}
+			},
+			"IdentityUnbound": {
+				"description": "身份已解绑。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/UnbindIdentityResponse" }
+					}
+				}
+			},
+			"Sessions": {
+				"description": "当前账号的通用设备会话列表。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/SessionsResponse" }
+					}
+				}
+			},
+			"SessionRevoked": {
+				"description": "指定会话已撤销。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/RevokeSessionResponse" }
+					}
+				}
+			},
+			"AccountExportQueued": {
+				"description": "数据导出工件已排队。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/AccountExportResponse" }
+					}
+				}
+			},
+			"AccountExportRead": {
+				"description": "当前账号自有数据导出的公开状态；不含对象存储定位信息。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/AccountExportStatusResponse" }
+					}
+				}
+			},
+			"LatestAccountExportRead": {
+				"description": "当前账号最近一次数据导出，或 item=null。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/LatestAccountExportResponse" }
+					}
+				}
+			},
+			"AccountExportContent": {
+				"description": "固定文件名、最大 10 MiB 的 UTF-8 JSON 导出流；客户端必须同时校验长度和 SHA-256。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					},
+					"Content-Length": {
+						"required": true,
+						"schema": {
+							"type": "integer",
+							"minimum": 0,
+							"maximum": 10485760
+						}
+					},
+					"Digest": {
+						"required": true,
+						"description": "RFC 3230 兼容的 SHA-256 标准 Base64 摘要。",
+						"schema": {
+							"type": "string",
+							"pattern": "^sha-256=[A-Za-z0-9+/]{43}=$"
+						}
+					},
+					"X-Content-SHA256": {
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[0-9a-f]{64}$"
+						}
+					},
+					"Content-Disposition": {
+						"required": true,
+						"schema": {
+							"type": "string",
+							"const": "attachment; filename=\"chi-shen-me-account-export.json\""
+						}
+					},
+					"Cache-Control": {
+						"required": true,
+						"schema": { "type": "string", "const": "private, no-store" }
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "type": "string", "format": "binary" }
+					}
+				}
+			},
+			"AccountExportNotFound": {
+				"description": "导出不存在或不属于当前账号；两者不可区分。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/AccountExportNotFoundError" }
+					}
+				}
+			},
+			"AccountExportNotReady": {
+				"description": "导出仍在排队、处理中或生成失败，当前不可下载。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/AccountExportNotReadyError" }
+					}
+				}
+			},
+			"AccountExportExpired": {
+				"description": "导出工件已过期或已按保留策略删除。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/AccountExportExpiredError" }
+					}
+				}
+			},
+			"AccountDeleted": {
+				"description": "账号已立即停用，全部会话已失效。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/DeleteAccountResponse" }
+					}
+				}
+			},
+			"AuthBadRequest": {
+				"description": "JSON 无法解析，或严格账号请求不符合契约。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": {
+							"oneOf": [
+								{ "$ref": "#/components/schemas/InvalidRequestError" },
+								{ "$ref": "#/components/schemas/InvalidJsonError" }
+							]
+						}
+					}
+				}
+			},
+			"AuthUnauthorized": {
+				"description": "身份材料、Bearer 会话或已绑定账号无效。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/AuthUnauthorizedError" }
+					}
+				}
+			},
+			"AuthForbidden": {
+				"description": "需要重新验证，或当前风险/账号状态不允许操作。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/AuthForbiddenError" }
+					}
+				}
+			},
+			"AuthConflict": {
+				"description": "身份、challenge、会话或账号状态冲突；不披露其他账号。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/AuthConflictError" }
+					}
+				}
+			},
+			"AuthUnavailable": {
+				"description": "账号总开关、指定通道、数据库或外部身份服务未安全就绪。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": { "$ref": "#/components/schemas/AuthUnavailableError" }
+					}
+				}
+			},
+			"RateLimited": {
+				"description": "达到当前限流上限；Retry-After 与响应体 retryAfterSeconds 使用同一秒数，不发送 X-RateLimit 系列响应头",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					},
+					"Retry-After": {
+						"description": "客户端至少等待的秒数",
+						"schema": { "type": "integer", "minimum": 1 }
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": {
+							"$ref": "#/components/schemas/RateLimitError"
+						}
+					}
+				}
+			},
+			"PayloadTooLarge": {
+				"description": "JSON 请求体超过 100 KiB",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": {
+							"$ref": "#/components/schemas/PayloadTooLargeError"
+						}
+					}
+				}
+			},
+			"UnsupportedMediaType": {
+				"description": "Content-Type 缺失、不是 application/json，或声明了不受支持的请求体编码。媒体类型比较不区分大小写，并允许参数语法",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": {
+							"$ref": "#/components/schemas/UnsupportedMediaTypeError"
+						}
+					}
+				}
+			},
+			"PlaceProviderUnavailable": {
+				"description": "餐厅数据供应商不可用",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": {
+							"$ref": "#/components/schemas/PlaceProviderUnavailableError"
+						}
+					}
+				}
+			},
+			"LocationProviderUnavailable": {
+				"description": "当前地点数据适配器未配置、被授权策略禁用或实时供应商不可用",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": {
+							"$ref": "#/components/schemas/LocationProviderUnavailableError"
+						}
+					}
+				}
+			},
+			"PlaceSearchProviderUnavailable": {
+				"description": "当前餐厅关键词搜索适配器未配置、被停用或实时供应商不可用",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": {
+							"$ref": "#/components/schemas/PlaceSearchProviderUnavailableError"
+						}
+					}
+				}
+			},
+			"ServiceNotReady": {
+				"description": "数据库或核心推荐适配器尚未就绪；响应不区分具体依赖，也不披露内部原因。",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": {
+							"$ref": "#/components/schemas/ServiceNotReadyError"
+						}
+					}
+				}
+			},
+			"InternalError": {
+				"description": "未预期的服务端错误",
+				"headers": {
+					"X-ChiShenMe-Contract-Version": {
+						"$ref": "#/components/headers/ContractVersion"
+					}
+				},
+				"content": {
+					"application/json": {
+						"schema": {
+							"$ref": "#/components/schemas/InternalError"
+						}
+					}
+				}
+			}
+		}
+	}
+}

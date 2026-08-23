@@ -1,0 +1,320 @@
+name: ${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is required}
+
+x-bounded-logging: &bounded-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-database-identity: &database-identity
+  DATABASE_EXPECTED_TARGET: postgres.internal:5432/${POSTGRES_DB:?POSTGRES_DB is required}
+  DATABASE_RUNTIME_ROLE_NAME: api_runtime
+  DATABASE_MIGRATION_ROLE_NAME: schema_migrator
+  DATABASE_MAINTENANCE_ROLE_NAME: retention_worker
+  DATABASE_EXPORT_WORKER_ROLE_NAME: data_export_worker
+
+services:
+  api:
+    image: ${API_IMAGE:?API_IMAGE is required and should be digest-pinned}
+    platform: linux/amd64
+    pull_policy: never
+    restart: unless-stopped
+    init: true
+    env_file:
+      # Must be an owner-readable-only (0600) root-owned deployment file.
+      # It contains only API secrets, notably DATABASE_URL, the Base64 database
+      # CA, and the AMap key/signature. Never copy migration/maintenance secrets
+      # or any ADMIN_* secret into it.
+      - ${SHARED_STATE_DIRECTORY:?SHARED_STATE_DIRECTORY is required}/secrets/api.env
+    environment:
+      <<: *database-identity
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=384
+      PORT: "3001"
+      ADMIN_API_ENABLED: "false"
+      # BaoTa Nginx reaches this container through the Docker bridge gateway.
+      TRUSTED_PROXY_CIDRS: 172.30.10.1/32
+      DATABASE_ENABLED: "true"
+      DATABASE_SSL_MODE: verify-full
+      DATABASE_POOL_MAX: "4"
+      DATABASE_CONNECT_TIMEOUT_MS: "5000"
+      DATABASE_IDLE_TIMEOUT_MS: "15000"
+      DATA_RIGHTS_MODE: LIVE_DISPLAY_ONLY
+      ALLOW_DEMO_DATA: "false"
+      RECOMMENDATION_PROVIDER_PRIORITY: AMAP
+      LOCATION_SEARCH_PROVIDER_PRIORITY: AMAP
+      PLACE_SEARCH_PROVIDER_PRIORITY: AMAP
+      AMAP_ENABLED: "${AMAP_ENABLED:-false}"
+      AMAP_TIMEOUT_MS: "2200"
+      QWEN_ENABLED: "false"
+      ACCOUNTS_ENABLED: "false"
+      PHONE_AUTH_ENABLED: "false"
+      EMAIL_AUTH_ENABLED: "false"
+      WECHAT_AUTH_ENABLED: "false"
+      QQ_AUTH_ENABLED: "false"
+      FAVORITES_ENABLED: "false"
+      HISTORY_ENABLED: "false"
+      PRIVATE_FEEDBACK_ENABLED: "false"
+      SUPPORT_FEEDBACK_ENABLED: "false"
+      DATA_EXPORT_ENABLED: "false"
+      DATA_EXPORT_WORKER_READY: "false"
+      MINIMUM_SUPPORTED_VERSION: ${MINIMUM_SUPPORTED_VERSION:?MINIMUM_SUPPORTED_VERSION is required}
+    expose:
+      - "3001"
+    ports:
+      - target: 3001
+        published: ${API_LOOPBACK_PORT:-13001}
+        host_ip: 127.0.0.1
+        protocol: tcp
+    networks:
+      edge:
+        ipv4_address: 172.30.10.3
+      database:
+        ipv4_address: 172.30.20.3
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:3001/health/ready',{signal:AbortSignal.timeout(2000)})
+          .then(async(response)=>{if(!response.ok)throw new Error('http');const
+          body=await response.json();if(body.status!=='ready')throw new Error('body')})
+          .catch(()=>process.exit(1))
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 45s
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 640m
+    mem_reservation: 320m
+    memswap_limit: 768m
+    cpus: 0.80
+    pids_limit: 160
+    ulimits:
+      nofile:
+        soft: 4096
+        hard: 4096
+    stop_grace_period: 20s
+    logging: *bounded-logging
+
+  postgres:
+    image: ${POSTGIS_IMAGE:?POSTGIS_IMAGE is required and must be PostgreSQL 17 with PostGIS 3.5}
+    platform: linux/amd64
+    pull_policy: never
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_USER: ${POSTGRES_BOOTSTRAP_USER:?POSTGRES_BOOTSTRAP_USER is required}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_bootstrap_password
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --auth-local=scram-sha-256
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      PGDATA: /var/lib/postgresql/data/pgdata
+    command:
+      - postgres
+      - -c
+      - listen_addresses=*
+      - -c
+      - ssl=on
+      - -c
+      - ssl_min_protocol_version=TLSv1.2
+      - -c
+      - ssl_cert_file=/run/postgres-tls/server.crt
+      - -c
+      - ssl_key_file=/run/postgres-tls/server.key
+      - -c
+      - ssl_ca_file=/run/postgres-tls/ca.crt
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
+      - -c
+      - password_encryption=scram-sha-256
+      - -c
+      - max_connections=30
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - effective_cache_size=512MB
+      - -c
+      - work_mem=2MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - log_statement=none
+      - -c
+      - log_min_duration_statement=2000
+      - -c
+      - idle_in_transaction_session_timeout=30000
+      - -c
+      - lock_timeout=5000
+      - -c
+      - temp_file_limit=65536
+      - -c
+      - max_wal_size=256MB
+      - -c
+      - min_wal_size=80MB
+      - -c
+      - wal_compression=on
+      - -c
+      - log_lock_waits=on
+    volumes:
+      - type: volume
+        source: postgres_data
+        target: /var/lib/postgresql/data
+      - type: bind
+        source: ${SHARED_STATE_DIRECTORY:?SHARED_STATE_DIRECTORY is required}/secrets/postgres_bootstrap_password
+        target: /run/secrets/postgres_bootstrap_password
+        read_only: true
+      # server.crt must contain DNS:postgres.internal in SubjectAltName.
+      # server.key must satisfy PostgreSQL ownership/mode checks; clients trust
+      # ca.crt through the Base64 CA value in their separate root-only env file.
+      - type: bind
+        source: ${SHARED_STATE_DIRECTORY:?SHARED_STATE_DIRECTORY is required}/secrets/postgres
+        target: /run/postgres-tls
+        read_only: true
+      - type: bind
+        source: ./postgres/pg_hba.conf
+        target: /etc/postgresql/pg_hba.conf
+        read_only: true
+      # These scripts are deliberately not mounted into docker-entrypoint-initdb.d.
+      # Role creation, extension bootstrap and grants require an explicit,
+      # reviewed psql provisioning step with five pre-created roles.
+      - type: bind
+        source: ./sql
+        target: /opt/chi-shen-me/sql
+        read_only: true
+    expose:
+      - "5432"
+    networks:
+      database:
+        ipv4_address: 172.30.20.2
+        aliases:
+          - postgres.internal
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          export PGPASSWORD="$$(cat /run/secrets/postgres_bootstrap_password)" &&
+          psql -X -qAt
+          "host=postgres.internal port=5432 dbname=$${POSTGRES_DB} user=$${POSTGRES_USER}
+          sslmode=verify-full sslrootcert=/run/postgres-tls/ca.crt"
+          -c "SELECT 1" | grep -qx "1"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    shm_size: 128m
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 768m
+    mem_reservation: 384m
+    memswap_limit: 1024m
+    cpus: 1.00
+    pids_limit: 200
+    ulimits:
+      nofile:
+        soft: 4096
+        hard: 4096
+    stop_grace_period: 60s
+    logging: *bounded-logging
+
+  migrate:
+    profiles: [ops]
+    image: ${API_IMAGE:?API_IMAGE is required and should be digest-pinned}
+    platform: linux/amd64
+    pull_policy: never
+    init: true
+    env_file:
+      # Must contain only DATABASE_MIGRATION_URL and the migration CA setting.
+      - ${SHARED_STATE_DIRECTORY:?SHARED_STATE_DIRECTORY is required}/secrets/migration.env
+    environment:
+      <<: *database-identity
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=128
+      DATABASE_MIGRATION_SSL_MODE: verify-full
+    command: [node, dist/database/migrate-cli.js]
+    networks:
+      database:
+        ipv4_address: 172.30.20.4
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 256m
+    mem_reservation: 128m
+    memswap_limit: 320m
+    cpus: 0.50
+    pids_limit: 100
+    logging: *bounded-logging
+
+  retention:
+    profiles: [ops]
+    image: ${API_IMAGE:?API_IMAGE is required and should be digest-pinned}
+    platform: linux/amd64
+    pull_policy: never
+    init: true
+    env_file:
+      # Must contain only DATABASE_MAINTENANCE_URL and the maintenance CA setting.
+      - ${SHARED_STATE_DIRECTORY:?SHARED_STATE_DIRECTORY is required}/secrets/maintenance.env
+    environment:
+      <<: *database-identity
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=128
+      DATABASE_MAINTENANCE_SSL_MODE: verify-full
+    # Safe by default. An operator must deliberately override this with
+    # RETENTION_MODE=--execute after reviewing the dry-run output.
+    command: [node, dist/database/cleanup-cli.js, "${RETENTION_MODE:---dry-run}"]
+    networks:
+      database:
+        ipv4_address: 172.30.20.5
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 256m
+    mem_reservation: 128m
+    memswap_limit: 320m
+    cpus: 0.50
+    pids_limit: 100
+    logging: *bounded-logging
+
+volumes:
+  postgres_data:
+    name: ${POSTGRES_VOLUME_NAME:?POSTGRES_VOLUME_NAME is required}
+    external: true
+
+networks:
+  edge:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.10.0/29
+          gateway: 172.30.10.1
+  database:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.20.0/28

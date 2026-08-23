@@ -1,0 +1,90 @@
+# 吃什么
+
+面向北京高校学生和教师的附近美食决策产品。当前仓库包含 Android 原生客户端、NestJS API、Next.js 运营后台和共享接口契约。
+
+## 当前可运行范围
+
+- 本地开发默认使用虚构的北京演示餐厅和确定性意图引擎，不调用或缓存任何第三方 POI 数据；生产环境从代码层禁止演示餐厅。
+- Android 已支持固定试点和地点关键词手动选址；关键词经自有 `POST /v1/location-search` JSON body 提交，最多返回 5 个显式标记 `LIVE/DEMO` 的通用地点结果，固定试点在拒绝定位、无网或上游不可用时仍可回退。
+- 在书面授权边界确认后，同时配置高德 Web Service Key 与 `AMAP_ENABLED=true` 才会启用实时查询；生产还必须使用匹配的服务端数字签名私钥并确认固定出口 IP 已进入高德白名单，否则应用在任何高德请求前安全失败。重排、适合度和 POI 引用保存能力仍由 `DATA_RIGHTS_MODE` 控制。
+- 推荐结果的 provider 是受约束、可扩展的数据源代码，并逐条携带 `LIVE/DEMO` 与导航、拨号、复制、分享四项 API v1 动作。为保持契约兼容暂时保留 `share` 字段，但当前 AMAP/DEMO provider 均返回 `false`；Android 1.0 的分享入口由唯一的编译期常量固定关闭，不存在 Gradle 属性或远程开关。底层分享代码只作封存，不属于 1.0 能力或发布门禁，若在 2.0 重新启用必须重新完成产品、数据授权、隐私与安全评审。
+- 公开推荐结果不包含供应商稳定 POI ID，只携带两小时、请求作用域的 43 字符 `resultToken`；行为事件只回传该 token，服务端从短期登记表解析来源并防伪造、跨请求复用和同类重放。
+- 当前只实现 AMAP 与 development/test DEMO adapter。公共契约、推荐引擎和 Android 不依赖高德枚举；未来美团、大众点评等来源只通过正式 API 或商务合作新增 adapter，不抓取、不逆向，也不虚构尚不存在的接口。
+- 配置百炼北京地域工作空间地址、API Key 与 `QWEN_ENABLED=true` 后可启用千问；失败时自动回退确定性规则。
+- Android 工程已用 JDK 17、SDK 36、Gradle 8.13 完成 buildSrc/App JVM 测试、Lint、Debug、AndroidTest 与内部 Alpha 构建；模拟器验收结果和当前 APK SHA-256 以验证报告为准。仓库内 `.tools` 仅为本机忽略目录，不会提交到版本库。
+- 登录已在不使用真实供应商凭据的设备内合成 API 夹具中验证手机号登录、邮箱绑定、退出、邮箱登录和再次退出；微信/QQ AppID 缺失时保持 fail closed。高德已在不使用 Key 或官方网络端点的合成 `LIVE_DISPLAY_ONLY` 响应夹具中验证来源标注、无自有评分、动作关闭和 WGS84 请求边界；两者均不等同于真实供应商联调。
+- 前后端已按独立部署边界拆分：Android 只持有一个环境对应的 HTTPS API 基址和公开 v1 契约，不包含数据库或供应商 Secret；API 通过 `serviceCapabilities` 分别声明推荐、地点搜索和餐厅搜索是否可用，缺失字段时客户端全部关闭并提供手动重连。ECS API 只监听 `127.0.0.1:13001`，数据库只在内部 Docker 网络开放；独立 `api.unfinished-era.com` 模板、readiness、不可变 bundle、权限预检、候选激活/自动回退及备份/恢复/回滚脚本均已落盘。最终候选 release `20260823-024841-cloudsep-final` 已完成镜像和严格预检，但没有启动或切流；DNS、子域证书与真实高德凭据未完成前不会替换现网。
+
+## 本地启动
+
+```powershell
+pnpm install
+pnpm test
+pnpm build
+pnpm dev:api
+pnpm dev:admin
+```
+
+API 默认位于 `http://localhost:3001`，管理后台默认位于 `http://localhost:3000`。
+管理后台代码已实现 passkey 登录、会话、RBAC 与审计读取，但真实生产 RP ID/origin、首位管理员离线 bootstrap、独立管理员数据库角色和恢复流程尚未验收；当前仍只能用于封闭开发，不得直接发布到公网。
+
+`pnpm dev:api` 会先用项目 TypeScript 配置编译共享契约与 API，再监听源码并只运行
+`dist` 中的编译产物。请勿改回 `tsx`/esbuild 直接执行 Nest TypeScript；该路径不会
+生成依赖注入所需的 `emitDecoratorMetadata`，会让全局 Guard 在运行时失败。可单独执行
+`pnpm --filter @chi-shen-me/api test:runtime`，在随机本机端口对编译产物进行三接口冒烟测试。
+
+需要联调高德或登录供应商时，不要把密钥写进命令行或聊天记录。先把仅面向
+公开 API 进程的 `.env.local.example` 复制为已被 Git 忽略的 `.env.local`，只在
+本机填写，然后运行：
+
+```powershell
+.\scripts\start-api-local.ps1 -ValidateOnly
+.\scripts\start-api-local.ps1
+```
+
+脚本只接受公开 API 已声明的配置，不执行文件内容、不回显数据库、高德、千问
+或认证密钥值。它先在无运行时 Secret 的最小环境中构建，再只把白名单配置注入
+API 运行进程；管理员、迁移、维护、导出 worker 和其他父终端变量不会进入子进程。
+
+本机已准备 Android 工具时，可执行一条完整验证命令：
+
+```powershell
+.\scripts\verify.ps1 -AlphaApiBaseUrl 'https://api.unfinished-era.com/'
+```
+
+完整验证要求显式给出 Alpha 将嵌入的公网 HTTPS 地址。该脚本会验证 URL 策略、生成的 `BuildConfig` 和 Alpha DEX 确实包含同一地址，也会验证 ECS bundle；它不会把“地址成功嵌入”误当成 DNS、证书或公网可达已通过。公网连通必须在子域和证书就绪后另行运行 ECS `scripts/smoke-test.sh`。脚本会在 Windows 中文工作区路径下临时创建 ASCII 盘符并在结束后撤销，同时构建 Debug、AndroidTest 和启用 R8/资源压缩的独立 Alpha APK。
+
+本地 API 已经启动、Debug APK 已自行安装后，用下面的可重复命令建立设备到 `127.0.0.1:3001` 的调试连接：
+
+```powershell
+.\scripts\connect-android-debug.ps1
+```
+
+脚本会要求恰好一台已就绪设备、验证 `/health`、安全刷新并复核同目标的 `adb reverse`；若已有不同目标的映射则拒绝覆盖。它不会安装 APK 或启停后端，只有显式传入 `-OpenApp` 才会打开已安装的 Debug App。设备或模拟器重启后要重新执行；多设备时使用 `-Serial <adb序列号>`。
+
+## 项目文档
+
+- [Android 1.0：ECS 最小云端部署计划](./docs/ECS_MINIMAL_DEPLOYMENT_PLAN.md)
+- [ECS 运维、备份、恢复与回滚手册](./docs/ECS_OPERATIONS_RUNBOOK.md)
+- [Android 1.0 外部平台与密钥配置手册](./docs/EXTERNAL_CREDENTIALS_SETUP.md)
+- [高德开放平台 API 接入说明](./docs/AMAP_API_INTEGRATION.md)
+- [多数据源架构与接入治理](./docs/DATA_PROVIDER_ARCHITECTURE.md)
+- [OpenAPI v1 规范](./docs/openapi.v1.json)
+- [当前实现边界](./docs/IMPLEMENTATION_STATUS.md)
+- [架构与隐私边界](./docs/ARCHITECTURE.md)
+- [数据字典](./docs/DATA_DICTIONARY.md)
+- [测试计划](./docs/TEST_PLAN.md)
+- [当前验证报告](./docs/VERIFICATION_REPORT.md)
+- [合规与发布门禁](./docs/COMPLIANCE_GATES.md)
+- [12 周及跨平台路线](./docs/ROADMAP.md)
+
+## 安全约束
+
+- 不要提交 `.env`、签名文件、短信/微信/高德/千问密钥。
+- 精确坐标只允许出现在自有 `POST /v1/recommendations` 请求体中；日志与行为事件禁止包含坐标。若经书面授权的供应商官方接口强制使用 HTTPS query，只能按架构文档完成 PIA、最小传输和全链路 URL 禁采集后作为出站例外。
+- 未获得数据提供方书面许可前，保持 `DATA_RIGHTS_MODE=LIVE_DISPLAY_ONLY`。
+- `LICENSED_ENRICHMENT` 还必须同时提供数据库授权记录 UUID 和未来到期时间；每项能力会按实际供应商查询数据库 operation，环境变量校验不是法律授权本身。
+- 授权缺失、撤销、过期、供应商不匹配或数据库不可用时，服务会在运行中自动降为 `LIVE_DISPLAY_ONLY`；生产 API 还必须配置直接上游的 `TRUSTED_PROXY_CIDRS`，不得无条件信任转发头。
+- 当前计划不包含抓取或复制第三方平台数据。
+
+供应商文档按三层处理：官方 endpoint、参数、响应和坐标系是必须匹配的技术事实；合同、书面授权、隐私与法律要求是不能绕过的发布门禁；接口组合、超时、排序和 UI 建议则由产品指标、测试、灰度与回滚决定，不会因为首个供应商是高德就把核心逻辑锁死。详见[多数据源架构与接入治理](./docs/DATA_PROVIDER_ARCHITECTURE.md)。

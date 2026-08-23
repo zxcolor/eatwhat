@@ -1,0 +1,51 @@
+{
+	"name": "@chi-shen-me/api",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"engines": {
+		"node": ">=24.7.0 <25"
+	},
+	"main": "dist/main.js",
+	"scripts": {
+		"build": "pnpm --filter @chi-shen-me/contracts build && tsc -p tsconfig.json",
+		"predev": "pnpm run build",
+		"dev": "node scripts/dev-compiled.mjs",
+		"start": "node dist/main.js",
+		"start:admin": "node dist/admin/admin-main.js",
+		"start:export-worker": "node dist/data-export/export-worker-main.js",
+		"db:migrate": "pnpm run build && node dist/database/migrate-cli.js",
+		"db:cleanup": "pnpm run build && node dist/database/cleanup-cli.js",
+		"typecheck": "pnpm --filter @chi-shen-me/contracts build && tsc -p tsconfig.json --noEmit",
+		"test": "pnpm run test:unit && pnpm run test:runtime",
+		"test:unit": "vitest run",
+		"test:runtime": "pnpm run build && node scripts/smoke-compiled.mjs",
+		"test:watch": "vitest"
+	},
+	"dependencies": {
+		"@alicloud/credentials": "2.4.7",
+		"@alicloud/dysmsapi20170525": "4.6.0",
+		"@alicloud/openapi-core": "1.0.8",
+		"@chi-shen-me/contracts": "workspace:*",
+		"@darabonba/typescript": "1.0.5",
+		"@simplewebauthn/server": "13.3.2",
+		"ali-oss": "6.23.0",
+		"@nestjs/common": "^11.1.11",
+		"@nestjs/core": "^11.1.11",
+		"@nestjs/platform-express": "^11.1.11",
+		"nodemailer": "9.0.5",
+		"pg": "^8.16.3",
+		"reflect-metadata": "^0.2.2",
+		"rxjs": "^7.8.2",
+		"zod": "^4.3.6"
+	},
+	"devDependencies": {
+		"@nestjs/testing": "^11.1.11",
+		"@types/node": "^24.10.1",
+		"@types/nodemailer": "8.0.1",
+		"@types/ali-oss": "6.23.3",
+		"@types/pg": "^8.15.6",
+		"typescript": "^7.0.2",
+		"vitest": "^4.1.11"
+	}
+}

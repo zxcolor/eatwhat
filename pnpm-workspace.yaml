@@ -1,0 +1,10 @@
+packages:
+  - apps/*
+  - packages/*
+
+# pnpm 11 fails closed when dependency lifecycle scripts are not reviewed.
+# These two packages are already pinned by pnpm-lock.yaml and their install
+# scripts select the compatible Alibaba SDK build and verify the esbuild binary.
+allowBuilds:
+  "@alicloud/openapi-core": true
+  esbuild: true

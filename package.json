@@ -1,0 +1,26 @@
+{
+  "name": "chi-shen-me",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.17.0",
+  "engines": {
+    "node": ">=24.7.0 <25"
+  },
+  "scripts": {
+    "build": "pnpm -r --if-present build",
+    "dev:api": "pnpm --filter @chi-shen-me/api dev",
+    "dev:admin": "pnpm --filter @chi-shen-me/admin dev",
+    "db:migrate": "pnpm --filter @chi-shen-me/api db:migrate",
+    "db:cleanup": "pnpm --filter @chi-shen-me/api db:cleanup",
+    "lint": "biome lint apps/api/src apps/api/scripts packages/contracts/src apps/admin/app apps/admin/components apps/admin/lib",
+    "test": "pnpm -r --if-present test",
+    "test:openapi": "pnpm --filter @chi-shen-me/contracts test:openapi",
+    "typecheck": "pnpm -r --if-present typecheck"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.9",
+    "@types/node": "^24.10.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
+  }
+}
