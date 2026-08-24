@@ -341,7 +341,7 @@ class MainActivityConfigUnavailableTest {
     private fun fallbackResponse(): RecommendationResponse = RecommendationResponse(
         requestId = "2f87007b-a417-4e3c-9adf-bf70011eca37",
         generatedAt = "2026-08-21T00:00:00Z",
-        coverage = Coverage.BEIJING_FOURTH_RING,
+        coverage = Coverage.NATIONWIDE,
         dataRightsMode = DataRightsMode.LIVE_DISPLAY_ONLY,
         ruleVersion = "rule-device-fallback-v1",
         promptVersion = "prompt-disabled",

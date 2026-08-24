@@ -13,8 +13,6 @@ import com.chishenme.app.data.remote.FeatureConfig
 import com.chishenme.app.data.remote.PrivateFeedbackRecord
 import com.chishenme.app.data.remote.PrivateFeedbackType
 import com.chishenme.app.data.remote.PersistenceCapabilities
-import com.chishenme.app.data.remote.PlaceSearchResponse
-import com.chishenme.app.data.remote.PlaceSearchResult
 import com.chishenme.app.data.remote.RecommendationHistoryItem
 import com.chishenme.app.data.remote.RecommendationResponse
 import com.chishenme.app.data.remote.RecommendationResult
@@ -240,68 +238,6 @@ class SavedResourcesViewModel @Inject constructor(
         config: FeatureConfig?,
         response: RecommendationResponse,
         result: RecommendationResult,
-        type: PrivateFeedbackType,
-    ) {
-        when (
-            val gate = PersistenceActionGate.evaluate(
-                config,
-                response,
-                result,
-                PersistenceCreation.PRIVATE_FEEDBACK,
-            )
-        ) {
-            is PersistenceGateDecision.Blocked -> {
-                mutableState.update { it.copy(message = gate.message) }
-                return
-            }
-            PersistenceGateDecision.Allowed -> Unit
-        }
-        if (!requireEnabled(SavedResourcesSection.PRIVATE_FEEDBACK, "私有反馈能力当前未开放，本次不会上传")) {
-            return
-        }
-        if (type in mutableState.value.submittedFeedback) return
-        launchMutation(
-            operation = { repository.createPrivateFeedback(response.requestId, result.resultToken, type) },
-            successMessage = "私有反馈已记录，不会形成公开评分",
-        ) { record ->
-                copy(
-                    submittedFeedback = submittedFeedback + type,
-                    privateFeedback = listOf(record) + privateFeedback.filterNot {
-                        it.feedbackId == record.feedbackId
-                    },
-                )
-        }
-    }
-
-    fun createFavorite(
-        config: FeatureConfig?,
-        response: PlaceSearchResponse,
-        result: PlaceSearchResult,
-        group: FavoriteGroup,
-    ) {
-        when (val gate = PersistenceActionGate.evaluate(config, response, result, PersistenceCreation.FAVORITE)) {
-            is PersistenceGateDecision.Blocked -> {
-                mutableState.update { it.copy(message = gate.message) }
-                return
-            }
-            PersistenceGateDecision.Allowed -> Unit
-        }
-        if (!requireEnabled(SavedResourcesSection.FAVORITES, "收藏能力当前未开放，本次不会上传")) return
-        launchMutation(
-            operation = { repository.createFavorite(response.requestId, result.resultToken, group) },
-            successMessage = if (group == FavoriteGroup.WANT_TO_GO) "已收藏到“想去”" else "已收藏到“常吃”",
-        ) { record ->
-                copy(
-                    favoriteSaved = true,
-                    favorites = listOf(record) + favorites.filterNot { it.favoriteId == record.favoriteId },
-                )
-        }
-    }
-
-    fun createPrivateFeedback(
-        config: FeatureConfig?,
-        response: PlaceSearchResponse,
-        result: PlaceSearchResult,
         type: PrivateFeedbackType,
     ) {
         when (

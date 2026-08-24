@@ -221,7 +221,7 @@ private object SearchUnusedLocationClient : ForegroundLocationClient {
 
 private object SearchUnusedRecommendationApi : RecommendationApi {
     override suspend fun featureConfig(): FeatureConfig = FeatureConfig(
-        coverageName = "北京四环内",
+        coverageName = "全国服务",
         dataRightsMode = DataRightsMode.LIVE_DISPLAY_ONLY,
         aiEnabled = false,
         accountsEnabled = false,

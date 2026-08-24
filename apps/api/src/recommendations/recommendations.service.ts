@@ -17,7 +17,6 @@ import {
 import { RecommendationRequestRegistry } from "../common/recommendation-request.registry.js";
 import { APP_CONFIG, type AppConfig } from "../config/app-config.js";
 import { DataRightsPolicy } from "../config/data-rights-policy.js";
-import { isInsideBeijingFourthRingPilot } from "./domain/coverage.js";
 import {
 	PLACE_PROVIDER,
 	type PlaceCandidate,
@@ -96,24 +95,6 @@ export class RecommendationsService {
 		// time so a forged requestTime cannot turn a closed place into an open one.
 		const trustedContext = { ...context, requestTime: generatedAt };
 
-		if (!isInsideBeijingFourthRingPilot(context.location)) {
-			const effectiveDataRightsMode = await this.dataRightsPolicy.effectiveMode(
-				this.places.kind,
-			);
-			return RecommendationResponseSchema.parse({
-				requestId,
-				generatedAt,
-				coverage: "OUTSIDE_PILOT",
-				dataRightsMode: effectiveDataRightsMode,
-				ruleVersion: this.config.versions.rule,
-				promptVersion: this.config.versions.prompt,
-				modelVersion: this.config.versions.ruleFallbackModel,
-				aiFallbackUsed: false,
-				results: [],
-				notice: "当前位置不在北京四环试点区，请手动选择试点区内地点",
-			});
-		}
-
 		const resolvedIntent = await this.intents.resolve(trustedContext);
 		let candidates: readonly PlaceCandidate[];
 		try {
@@ -179,7 +160,7 @@ export class RecommendationsService {
 			return RecommendationResponseSchema.parse({
 				requestId,
 				generatedAt,
-				coverage: "BEIJING_FOURTH_RING",
+				coverage: "NATIONWIDE",
 				dataRightsMode: effectiveDataRightsMode,
 				ruleVersion: this.config.versions.rule,
 				promptVersion: this.config.versions.prompt,

@@ -98,7 +98,13 @@ describe("Nest database pool lifecycle", () => {
 			end: vi.fn(async () => {
 				events.push("end");
 			}),
-			query: vi.fn(async () => ({ rows: [{ ready: 1 }], rowCount: 1 })),
+			query: vi.fn(async (query: unknown) => {
+				if (typeof query !== "object" || query === null) {
+					throw new TypeError("expected a query configuration object");
+				}
+				(query as { callback?: () => void }).callback = () => undefined;
+				return { rows: [{ ready: 1 }], rowCount: 1 };
+			}),
 		};
 		const database = new DatabasePool(
 			loadAppConfig({
@@ -112,14 +118,17 @@ describe("Nest database pool lifecycle", () => {
 		await database.onApplicationBootstrap();
 		expect(events).toEqual(["release"]);
 		await expect(database.isReady()).resolves.toBe(true);
-		expect(fakePool.query).toHaveBeenCalledWith({
+		const firstReadinessQuery = fakePool.query.mock.calls[0]?.[0];
+		expect(firstReadinessQuery).toMatchObject({
 			text: "SELECT 1",
 			query_timeout: 2_000,
 		});
+		expect(Object.isExtensible(firstReadinessQuery)).toBe(true);
 		fakePool.query.mockRejectedValueOnce(
 			new Error("private database readiness failure"),
 		);
 		await expect(database.isReady()).resolves.toBe(false);
+		expect(fakePool.query.mock.calls[1]?.[0]).not.toBe(firstReadinessQuery);
 		await expect(
 			database.withTransaction(async (transaction) => {
 				await transaction.query("SELECT transaction_work");

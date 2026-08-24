@@ -444,7 +444,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 				env.PRIVATE_FEEDBACK_ENABLED,
 				"PRIVATE_FEEDBACK_ENABLED",
 			),
-			minimumSupportedVersion: env.MINIMUM_SUPPORTED_VERSION?.trim() || "0.1.0",
+			minimumSupportedVersion: env.MINIMUM_SUPPORTED_VERSION?.trim() || "0.1.1",
 		}),
 	});
 }

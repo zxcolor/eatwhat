@@ -554,7 +554,19 @@ function Assert-EcsOperationalGates {
             throw "Dedicated API vhost is missing a route boundary: $required"
         }
     }
-    if ($apiVhost -match '(?m)^\s*server_name\s+(?:www\.)?unfinished-era\.com\s*;' -or
+    $apiVhostWithoutComments = [System.Text.RegularExpressions.Regex]::Replace(
+        $apiVhost,
+        '(?m)#.*$',
+        ''
+    )
+    $apiServerNames = @([System.Text.RegularExpressions.Regex]::Matches(
+            $apiVhostWithoutComments,
+            '(?is)\bserver_name\s+(?<names>[^;]+);'
+        ) | ForEach-Object {
+            $_.Groups['names'].Value -split '\s+' | Where-Object { $_ -ne '' }
+        })
+    if ($apiServerNames -contains 'www.unfinished-era.com' -or
+        $apiServerNames -contains 'unfinished-era.com' -or
         $apiVhost -match '(?s)location\s+/\s*\{[^}]*proxy_pass') {
         throw 'Dedicated API vhost must not claim the website domain or proxy its root.'
     }
@@ -571,9 +583,21 @@ function Assert-EcsOperationalGates {
             throw "Dedicated API ACME vhost is missing a boundary: $required"
         }
     }
+    $apiAcmeWithoutComments = [System.Text.RegularExpressions.Regex]::Replace(
+        $apiAcmeVhost,
+        '(?m)#.*$',
+        ''
+    )
+    $apiAcmeServerNames = @([System.Text.RegularExpressions.Regex]::Matches(
+            $apiAcmeWithoutComments,
+            '(?is)\bserver_name\s+(?<names>[^;]+);'
+        ) | ForEach-Object {
+            $_.Groups['names'].Value -split '\s+' | Where-Object { $_ -ne '' }
+        })
     if ($apiAcmeVhost -match '(?i)proxy_pass' -or
         $apiAcmeVhost -match '(?m)^\s*listen\s+443\b' -or
-        $apiAcmeVhost -match '(?m)^\s*server_name\s+(?:www\.)?unfinished-era\.com\s*;') {
+        $apiAcmeServerNames -contains 'www.unfinished-era.com' -or
+        $apiAcmeServerNames -contains 'unfinished-era.com') {
         throw 'Dedicated API ACME vhost must be HTTP-only, must not proxy, and must not claim the website domain.'
     }
 
@@ -598,10 +622,18 @@ function Assert-EcsOperationalGates {
     $legacyNginxActivation = [System.IO.File]::ReadAllText(
         (Join-Path -Path $BundleRoot -ChildPath 'scripts/activate-baota-nginx.sh')
     )
-    if (-not $legacyNginxActivation.Contains('LEGACY_MAIN_VHOST_ACTIVATION_DISABLED=true') -or
-        -not $legacyNginxActivation.Contains('exit 64') -or
-        $legacyNginxActivation -match '(?i)nginx\s+-s\s+reload' -or
-        $legacyNginxActivation -match '(?im)^\s*(?:cp|install|mv|rm|sed)\b') {
+    $expectedLegacyNginxActivation = (@(
+            '#!/usr/bin/env bash',
+            '',
+            'set -Eeuo pipefail',
+            'umask 077',
+            '',
+            'printf ''LEGACY_MAIN_VHOST_ACTIVATION_DISABLED=true\n'' >&2',
+            'printf ''This retired command can never modify www.unfinished-era.com. Use activate-api-subdomain-nginx.sh after dedicated API TLS is ready.\n'' >&2',
+            'exit 64',
+            ''
+        ) -join "`n")
+    if ($legacyNginxActivation -cne $expectedLegacyNginxActivation) {
         throw 'Retired main-site Nginx activation must remain an unconditional fail-closed tombstone.'
     }
 
@@ -616,12 +648,15 @@ function Assert-EcsOperationalGates {
         'lock_file="$lock_directory/public-nginx.lock"',
         'flock -n 9',
         'openssl x509 -in "$certificate" -noout -checkend 604800',
+        'openssl s_client -connect 127.0.0.1:443 -servername api.unfinished-era.com',
         'proxy_pass http://127.0.0.1:13001;',
         '"$nginx" -t -q -p /www/server/nginx/ -c "$isolated_config"',
         'mv -Tf -- "$candidate" "$api_vhost"',
         '--resolve api.unfinished-era.com:80:127.0.0.1',
         '--resolve api.unfinished-era.com:443:127.0.0.1',
         'https://api.unfinished-era.com/admin/v1',
+        'api.unfinished-era.com is claimed by an unexpected or duplicate vhost',
+        'API vhost installation changed public hostname ownership',
         'wordpress_unchanged',
         'rollback_api_vhost',
         'NGINX_API_SUBDOMAIN_ROLLBACK=OK',
@@ -645,6 +680,7 @@ function Assert-EcsOperationalGates {
         'lock_file="$lock_directory/public-nginx.lock"',
         'flock -n 9',
         'openssl x509 -in "$certificate" -noout -checkend 604800',
+        'openssl s_client -connect 127.0.0.1:443 -servername api.unfinished-era.com',
         'active API vhost has the wrong upstream',
         '"$nginx" -t >/dev/null',
         '"$nginx" -s reload >/dev/null',

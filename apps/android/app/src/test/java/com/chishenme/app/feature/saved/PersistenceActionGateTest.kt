@@ -9,9 +9,6 @@ import com.chishenme.app.data.remote.DataRightsMode
 import com.chishenme.app.data.remote.FeatureConfig
 import com.chishenme.app.data.remote.OpenStatus
 import com.chishenme.app.data.remote.PersistenceCapabilities
-import com.chishenme.app.data.remote.PlaceSearchCoordinate
-import com.chishenme.app.data.remote.PlaceSearchResponse
-import com.chishenme.app.data.remote.PlaceSearchResult
 import com.chishenme.app.data.remote.RecommendationActions
 import com.chishenme.app.data.remote.RecommendationDataMode
 import com.chishenme.app.data.remote.RecommendationResponse
@@ -107,51 +104,6 @@ class PersistenceActionGateTest {
         assertBlockedWithoutToken(decision, stale.resultToken)
     }
 
-    @Test
-    fun `licensed live search token requires explicit account and persistence capabilities`() {
-        val result = searchResult()
-        val response = searchResponse(result)
-
-        assertTrue(
-            PersistenceActionGate.evaluate(
-                config(),
-                response,
-                result,
-                PersistenceCreation.FAVORITE,
-            ) is PersistenceGateDecision.Allowed,
-        )
-        assertTrue(
-            PersistenceActionGate.evaluate(
-                config(),
-                response,
-                result,
-                PersistenceCreation.PRIVATE_FEEDBACK,
-            ) is PersistenceGateDecision.Allowed,
-        )
-        assertTrue(
-            PersistenceActionGate.evaluate(
-                config().copy(accountsEnabled = false),
-                response,
-                result,
-                PersistenceCreation.FAVORITE,
-            ) is PersistenceGateDecision.Blocked,
-        )
-    }
-
-    @Test
-    fun `demo and unknown search modes fail closed without leaking token`() {
-        listOf("DEMO", "FUTURE_SAFE").forEach { mode ->
-            val result = searchResult(dataMode = mode)
-            val decision = PersistenceActionGate.evaluate(
-                config(),
-                searchResponse(result),
-                result,
-                PersistenceCreation.FAVORITE,
-            )
-            assertBlockedWithoutToken(decision, result.resultToken)
-        }
-    }
-
     private fun assertBlockedWithoutToken(decision: PersistenceGateDecision, token: String) {
         assertTrue(decision is PersistenceGateDecision.Blocked)
         assertFalse((decision as PersistenceGateDecision.Blocked).message.contains(token))
@@ -159,7 +111,7 @@ class PersistenceActionGateTest {
     }
 
     private fun config() = FeatureConfig(
-        coverageName = "北京四环试点区",
+        coverageName = "全国服务",
         dataRightsMode = DataRightsMode.LICENSED_ENRICHMENT,
         aiEnabled = false,
         accountsEnabled = true,
@@ -187,7 +139,7 @@ class PersistenceActionGateTest {
     private fun response(mode: DataRightsMode, result: RecommendationResult) = RecommendationResponse(
         requestId = "11111111-1111-4111-8111-111111111111",
         generatedAt = "2026-08-21T00:00:00Z",
-        coverage = Coverage.BEIJING_FOURTH_RING,
+        coverage = Coverage.NATIONWIDE,
         dataRightsMode = mode,
         ruleVersion = "rule-v1",
         promptVersion = "prompt-v1",
@@ -224,28 +176,5 @@ class PersistenceActionGateTest {
         confidence = Confidence.HIGH,
         aiAssisted = false,
         sourceAttribution = "经授权餐厅数据",
-    )
-
-    private fun searchResponse(result: PlaceSearchResult) = PlaceSearchResponse(
-        requestId = "22222222-2222-4222-8222-222222222222",
-        coverage = Coverage.BEIJING_FOURTH_RING,
-        results = listOf(result),
-        notice = null,
-    )
-
-    private fun searchResult(dataMode: String = "LIVE") = PlaceSearchResult(
-        resultToken = "S".repeat(43),
-        rank = 2,
-        name = "学院路面馆",
-        address = "海淀区学院路 25 号",
-        location = PlaceSearchCoordinate(39.9, 116.4, CoordinateReferenceSystem.GCJ02),
-        distanceMeters = 300,
-        sourceLabel = "经授权餐厅数据",
-        sourceRating = null,
-        averageCostYuan = 25.0,
-        openStatus = OpenStatus.OPEN,
-        tags = listOf("面食"),
-        dataMode = dataMode,
-        actions = RecommendationActions(false, false, false, false),
     )
 }

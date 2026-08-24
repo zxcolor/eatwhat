@@ -2,9 +2,6 @@ package com.chishenme.app.feature.saved
 
 import com.chishenme.app.data.remote.DataRightsMode
 import com.chishenme.app.data.remote.FeatureConfig
-import com.chishenme.app.data.remote.Coverage
-import com.chishenme.app.data.remote.PlaceSearchResponse
-import com.chishenme.app.data.remote.PlaceSearchResult
 import com.chishenme.app.data.remote.RecommendationDataMode
 import com.chishenme.app.data.remote.RecommendationResponse
 import com.chishenme.app.data.remote.RecommendationResult
@@ -41,51 +38,6 @@ internal object PersistenceActionGate {
         }
         if (config.dataRightsMode != DataRightsMode.LICENSED_ENRICHMENT) {
             return blocked("数据授权状态已变化，本次不会上传餐厅引用")
-        }
-        val capabilities = config.effectivePersistenceCapabilities()
-        val enabled = capabilities.savedResourceIdsEnabled && when (creation) {
-            PersistenceCreation.FAVORITE -> capabilities.favoritesEnabled
-            PersistenceCreation.PRIVATE_FEEDBACK -> capabilities.privateFeedbackEnabled
-        }
-        return if (enabled) {
-            PersistenceGateDecision.Allowed
-        } else {
-            blocked(
-                if (creation == PersistenceCreation.FAVORITE) {
-                    "收藏能力当前未开放，本次不会上传"
-                } else {
-                    "私有反馈能力当前未开放，本次不会上传"
-                },
-            )
-        }
-    }
-
-    fun evaluate(
-        config: FeatureConfig?,
-        response: PlaceSearchResponse,
-        result: PlaceSearchResult,
-        creation: PersistenceCreation,
-    ): PersistenceGateDecision {
-        if (result.dataMode == "DEMO") {
-            return blocked("演示餐厅不能收藏或记录反馈，本次不会上传")
-        }
-        if (result.dataMode != "LIVE") {
-            return blocked("当前搜索数据模式尚未确认保存规则，本次不会上传")
-        }
-        if (response.coverage != Coverage.BEIJING_FOURTH_RING) {
-            return blocked("当前位置不在试点区，本次不会上传餐厅引用")
-        }
-        if (response.results.none { it.resultToken == result.resultToken }) {
-            return blocked("搜索会话已变化，请返回结果页重新打开")
-        }
-        if (config == null) {
-            return blocked("保存能力尚未通过远程配置确认，本次不会上传")
-        }
-        if (!config.accountsEnabled || config.authCapabilities?.accountsEnabled != true) {
-            return blocked("账号能力当前未开放；游客搜索仍可继续使用")
-        }
-        if (config.dataRightsMode != DataRightsMode.LICENSED_ENRICHMENT) {
-            return blocked("当前数据授权不允许保存搜索结果引用")
         }
         val capabilities = config.effectivePersistenceCapabilities()
         val enabled = capabilities.savedResourceIdsEnabled && when (creation) {

@@ -13,7 +13,7 @@ if [[ "$(id -u)" -ne 0 ]]; then
 fi
 [[ "$#" -eq 0 ]] || die 'activate-api-subdomain-nginx.sh does not accept arguments'
 
-for required_command in awk chmod chown cp curl date dirname find flock grep id install mktemp mv openssl readlink realpath rm sed sha256sum sleep stat; do
+for required_command in awk chmod chown cp curl date dirname find flock grep id install mktemp mv openssl readlink realpath rm sed sha256sum sleep stat timeout; do
   command -v "$required_command" >/dev/null || die "required command is unavailable: $required_command"
 done
 
@@ -31,6 +31,8 @@ release_id="${release_root##*/}"
 [[ "$release_root" == "/opt/chi-shen-me/releases/$release_id" ]] || die 'unexpected release path'
 [[ "$(realpath -e -- "$release_root")" == "$release_root" && ! -L "$release_root" ]] ||
   die 'release must not be a link'
+[[ "$(stat -c '%a:%u:%g' "$release_root")" == '700:0:0' ]] ||
+  die 'release must be root:root mode 0700'
 [[ "$script_path" == "$script_dir/activate-api-subdomain-nginx.sh" ]] || die 'unexpected activation script path'
 
 manifest="$bundle_root/SHA256SUMS"
@@ -55,6 +57,8 @@ fi
 "$preflight" >/dev/null
 
 [[ -L "$current_link" ]] || die 'current must be a release symlink before publishing the API vhost'
+[[ "$(stat -c '%u:%g' "$current_link")" == '0:0' ]] || die 'current release symlink must be owned by root'
+[[ "$(readlink -- "$current_link")" == "$release_root" ]] || die 'current must directly target this release'
 [[ "$(realpath -e -- "$current_link")" == "$release_root" ]] ||
   die 'the API vhost may be activated only from the current release'
 
@@ -183,6 +187,124 @@ wordpress_unchanged() {
   [[ "$(sha256sum "$wordpress_vhost" | awk '{print $1}')" == "$wordpress_sha_before" ]]
 }
 
+server_name_sources_from_dump() {
+  local wanted="$1"
+  awk -v wanted="$wanted" '
+    function emit_server_name(directive, source, value, count, i, tokens) {
+      value = directive
+      sub(/^[[:space:]]*server_name[[:space:]]+/, "", value)
+      sub(/;.*/, "", value)
+      count = split(value, tokens, /[[:space:]]+/)
+      for (i = 1; i <= count; i += 1) {
+        if (tokens[i] == wanted && source == "") {
+          exit 2
+        }
+        if (tokens[i] == wanted && !seen[source]) {
+          seen[source] = 1
+          print source
+        }
+      }
+    }
+    /^# configuration file / {
+      source = $0
+      sub(/^# configuration file /, "", source)
+      sub(/:$/, "", source)
+      next
+    }
+    {
+      line = $0
+      sub(/[[:space:]]*#.*/, "", line)
+      if (collecting) {
+        directive = directive " " line
+      } else if (match(line, /server_name[[:space:]]+/)) {
+        directive = substr(line, RSTART)
+        collecting = 1
+      }
+      if (collecting && index(directive, ";") > 0) {
+        emit_server_name(directive, source)
+        directive = ""
+        collecting = 0
+      }
+    }
+  '
+}
+
+capture_hostname_inventory() {
+  local dump
+  local api_output
+  local www_output
+  local root_output
+  dump="$("$nginx" -T 2>/dev/null)" || return 1
+  api_output="$(server_name_sources_from_dump 'api.unfinished-era.com' <<<"$dump")" || return 1
+  www_output="$(server_name_sources_from_dump 'www.unfinished-era.com' <<<"$dump")" || return 1
+  root_output="$(server_name_sources_from_dump 'unfinished-era.com' <<<"$dump")" || return 1
+  api_hostname_sources=()
+  www_hostname_sources=()
+  root_hostname_sources=()
+  if [[ -n "$api_output" ]]; then
+    mapfile -t api_hostname_sources <<<"$api_output"
+  fi
+  if [[ -n "$www_output" ]]; then
+    mapfile -t www_hostname_sources <<<"$www_output"
+  fi
+  if [[ -n "$root_output" ]]; then
+    mapfile -t root_hostname_sources <<<"$root_output"
+  fi
+  unset dump
+}
+
+source_list_signature() {
+  printf '%s\0' "$@" | sha256sum | awk '{print $1}'
+}
+
+api_hostname_is_not_duplicated() {
+  [[ "${#api_hostname_sources[@]}" -le 1 ]] || return 1
+  [[ "${#api_hostname_sources[@]}" -eq 0 || "${api_hostname_sources[0]}" == "$api_vhost" ]]
+}
+
+api_hostname_uses_target_only() {
+  [[ "${#api_hostname_sources[@]}" -eq 1 && "${api_hostname_sources[0]}" == "$api_vhost" ]]
+}
+
+website_hostnames_exclude_api_target() {
+  local source
+  for source in "${www_hostname_sources[@]}" "${root_hostname_sources[@]}"; do
+    [[ "$source" != "$api_vhost" ]] || return 1
+  done
+}
+
+hostname_ownership_matches_baseline() {
+  [[ "$(source_list_signature "${api_hostname_sources[@]}")" == "$api_ownership_before" ]] || return 1
+  [[ "$(source_list_signature "${www_hostname_sources[@]}")" == "$www_ownership_before" ]] || return 1
+  [[ "$(source_list_signature "${root_hostname_sources[@]}")" == "$root_ownership_before" ]]
+}
+
+public_ownership_is_safe_after_install() {
+  api_hostname_uses_target_only || return 1
+  website_hostnames_exclude_api_target || return 1
+  [[ "$(source_list_signature "${www_hostname_sources[@]}")" == "$www_ownership_before" ]] || return 1
+  [[ "$(source_list_signature "${root_hostname_sources[@]}")" == "$root_ownership_before" ]]
+}
+
+served_certificate_matches_file() {
+  local expected_sha
+  local served_sha
+  local attempt
+  expected_sha="$(openssl x509 -in "$certificate" -outform DER | sha256sum | awk '{print $1}')"
+  for attempt in {1..8}; do
+    served_sha="$(
+      timeout 3 openssl s_client -connect 127.0.0.1:443 -servername api.unfinished-era.com </dev/null 2>/dev/null |
+        openssl x509 -outform DER 2>/dev/null |
+        sha256sum | awk '{print $1}'
+    )" || true
+    if [[ -n "$expected_sha" && "$served_sha" == "$expected_sha" ]]; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 rollback_api_vhost() {
   local rollback_ok='true'
   local live_sha=''
@@ -226,6 +348,12 @@ rollback_api_vhost() {
     "$nginx" -t >/dev/null || rollback_ok='false'
   fi
   if [[ "$rollback_ok" == 'true' ]]; then
+    capture_hostname_inventory || rollback_ok='false'
+  fi
+  if [[ "$rollback_ok" == 'true' ]]; then
+    hostname_ownership_matches_baseline || rollback_ok='false'
+  fi
+  if [[ "$rollback_ok" == 'true' ]]; then
     "$nginx" -s reload >/dev/null || rollback_ok='false'
   fi
   wordpress_unchanged || rollback_ok='false'
@@ -237,6 +365,9 @@ on_exit() {
   local status="$?"
   trap - EXIT INT TERM HUP
   set +e
+  if [[ "$status" -ne 0 ]]; then
+    printf 'API_VHOST_BACKUP=%s\n' "$backup_directory" >&2
+  fi
   if [[ "$status" -ne 0 && "$installation_started" == 'true' ]]; then
     if rollback_api_vhost; then
       printf 'NGINX_API_SUBDOMAIN_ROLLBACK=OK\n' >&2
@@ -252,6 +383,16 @@ trap on_exit EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
+
+api_hostname_sources=()
+www_hostname_sources=()
+root_hostname_sources=()
+capture_hostname_inventory || die 'could not inventory BaoTa Nginx hostname ownership' 10
+api_hostname_is_not_duplicated || die 'api.unfinished-era.com is claimed by an unexpected or duplicate vhost' 10
+website_hostnames_exclude_api_target || die 'the existing API vhost claims a WordPress hostname' 10
+api_ownership_before="$(source_list_signature "${api_hostname_sources[@]}")"
+www_ownership_before="$(source_list_signature "${www_hostname_sources[@]}")"
+root_ownership_before="$(source_list_signature "${root_hostname_sources[@]}")"
 
 placeholder_count="$(grep -o '__API_LOOPBACK_PORT__' "$template" | awk 'END {print NR}')"
 [[ "$placeholder_count" == '4' ]] || die 'API vhost template must contain exactly four loopback port placeholders'
@@ -279,10 +420,13 @@ mv -Tf -- "$candidate" "$api_vhost"
 wordpress_unchanged || die 'WordPress vhost changed during API vhost installation' 22
 
 "$nginx" -t >/dev/null || die 'BaoTa Nginx rejected the installed API vhost' 23
+capture_hostname_inventory || die 'could not inventory hostname ownership after API vhost installation' 23
+public_ownership_is_safe_after_install || die 'API vhost installation changed public hostname ownership' 23
 wordpress_unchanged || die 'WordPress vhost changed during full Nginx validation' 24
 "$nginx" -s reload >/dev/null || die 'BaoTa Nginx reload failed' 25
 sleep 1
 wordpress_unchanged || die 'WordPress vhost changed during Nginx reload' 26
+served_certificate_matches_file || die 'BaoTa Nginx is not serving the reviewed API certificate' 26
 
 http_status="$(curl --silent --show-error --max-time 8 --noproxy '*' \
   --resolve api.unfinished-era.com:80:127.0.0.1 \
@@ -320,6 +464,8 @@ wordpress_unchanged || die 'WordPress vhost changed during API smoke tests' 31
 [[ "$(sha256sum "$api_vhost" | awk '{print $1}')" == "$installed_sha" ]] ||
   die 'API vhost changed during smoke tests' 32
 "$nginx" -t >/dev/null || die 'final BaoTa Nginx validation failed' 33
+capture_hostname_inventory || die 'could not inventory hostname ownership after API smoke tests' 34
+public_ownership_is_safe_after_install || die 'public hostname ownership changed during API smoke tests' 34
 wordpress_unchanged || die 'WordPress vhost changed during final Nginx validation' 34
 [[ "$(sha256sum "$api_vhost" | awk '{print $1}')" == "$installed_sha" ]] ||
   die 'API vhost changed during final Nginx validation' 34

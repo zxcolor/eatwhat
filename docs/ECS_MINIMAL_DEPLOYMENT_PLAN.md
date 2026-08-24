@@ -1,30 +1,30 @@
 # Android 1.0：ECS 最小云端部署计划
 
-> 当前检查点：2026-08-23，线上仍为部署修订 `20260823-080633-r2`；最终候选 `20260823-024841-cloudsep-final` 已构建并通过不可变 bundle、权限、镜像与 Compose 严格预检，但未启动或切流。  
-> 尚未公开：`AMAP_ENABLED=false`，独立的 `api.unfinished-era.com` DNS、证书和 vhost 均未激活，真实高德和公网手机闭环均未验收。  
+> 当前检查点：2026-08-23，线上全国版 release 为 `20260823T071142Z-nationwide`；不可变 bundle、镜像、权限、Compose、数据库 readiness、真实高德与自动回退门禁均已通过。
+> `AMAP_ENABLED=true`，独立的 `api.unfinished-era.com` DNS、Let's Encrypt 证书、vhost 和自动续期均已激活；ECS 与工作站公网 HTTPS 闭环通过，关闭 Wi-Fi 的外部真机仍待复验。
 > 适用范围：北京地域 2 vCPU / 2 GiB / 40 GiB / 3 Mbps ECS，封闭邀请制 Alpha。
 
 ## 1. 结论与当前状态
 
-现有 ECS 足以承载单实例、少量受邀测试者的 Alpha，不需要把决策算法搬进 APK，也不需要为节省服务器资源删除 Android 1.0 功能。服务器的主要负担是 PostgreSQL、账号状态和容器运行时，不是规则排序本身。
+现有 ECS 足以承载单实例、少量受邀测试者的 Alpha，不需要把决策算法搬进 APK，也不需要为节省服务器资源删除 Android 1.0 的决策能力。直接餐厅关键词搜索从客户端移除是产品范围收口，不是服务器容量妥协；服务器的主要负担是 PostgreSQL、账号状态和容器运行时，不是规则排序本身。
 
 当前部署严格分为三个检查点：
 
 | 检查点 | 当前结果 | 是否可对外 |
 | --- | --- | --- |
-| 基础运行时 | API release `20260823-080633`、部署修订 `20260823-080633-r2` 的 PostGIS、迁移和 API 已在 ECS 本机通过健康检查 | 仅主机本地 |
-| 新候选发布 | `20260823-024841-cloudsep-final` 的 Linux/amd64 API 镜像、13 项发布坐标、root-only 权限、共享 Secret/TLS 形状与 Compose 通过预检；未启动、未迁移、未切换 `current` | 否 |
-| 高德真实数据 | `AMAP_ENABLED=false`；缺真实 Web Service Key、匹配的签名私钥和 ECS 出口 IP 白名单确认 | 否 |
-| 公网域名 | 主站停止页保持不动；独立 API 子域尚未配置 DNS、证书或 vhost | 否 |
+| 基础运行时 | `20260823T071142Z-nationwide` 已成为 `current`；API/PostgreSQL healthy，`/health/ready` 为 200，PostgreSQL 容器在切换中未变化 | 封闭 Alpha |
+| 新候选发布 | Linux/amd64 镜像 `sha256:44041f99d06b1758088b58a22af83707e56db81783c8c4daadc7347e9da7c3a7`、root-only release、共享 Secret/TLS 与 Compose 已通过预检、上海隔离验收和动态激活 | 是 |
+| 高德真实数据 | `AMAP_ENABLED=true`；Key、数字签名与固定出口 IP 白名单门禁通过，隔离容器、活动容器和公网均得到 `AMAP/LIVE` 结果 | 封闭 Alpha |
+| 公网域名 | `https://api.unfinished-era.com` 已启用独立 DNS、证书、vhost 与自动续期；只公开健康探针和 `/v1`，`/admin/v1` 为 404 | 封闭 Alpha |
 | WordPress | 原站点文件、宝塔数据库、证书和两份恢复点均保留；当前离线 | 不受本次 API 基础运行时影响 |
 | 登录 | 账号、手机号、邮箱、微信、QQ 均保持关闭 | 否 |
 
-因此，“基础 API 健康”只证明旧容器、数据库、迁移和本机回环链路可用，不代表真实餐厅推荐、域名 HTTPS、外部手机或登录已经完成。当前旧 API 的 `/health` 为 200，而 `/health/ready` 为 404；候选预检也不会启动服务，所以两者都不能冒充新版 readiness 已通过。
+当前真实地点搜索和餐厅推荐的技术链路、数据库 readiness、域名 HTTPS 与工作站公网访问均已通过；这仍不等于商业授权、登录供应商、关闭 Wi-Fi 真机矩阵、App 备案或 Android 1.0 公开发布门禁已经完成。
 
 ## 2. 当前实际拓扑
 
 ```text
-Android Alpha（未来公网流量，api.unfinished-era.com）
+Android Alpha（公网流量，api.unfinished-era.com）
         |
         | HTTPS :443
         v
@@ -43,8 +43,8 @@ NestJS 公共 API（单实例，172.30.10.3 / 172.30.20.3）
         v
 PostgreSQL 17 + PostGIS 3.5（172.30.20.2，无宿主机端口）
 
-API 出站（具备凭据并单独验收后才启用）：
-  - 高德 Web Service：阶段 A
+API 出站：
+  - 高德 Web Service：阶段 A 已启用并完成基础真实 smoke
   - 阿里云短信、微信开放平台：阶段 B
 ```
 
@@ -56,9 +56,11 @@ API 的 `TRUSTED_PROXY_CIDRS` 固定为 edge 网关 `172.30.10.1/32`。不能改
 
 | 能力 | APK | ECS | Android 1.0 状态 |
 | --- | --- | --- | --- |
-| 隐私同意、主题、偏好、固定试点和结果 UI | 本地 | 不需要 | 保留 |
+| 隐私同意、主题、偏好、内置快捷地点和结果 UI | 本地 | 不需要 | 保留 |
 | 用户主动定位 | 权限与坐标采集 | 只接收请求坐标 | 保留 |
-| 地点搜索、餐厅详情、推荐 | 发 HTTPS JSON 请求并展示 | 高德适配、校验、过滤和结果生成 | 待阶段 A |
+| 自动定位与手动选址 | 采集或选择本次推荐起点；地点关键词经 HTTPS JSON 请求 | 地点适配、校验和最多 5 条结果 | Android 1.0 保留，作为决策前置步骤 |
+| 餐厅推荐与推荐详情 | 发 HTTPS JSON 请求并展示主推荐和备选 | 高德适配、校验、过滤和结果生成 | 推荐云端技术闭环通过；详情、真机与授权矩阵待验收 |
+| 独立餐厅关键词搜索 | 不展示、不路由、不调用 | 保留 `/v1/place-search`、OpenAPI 与 provider | 仅服务端独立能力，不属于 Android 1.0 |
 | 最低版本与能力发现 | 执行门禁 | `/v1/config` 提供配置 | 基础 API 已具备 |
 | 推荐事件 | 失败不阻断推荐 | 单实例内存登记 | 保留 |
 | 手机号/微信登录与会话 | 保存安全令牌 | 短信、微信、认证事务和数据库 | 待阶段 B |
@@ -69,9 +71,11 @@ API 的 `TRUSTED_PROXY_CIDRS` 固定为 edge 网关 `172.30.10.1/32`。不能改
 
 `GET /v1/config` 只通过供应商无关的 `serviceCapabilities` 声明
 `recommendationsEnabled`、`locationSearchEnabled` 和 `placeSearchEnabled`。对象缺失、
-字段缺失或值不是明确的 `true` 时，Android 一律按关闭处理。地点关键词搜索还把
-能力判断与产生它的可信配置 generation 绑定：旧 generation 的 `true` 不能取得新
-generation 的远程访问 lease，因此配置刷新或能力关闭后不得用旧 UI 状态继续发网。
+字段缺失或值不是明确的 `true` 时，共享契约和服务端按失败关闭处理。Android 1.0
+只消费前两项并无条件忽略 `placeSearchEnabled`；即使它为 `true`，客户端也没有直接餐厅
+关键词搜索入口、路由或请求。地点搜索能力判断与产生它的可信配置 generation 绑定：旧
+generation 的 `true` 不能取得新 generation 的远程访问 lease，因此配置刷新或能力关闭后
+不得用旧 UI 状态继续发网。
 该对象只表示当前已选 adapter 的本地配置是否可用，不探测高德配额，也不向客户端
 披露具体供应商身份。
 
@@ -138,13 +142,14 @@ postgres.internal:5432/chi_shen_me
 COMPOSE_PROJECT_NAME=chi-shen-me-alpha
 SHARED_STATE_DIRECTORY=/opt/chi-shen-me/shared
 API_LOOPBACK_PORT=13001
-API_IMAGE_ID=sha256:<已校验的 API 镜像 ID>
+API_IMAGE=chi-shen-me-api:20260823T071142Z-nationwide
+API_IMAGE_ID=sha256:44041f99d06b1758088b58a22af83707e56db81783c8c4daadc7347e9da7c3a7
 POSTGRES_DB=chi_shen_me
 POSTGRES_BOOTSTRAP_USER=postgres_bootstrap
 POSTGRES_VOLUME_NAME=chi-shen-me-alpha_postgres_data
 POSTGIS_IMAGE_ID=sha256:<已校验的 PostGIS 镜像 ID>
-MINIMUM_SUPPORTED_VERSION=0.1.0
-AMAP_ENABLED=false
+MINIMUM_SUPPORTED_VERSION=0.1.1
+AMAP_ENABLED=true
 RETENTION_MODE=--dry-run
 ```
 
@@ -171,20 +176,20 @@ ACCOUNTS_ENABLED=false
 
 ## 7. 高德阶段 A 门禁
 
-当前保持 `AMAP_ENABLED=false` 是正确状态。只有以下三项全部完成，才允许在服务器本地把它改为 `true`：
+当前服务器已在以下三项全部完成后受控启用 `AMAP_ENABLED=true`：
 
 1. 取得高德 **Web Service Key**，不是 Android SDK Key；
 2. 取得与该 Key 匹配的服务端数字签名私钥；
 3. 在高德控制台把 ECS 固定公网出口 IPv4 加入该 Key 的 IP 白名单，并确认已生效。
 
-随后必须先在不切域名的情况下通过服务器侧真实 smoke：
+本轮已先在隔离容器和活动容器完成服务器侧真实 smoke，再切换域名；实际覆盖范围为：
 
-- `/health/ready` 和 `/v1/config` 正常；
-- 地点关键词搜索返回真实 `LIVE` 数据；
-- 推荐、地点详情和“换一批”可用，且不出现 DEMO 来源；
-- `LIVE_DISPLAY_ONLY` 下 `fitScore=null`，结果保持供应商顺序；
+- `/health/ready` 和 `/v1/config` 正常，三项服务能力均为 `true`；
+- “北京大学”地点关键词搜索返回 5 条 `AMAP/LIVE`、GCJ-02 结果；
+- 北京大学东门附近午餐推荐返回 3 条 `AMAP/LIVE` 结果，不出现 DEMO 来源；
+- `LIVE_DISPLAY_ONLY` 下 `fitScore=null`、`actions.share=false`；
 - Key、签名、坐标和完整供应商请求 URL 不进入日志；
-- 超时、配额、业务错误和供应商异常均 fail closed。
+- 离线自动化覆盖超时、业务错误和供应商异常的 fail-closed；真实配额耗尽动态演练仍待完成。
 
 `/health` 只证明进程存活；`/health/ready` 才检查启用数据库的 `SELECT 1` 和核心推荐适配器配置。Compose、运行时验证和公网 smoke 均使用 readiness，因此生产 `ALLOW_DEMO_DATA=false` 且 `AMAP_ENABLED=false` 时返回受控 503、容器保持 unhealthy 是预期的失败关闭状态。
 
@@ -194,9 +199,9 @@ Key 能返回数据不等于数据使用和商业授权已经完整解决；自�
 
 宝塔 Nginx 继续拥有 `80/443`，API 的 Compose 不触碰这两个端口。公网 API 改用 `api.unfinished-era.com` 的独立 vhost、ACME well-known 文件和证书；`www.unfinished-era.com` 与根域的主站 vhost 不再作为 API 激活目标。
 
-仓库中的 `nginx/api.unfinished-era.com.conf` 是最终 HTTPS 候选模板，只代理 `/health`、`/health/ready`、`/v1` 和 `/v1/*`，其余路径返回 404。`nginx/api.unfinished-era.com.acme.conf` 是申请证书前的 HTTP-only 临时模板，只读取独立 well-known 静态目录且不代理应用。当前未配置 API 子域 DNS 和证书，因此不得直接安装或 reload 最终模板。
+仓库中的 `nginx/api.unfinished-era.com.conf` 是当前已激活的 HTTPS 模板，只代理 `/health`、`/health/ready`、`/v1` 和 `/v1/*`，其余路径返回 404。`nginx/api.unfinished-era.com.acme.conf` 仅用于首次申请证书时的 HTTP-only 阶段；当前 DNS、证书与最终 vhost 已完成，后续不得用临时模板覆盖活动配置。
 
-只有真实高德 smoke 通过，且 API 子域 IPv4 DNS、独立证书、自动续期和 ACME include 全部完成后，才能从当前 release 执行 `scripts/activate-api-subdomain-nginx.sh`。它固定代理 `127.0.0.1:13001`，备份并只替换 API 子域 vhost，在 reload 前后比较主站 vhost SHA，并用本机 SNI/HTTP/HTTPS smoke 验证 readiness、配置接口和 `/admin/v1` 的 404；失败自动恢复 API vhost。续期成功 hook 使用 `reload-nginx-after-certificate-renewal.sh`，与激活器共用 public-Nginx 锁且不改写 vhost。旧 `activate-baota-nginx.sh` 固定 fail closed，旧主站 API 模板不再进入 bundle。原 WordPress 文件目录、宝塔 MySQL 数据库、主站证书和手工备份必须继续保留。完整恢复步骤见 [WORDPRESS_OFFLINE_RECOVERY.md](./WORDPRESS_OFFLINE_RECOVERY.md)，API 运维、备份和数据库回滚见 [ECS_OPERATIONS_RUNBOOK.md](./ECS_OPERATIONS_RUNBOOK.md)。
+上述门禁已满足并从当前 release 成功执行 `scripts/activate-api-subdomain-nginx.sh`。它固定代理 `127.0.0.1:13001`，备份并只替换 API 子域 vhost，在 reload 前后比较主站 vhost SHA、核对 `nginx -T` hostname 唯一归属，并用本机 SNI/HTTP/HTTPS smoke 验证实际服务证书、readiness、配置接口和 `/admin/v1` 的 404；本轮全部通过。续期成功 hook 使用 `reload-nginx-after-certificate-renewal.sh`，与激活器共用 public-Nginx 锁且已动态重载成功。宝塔面板不遵守项目锁，因此后续激活/续期窗口仍禁止并发修改站点或证书。旧 `activate-baota-nginx.sh` 固定 fail closed，旧主站 API 模板不再进入 bundle。原 WordPress 文件目录、宝塔 MySQL 数据库、主站证书和手工备份必须继续保留。完整恢复步骤见 [WORDPRESS_OFFLINE_RECOVERY.md](./WORDPRESS_OFFLINE_RECOVERY.md)，API 运维、备份和数据库回滚见 [ECS_OPERATIONS_RUNBOOK.md](./ECS_OPERATIONS_RUNBOOK.md)。
 
 ## 9. 2 核 2G 资源预算
 
@@ -217,7 +222,7 @@ Key 能返回数据不等于数据使用和商业授权已经完整解决；自�
 
 3 Mbps 足够传输 JSON API，不适合由 ECS 同时分发 APK；APK 继续使用现有文件传输渠道。
 
-## 10. 从当前检查点继续的顺序
+## 10. 当前检查点与后续顺序
 
 已完成：
 
@@ -227,26 +232,23 @@ Key 能返回数据不等于数据使用和商业授权已经完整解决；自�
 4. 上传并验证 PostGIS/Node 基础镜像、release 和部署 bundle；
 5. 在 `/opt/chi-shen-me/shared` 准备共享 Secret 和数据库 TLS；
 6. 启动 PostgreSQL/PostGIS，创建 `postgres_bootstrap` 与五个应用角色，完成迁移与权限授予；
-7. 启动 release `20260823-080633` 的 API，并通过本机回环存活检查；新 release 的 readiness 必须等待数据库和核心推荐适配器都配置完成。
-
-下一步只能按以下顺序执行：
-
-1. 用户在高德控制台准备真实 Web Service Key、匹配的签名私钥和 ECS IP 白名单；
-2. 在候选 release 中运行 `update-amap-secrets.sh`，只从 root:root、`0600` 的输入文件原子更新共享 `api.env` 和候选 `deployment.env`，启用 `AMAP_ENABLED=true`；不得在命令参数或日志中出现真实值；
-3. 从同一候选 release 运行 `backup-database.sh`，并用 `verify-database-backup.sh` 校验刚生成的备份；高德更新、备份和 release 激活共同持有 root-only 的全局 mutation `flock`，会拒绝并行执行；
-4. 不切域名、不迁移数据库，运行 `scripts/activate-candidate-release.sh`。它只 force-recreate API，等待候选 `/health/ready` 和完整运行时门禁；失败时自动恢复旧 API 且 `current` 保持旧值。`AMAP_ENABLED=false` 时 readiness 失败并自动回退是预期行为，不得绕过；
-5. 激活成功后仍只使用 ECS 回环地址，完成真实地点搜索、推荐、详情和“换一批” smoke；
-6. 候选激活及回环 smoke 全部通过后，才配置 `api.unfinished-era.com` 的 IPv4 DNS；先使用 HTTP-only ACME vhost 和独立 well-known 目录取得证书，未验收 IPv6 listener 时不发布 AAAA；
-7. 证书 SAN、私钥匹配、有效期和续期确认后，从当前 release 执行 `activate-api-subdomain-nginx.sh`；只有出现 `NGINX_API_SUBDOMAIN_ACTIVATION=OK`、`WORDPRESS_VHOST_UNCHANGED=true` 和 `ADMIN_ENDPOINT_PUBLIC=false` 才从公网 HTTPS 验收 `/health/ready`、`/v1/config` 和真实推荐；
-8. 用最终 HTTPS API 地址执行完整门禁并重建 Alpha APK：
+7. 为全国版 release `20260823T071142Z-nationwide` 复用 root-only 高德 Secret 与 IP 白名单，生成并复核数据库备份 `20260823T072519Z`；
+8. 先在隔离容器完成上海地点搜索 5 条、决策 3 条、附近搜索 3 条及高德三链 smoke，再激活 release；PostgreSQL 容器未变化；
+9. 激活独立 API DNS、Let's Encrypt 证书、最终 HTTPS vhost 和自动续期 hook；ECS 与工作站公网 smoke 通过，WordPress vhost 哈希未变化；
+10. 用最终 HTTPS API 地址执行完整门禁并重建 Alpha APK：
 
    ```powershell
    .\scripts\verify.ps1 -AlphaApiBaseUrl 'https://api.unfinished-era.com/'
    ```
 
-   该门禁只证明 Alpha 通过公网 HTTPS 地址策略并嵌入了指定地址，不证明 DNS、TLS、
-   Nginx 或公网 API 已可达；随后必须在关闭 Wi-Fi 的真实手机验收；
-9. 高德主线完成后，再准备短信 RAM Role 和微信开放平台，进入登录阶段。
+   当前 `0.1.2-alpha01-internal` Alpha SHA-256 为 `ED08D3CB357754D8C98BE7F40E0C9BA74806E172426E95EC0D3BB0182AE789AD`。该版本已移除 Android 直接餐厅搜索模块，并由独立公网 smoke 与模拟器真实决策闭环补齐构建门禁不覆盖的运行证据。
+
+下一步只能按以下顺序继续：
+
+1. 在关闭 Wi-Fi 的外部真机完成手动选址、决策、版本门禁和恢复流程，并确认没有直接餐厅关键词搜索入口；
+2. 完成高德商业授权、配额/弱网/真实错误和详情/动作矩阵；
+3. 准备短信、SMTP、微信和 QQ 的正式资质与凭据，进入登录真实联调；
+4. 完成 App 备案、正式 Release 签名、设备矩阵和公开发布审批。
 
 不得因为基础 `/health` 已通过就跳过高德真实 smoke、直接切域名或对外发测试 APK。
 
@@ -257,7 +259,7 @@ Key 能返回数据不等于数据使用和商业授权已经完整解决；自�
 - 宝塔 Nginx 配置检查和 reload 成功，HTTPS 证书有效；
 - 公网只暴露预期的 80/443，SSH 按管理策略限制来源；
 - `/health`、`/health/ready` 与 `/v1/config` 正常，最低版本门禁符合 Alpha；
-- `AMAP_ENABLED=true` 时真实地点搜索、推荐、详情和“换一批”可用；
+- `AMAP_ENABLED=true` 时真实地点搜索与推荐已通过；详情和“换一批”仍待专项验收；
 - `ALLOW_DEMO_DATA=false`，生产响应不出现 DEMO 来源；
 - `LIVE_DISPLAY_ONLY` 不产生自有评分或重排；
 - 高德凭据、坐标和完整供应商请求 URL 不进入日志；
@@ -301,7 +303,7 @@ Key 能返回数据不等于数据使用和商业授权已经完整解决；自�
 - 不在账号依赖未齐时强开 `ACCOUNTS_ENABLED`；
 - 不启动 Qwen、管理后台、导出 worker、QQ、收藏、跨端历史或反馈能力；
 - 不删除 WordPress 文件、宝塔数据库、证书或恢复点；
-- 不通过删除 Android 功能掩盖服务器容量问题。
+- 不通过删除 Android 决策能力掩盖服务器容量问题；直接餐厅关键词搜索的客户端下线只依据产品边界，服务端独立接口继续维护。
 
 ## 15. 官方运维参考
 

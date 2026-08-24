@@ -72,11 +72,6 @@ describe("PlaceSearchService", () => {
 					averageCostYuan: 20,
 					openStatus: "OPEN",
 				}),
-				candidate(7, {
-					location: { latitude: 31.2304, longitude: 121.4737, crs: "GCJ02" },
-					averageCostYuan: 20,
-					openStatus: "OPEN",
-				}),
 			]),
 		} as unknown as PlaceKeywordSearchProvider;
 		const registry = new RecommendationRequestRegistry();
@@ -88,7 +83,7 @@ describe("PlaceSearchService", () => {
 		expect(response.results.map((result) => result.rank)).toEqual([2, 4]);
 		expect(response.results).toHaveLength(2);
 		expect(response).toMatchObject({
-			coverage: "BEIJING_FOURTH_RING",
+			coverage: "NATIONWIDE",
 			notice: null,
 		});
 		expect(response.results[1]?.name).toBe("餐厅 4");
@@ -116,32 +111,37 @@ describe("PlaceSearchService", () => {
 		expect(registry.resolveHistoryEvent(fakeEvent)).toBeNull();
 	});
 
-	it("returns OUTSIDE_PILOT without calling a provider or issuing tokens", async () => {
+	it("searches a Shanghai origin under nationwide coverage", async () => {
 		const provider = {
 			dataSource: "AMAP",
 			dataMode: "LIVE",
-			search: vi.fn(),
+			search: vi.fn().mockResolvedValue([
+				candidate(1, {
+					location: { latitude: 31.2304, longitude: 121.4737, crs: "GCJ02" },
+					averageCostYuan: 20,
+					openStatus: "OPEN",
+				}),
+			]),
 		} as unknown as PlaceKeywordSearchProvider;
 		const registry = new RecommendationRequestRegistry();
 		registries.push(registry);
 		const service = new PlaceSearchService(provider, registry);
 
-		await expect(
-			service.search({
-				...request,
-				location: {
-					latitude: 31.2304,
-					longitude: 121.4737,
-					crs: "WGS84",
-				},
-			}),
-		).resolves.toMatchObject({
-			coverage: "OUTSIDE_PILOT",
-			results: [],
-			notice: expect.stringContaining("不在北京四环试点区"),
+		const shanghaiRequest = {
+			...request,
+			location: {
+				latitude: 31.2304,
+				longitude: 121.4737,
+				crs: "WGS84" as const,
+			},
+		};
+		await expect(service.search(shanghaiRequest)).resolves.toMatchObject({
+			coverage: "NATIONWIDE",
+			results: [expect.objectContaining({ name: "餐厅 1" })],
+			notice: null,
 		});
-		expect(provider.search).not.toHaveBeenCalled();
-		expect(registry.diagnostics().activeRequestCount).toBe(0);
+		expect(provider.search).toHaveBeenCalledWith(shanghaiRequest);
+		expect(registry.diagnostics().activeRequestCount).toBe(1);
 	});
 
 	it("maps every provider error to one safe service error", async () => {

@@ -16,6 +16,9 @@ coverage/
 .gradle/
 local.properties
 **/build/
+*.apk
+*.aab
+*.apks
 *.jks
 *.keystore
 *.pem

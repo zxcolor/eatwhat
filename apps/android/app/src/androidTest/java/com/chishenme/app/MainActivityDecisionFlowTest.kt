@@ -274,7 +274,7 @@ class MainActivityDecisionFlowTest {
     }
 
     @Test
-    fun firstLaunch_locationKeywordSearch_selectsDemoPlaceAndOpensNearbyDetail() {
+    fun firstLaunch_locationKeywordSearch_selectsDemoPlace_withoutRestaurantSearchEntry() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
                 hasText("同意并继续") || hasText("手动选择")
@@ -286,6 +286,11 @@ class MainActivityDecisionFlowTest {
             composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
                 hasText("手动选择")
             }
+            assertFalse("正常首页不应显示直接餐厅搜索卡片", hasText("已经知道想吃什么？"))
+            assertFalse(
+                "正常首页不应显示直接餐厅搜索入口",
+                hasText("搜索附近餐厅 / 菜系 / 食物"),
+            )
             composeRule.onNodeWithText("手动选择").assertIsDisplayed().performClick()
             composeRule.onNodeWithText("搜索或选择地点").assertIsDisplayed()
             composeRule.waitUntil(timeoutMillis = CONFIG_TIMEOUT_MS) {
@@ -345,86 +350,14 @@ class MainActivityDecisionFlowTest {
             composeRule.onNodeWithText(DEMO_SEARCH_PLACE).assertIsDisplayed()
             composeRule.onNodeWithText("演示位置只在本次会话使用，不会写入历史。")
                 .assertIsDisplayed()
-            composeRule.onNodeWithText("搜索附近餐厅 / 菜系 / 食物")
+            composeRule.onNodeWithText("帮我决定")
                 .performScrollTo()
                 .assertIsDisplayed()
-                .performClick()
-
-            composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
-                hasText("搜索词和坐标只用于本次请求，不保存。")
-            }
-            composeRule.onNodeWithText(DEMO_SEARCH_PLACE).assertIsDisplayed()
-            composeRule.onNodeWithText("搜索词和坐标只用于本次请求，不保存。")
-                .assertIsDisplayed()
-            composeRule.onNode(hasSetTextAction())
-                .assertIsDisplayed()
-                .performTextInput(PLACE_SEARCH_QUERY)
-            composeRule.onNode(
-                hasClickAction() and
-                    androidx.compose.ui.test.hasText("搜索附近餐厅"),
-            ).performScrollTo().assertIsDisplayed().performClick()
-
-            composeRule.waitUntil(timeoutMillis = PLACE_SEARCH_TIMEOUT_MS) {
-                hasText(DEMO_PLACE_SEARCH_RESULT) ||
-                    hasText("没有找到符合当前条件的餐厅，请换个关键词或放宽筛选。") ||
-                    PLACE_SEARCH_DIAGNOSTICS.any(::hasText)
-            }
-            if (!hasText(DEMO_PLACE_SEARCH_RESULT)) {
-                val diagnostic = PLACE_SEARCH_DIAGNOSTICS.firstOrNull(::hasText)
-                    ?: "附近餐厅搜索没有返回预期演示结果"
-                fail("搜索地点后的附近餐厅验收失败，界面诊断：$diagnostic")
-            }
-
-            composeRule.onNodeWithText("搜索到 1 个结果").assertIsDisplayed()
-            composeRule.onNodeWithText("大致方位图（非道路导航图）")
-                .performScrollTo()
-                .assertIsDisplayed()
-            composeRule.onNodeWithText(DEMO_PLACE_SEARCH_RESULT)
-                .performScrollTo()
-                .assertIsDisplayed()
-                .performClick()
-            composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
-                hasText(PLACE_SEARCH_DETAIL_MARKER) || hasText(PLACE_SEARCH_EXPIRED_MARKER)
-            }
-            if (hasText(PLACE_SEARCH_EXPIRED_MARKER)) {
-                fail("打开附近餐厅后结果会话意外失效")
-            }
-            composeRule.onNodeWithText("搜索结果详情").assertIsDisplayed()
-            composeRule.onNodeWithText(DEMO_PLACE_SEARCH_RESULT)
-                .performScrollTo()
-                .assertIsDisplayed()
-            composeRule.onNodeWithText("联系商户")
-                .performScrollTo()
-                .assertIsDisplayed()
-            composeRule.onNodeWithText(
-                "分享信息",
-                substring = true,
-                useUnmergedTree = true,
-            ).assertDoesNotExist()
-            composeRule.onNodeWithText(PLACE_SEARCH_DETAIL_MARKER)
-                .performScrollTo()
-                .assertIsDisplayed()
-
-            recreateActivity(scenario)
-            composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
-                hasText(PLACE_SEARCH_DETAIL_MARKER) || hasText(PLACE_SEARCH_EXPIRED_MARKER)
-            }
-            if (hasText(PLACE_SEARCH_EXPIRED_MARKER)) {
-                fail("Activity 重建后搜索结果详情会话意外失效")
-            }
-            composeRule.onNodeWithText("搜索结果详情").assertIsDisplayed()
-            composeRule.onNodeWithText(DEMO_PLACE_SEARCH_RESULT).assertIsDisplayed()
-            composeRule.onNodeWithText(PLACE_SEARCH_DETAIL_MARKER)
-                .performScrollTo()
-                .assertIsDisplayed()
-
-            composeRule.onNodeWithContentDescription("返回搜索结果")
-                .assertIsDisplayed()
-                .performClick()
-            composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
-                hasText("搜索到 1 个结果") && !hasText(PLACE_SEARCH_DETAIL_MARKER)
-            }
-            composeRule.onNodeWithText("搜索到 1 个结果").assertIsDisplayed()
+            assertFalse("选择地点后也不应显示直接餐厅搜索卡片", hasText("已经知道想吃什么？"))
+            assertFalse(
+                "选择地点后也不应显示直接餐厅搜索入口",
+                hasText("搜索附近餐厅 / 菜系 / 食物"),
+            )
         }
     }
 
@@ -451,7 +384,6 @@ class MainActivityDecisionFlowTest {
         private const val STARTUP_TIMEOUT_MS = 10_000L
         private const val CONFIG_TIMEOUT_MS = 20_000L
         private const val LOCATION_SEARCH_TIMEOUT_MS = 15_000L
-        private const val PLACE_SEARCH_TIMEOUT_MS = 20_000L
         private const val RECOMMENDATION_TIMEOUT_MS = 20_000L
         private const val MANUAL_LOCATION = "北京大学东门"
         private const val LOCATION_SEARCH_QUERY = "北京大学"
@@ -460,11 +392,6 @@ class MainActivityDecisionFlowTest {
             "输入内容会发送给 虚构地点数据，仅供开发测试 用于本次搜索，不保存。"
         private const val DEMO_LOCATION_SOURCE_RANK =
             "来源：虚构地点数据，仅供开发测试 · 数据源顺序 1"
-        private const val PLACE_SEARCH_QUERY = "面"
-        private const val DEMO_PLACE_SEARCH_RESULT = "演示·校园牛肉面"
-        private const val PLACE_SEARCH_DETAIL_MARKER =
-            "这是关键词搜索结果，不代表 App 推荐或适合度判断。"
-        private const val PLACE_SEARCH_EXPIRED_MARKER = "搜索详情会话已失效"
         private const val RECOMMENDATION_EXPIRED_MARKER =
             "推荐状态已失效，请返回首页重新选择条件"
         private const val DETAIL_EXPIRED_MARKER = "详情会话已失效"
@@ -505,19 +432,6 @@ class MainActivityDecisionFlowTest {
             "地点搜索结果无法识别，请重试",
             "暂时无法搜索地点，仍可选择内置地点",
             "当前 App 与地点搜索服务版本不兼容，请更新 App 后重试",
-        )
-
-        private val PLACE_SEARCH_DIAGNOSTICS = listOf(
-            "远程配置尚未完成可信校验，请重新检查后再试",
-            "搜索条件不符合要求，请检查后重试",
-            "网络不可用，请检查连接后重试",
-            "餐厅搜索响应较慢，请稍后重试",
-            "搜索请求有点多，请稍后重试",
-            "餐厅搜索服务暂时不可用，请稍后重试",
-            "餐厅搜索结果未通过安全校验，请重试",
-            "餐厅搜索结果无法识别，请重试",
-            "当前 App 与餐厅搜索服务版本不兼容，请更新 App 后重试",
-            "暂时无法搜索附近餐厅，请重试",
         )
     }
 }

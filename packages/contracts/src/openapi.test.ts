@@ -1392,14 +1392,32 @@ describe("OpenAPI v1", () => {
 			"user-place-keyword",
 		);
 
-		const responseText = JSON.stringify(
-			dereference(documentedSchema("PlaceSearchResponse")),
+		const placeSearchResponse = dereference(
+			documentedSchema("PlaceSearchResponse"),
 		);
+		if (!isObject(placeSearchResponse)) {
+			throw new Error("Invalid PlaceSearchResponse schema");
+		}
+		const responseText = JSON.stringify(placeSearchResponse);
 		expect(responseText).not.toMatch(
 			/providerPlaceId|providerId|dataSource|fitScore|reasons|aiAssisted|phone|imageUrl|Amap/i,
 		);
 		expect(responseText).toContain('"navigate"');
 		expect(responseText).toContain('"copyAddress"');
+		expect(
+			objectValue(objectValue(placeSearchResponse, "properties"), "coverage"),
+		).toEqual({ type: "string", const: "NATIONWIDE" });
+	});
+
+	it("documents nationwide recommendation coverage as the only value", () => {
+		const properties = objectValue(
+			documentedSchema("RecommendationResponse"),
+			"properties",
+		);
+		expect(objectValue(properties, "coverage")).toEqual({
+			type: "string",
+			const: "NATIONWIDE",
+		});
 	});
 
 	it("freezes privacy-safe saved-resource, idempotency and rights boundaries", () => {

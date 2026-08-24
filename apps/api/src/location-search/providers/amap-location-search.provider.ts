@@ -19,8 +19,6 @@ interface AmapTextPoi {
 	readonly name?: unknown;
 	readonly address?: unknown;
 	readonly location?: unknown;
-	readonly adcode?: unknown;
-	readonly ad_info?: unknown;
 }
 
 interface AmapTextResponse {
@@ -61,14 +59,6 @@ function parseLocation(
 		return null;
 	}
 	return { latitude, longitude, crs: "GCJ02" };
-}
-
-function beijingAdcode(poi: AmapTextPoi): string | null {
-	const direct = boundedString(poi.adcode, 16);
-	const adInfo = objectValue(poi.ad_info);
-	const nested = boundedString(adInfo?.adcode, 16);
-	const value = direct ?? nested;
-	return value !== null && /^11\d{4}$/u.test(value) ? value : null;
 }
 
 async function readWithAbort(
@@ -166,8 +156,6 @@ export class AmapLocationSearchProvider implements LocationSearchProvider {
 		const endpoint = new URL("https://restapi.amap.com/v5/place/text");
 		endpoint.searchParams.set("key", this.config.amap.apiKey);
 		endpoint.searchParams.set("keywords", query);
-		endpoint.searchParams.set("region", "北京市");
-		endpoint.searchParams.set("city_limit", "true");
 		endpoint.searchParams.set("page_size", "5");
 		endpoint.searchParams.set("page_num", "1");
 		endpoint.searchParams.set("output", "json");
@@ -239,7 +227,7 @@ export class AmapLocationSearchProvider implements LocationSearchProvider {
 		index: number,
 	): LocationSearchCandidate | null {
 		const poi = objectValue(value) as AmapTextPoi | null;
-		if (poi === null || beijingAdcode(poi) === null) return null;
+		if (poi === null) return null;
 		const name = boundedString(poi.name, 120);
 		const location = parseLocation(poi.location);
 		if (name === null || location === null) return null;

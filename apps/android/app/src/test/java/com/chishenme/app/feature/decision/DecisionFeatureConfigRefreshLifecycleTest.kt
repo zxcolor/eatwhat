@@ -27,7 +27,7 @@ import com.chishenme.app.data.remote.RecommendationResponse
 import com.chishenme.app.data.remote.RecommendationResult
 import com.chishenme.app.data.remote.ReasonCode
 import com.chishenme.app.data.remote.ServiceCapabilities
-import com.chishenme.app.domain.BeijingPilotLocations
+import com.chishenme.app.domain.BuiltInQuickLocations
 import com.chishenme.app.feature.config.RemoteFeatureConfigState
 import com.chishenme.app.feature.config.RuntimeAppVersionGate
 import com.chishenme.app.feature.session.ResultSessionState
@@ -67,7 +67,7 @@ class DecisionFeatureConfigRefreshLifecycleTest {
             val viewModel = viewModel(api)
             viewModel.startConsentSession()
             advanceUntilIdle()
-            viewModel.setLocation(BeijingPilotLocations.choices.first())
+            viewModel.setLocation(BuiltInQuickLocations.choices.first())
 
             assertFalse(viewModel.recommend())
             advanceUntilIdle()
@@ -91,7 +91,7 @@ class DecisionFeatureConfigRefreshLifecycleTest {
             val viewModel = viewModel(api)
             viewModel.ensureConsentSessionStarted()
             advanceUntilIdle()
-            viewModel.setLocation(BeijingPilotLocations.choices.first())
+            viewModel.setLocation(BuiltInQuickLocations.choices.first())
             assertTrue(viewModel.recommend())
             advanceUntilIdle()
             val resultToken = currentRecommendationResponse().results.single().resultToken
@@ -164,7 +164,7 @@ class DecisionFeatureConfigRefreshLifecycleTest {
             val viewModel = viewModel(ImmediateRecommendationApi())
             viewModel.startConsentSession()
             advanceUntilIdle()
-            viewModel.setLocation(BeijingPilotLocations.choices.first())
+            viewModel.setLocation(BuiltInQuickLocations.choices.first())
             assertTrue(viewModel.recommend())
             advanceUntilIdle()
             assertTrue(viewModel.uiState.value.loadState is RecommendationLoadState.Ready)
@@ -194,7 +194,7 @@ class DecisionFeatureConfigRefreshLifecycleTest {
             val viewModel = viewModel(api)
             viewModel.startConsentSession()
             advanceUntilIdle()
-            viewModel.setLocation(BeijingPilotLocations.choices.first())
+            viewModel.setLocation(BuiltInQuickLocations.choices.first())
             assertTrue(viewModel.recommend())
             runCurrent()
             assertTrue(api.recommendationStarted.isCompleted)
@@ -319,7 +319,7 @@ class DecisionFeatureConfigRefreshLifecycleTest {
             runCurrent()
             assertNull(viewModel.uiState.value.featureConfig)
 
-            viewModel.setLocation(BeijingPilotLocations.choices.first())
+            viewModel.setLocation(BuiltInQuickLocations.choices.first())
             assertTrue(viewModel.recommend())
             runCurrent()
 
@@ -361,7 +361,7 @@ class DecisionFeatureConfigRefreshLifecycleTest {
                 viewModel.runtimeAppVersionGate.currentState.status,
             )
 
-            viewModel.setLocation(BeijingPilotLocations.choices.first())
+            viewModel.setLocation(BuiltInQuickLocations.choices.first())
             assertFalse(viewModel.recommend())
             viewModel.retry()
             viewModel.reroll()
@@ -614,7 +614,7 @@ private fun staleEnabledConfig() = FeatureConfig(
 )
 
 private fun currentFeatureConfig() = FeatureConfig(
-    coverageName = "北京四环内",
+    coverageName = "全国服务",
     dataRightsMode = DataRightsMode.LIVE_DISPLAY_ONLY,
     aiEnabled = false,
     accountsEnabled = false,
@@ -633,7 +633,7 @@ private fun currentFeatureConfig() = FeatureConfig(
 private fun currentRecommendationResponse() = RecommendationResponse(
     requestId = "2af305ae-82a1-4f87-86b7-1c97c4a8683f",
     generatedAt = "2026-08-21T04:00:00Z",
-    coverage = Coverage.BEIJING_FOURTH_RING,
+    coverage = Coverage.NATIONWIDE,
     dataRightsMode = DataRightsMode.LIVE_DISPLAY_ONLY,
     ruleVersion = "rule-v1",
     promptVersion = "prompt-v1",

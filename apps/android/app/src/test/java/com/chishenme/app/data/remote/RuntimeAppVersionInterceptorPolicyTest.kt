@@ -22,7 +22,7 @@ class RuntimeAppVersionInterceptorPolicyTest {
         assertFalse(runtimeRequestAllowed("GET", "/v1/account", gate.currentState))
         assertFalse(runtimeRequestAllowed("POST", "/v1/account", gate.currentState))
         assertFalse(runtimeRequestAllowed("POST", "/v1/recommendations", gate.currentState))
-        assertFalse(runtimeRequestAllowed("POST", "/v1/place-search", gate.currentState))
+        assertFalse(runtimeRequestAllowed("POST", "/v1/unsupported-write", gate.currentState))
         assertFalse(runtimeRequestAllowed("POST", "/v1/support-feedback", gate.currentState))
         assertFalse(runtimeRequestAllowed("POST", "/v1/auth/login", gate.currentState))
         assertFalse(runtimeRequestAllowed("GET", "/v1/auth/identities", gate.currentState))
@@ -36,7 +36,7 @@ class RuntimeAppVersionInterceptorPolicyTest {
         gate.markConfigurationUnavailable(1)
         assertTrue(runtimeRequestAllowed("POST", "/v1/recommendations", gate.currentState))
         assertFalse(runtimeRequestAllowed("GET", "/v1/recommendations", gate.currentState))
-        assertFalse(runtimeRequestAllowed("POST", "/v1/place-search", gate.currentState))
+        assertFalse(runtimeRequestAllowed("POST", "/v1/unsupported-write", gate.currentState))
 
         gate.markConfigurationUntrusted(2)
         gate.acceptTrustedConfiguration(2, "2.0.0")

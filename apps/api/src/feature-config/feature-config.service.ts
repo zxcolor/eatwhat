@@ -73,7 +73,7 @@ export class FeatureConfigService {
 			supportFeedbackEnabled = false;
 		}
 		return FeatureConfigSchema.parse({
-			coverageName: "北京四环试点区（粗略）",
+			coverageName: "全国范围",
 			dataRightsMode: effectiveDataRightsMode,
 			aiEnabled: this.config.qwen.enabled,
 			accountsEnabled: this.config.features.accountsEnabled,

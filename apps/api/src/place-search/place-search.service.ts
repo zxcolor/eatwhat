@@ -12,7 +12,6 @@ import {
 	ServiceUnavailableException,
 } from "@nestjs/common";
 import { RecommendationRequestRegistry } from "../common/recommendation-request.registry.js";
-import { isInsideBeijingFourthRingPilot } from "../recommendations/domain/coverage.js";
 import {
 	PLACE_KEYWORD_SEARCH_PROVIDER,
 	type PlaceKeywordSearchCandidate,
@@ -44,7 +43,6 @@ function satisfiesHardFilters(
 	candidate: PlaceKeywordSearchCandidate,
 	request: PlaceSearchRequest,
 ): boolean {
-	if (!isInsideBeijingFourthRingPilot(candidate.location)) return false;
 	if (candidate.distanceMeters > request.radiusMeters) return false;
 	if (
 		request.maxAverageCostYuan !== undefined &&
@@ -84,14 +82,6 @@ export class PlaceSearchService {
 
 	async search(request: PlaceSearchRequest): Promise<PlaceSearchResponse> {
 		const requestId = randomUUID();
-		if (!isInsideBeijingFourthRingPilot(request.location)) {
-			return PlaceSearchResponseSchema.parse({
-				requestId,
-				coverage: "OUTSIDE_PILOT",
-				results: [],
-				notice: "当前位置不在北京四环试点区，请手动选择试点区内地点",
-			});
-		}
 		let candidates: readonly PlaceKeywordSearchCandidate[];
 		try {
 			// This is a per-request live lookup. The provider query, exact origin and
@@ -118,7 +108,7 @@ export class PlaceSearchService {
 		try {
 			return PlaceSearchResponseSchema.parse({
 				requestId,
-				coverage: "BEIJING_FOURTH_RING",
+				coverage: "NATIONWIDE",
 				results: retained.map((candidate, index) => {
 					const resultToken = resultTokens[index];
 					if (resultToken === undefined) {

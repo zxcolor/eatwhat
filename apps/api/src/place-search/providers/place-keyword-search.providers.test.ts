@@ -48,8 +48,8 @@ function validResponse(): Response {
 					},
 				},
 				{
-					id: "OUTSIDE-BEIJING",
-					name: "外地餐厅",
+					id: "SHANGHAI-PRIVATE-POI-ID",
+					name: "上海测试餐厅",
 					location: "121.47,31.23",
 					adcode: "310101",
 				},
@@ -102,8 +102,8 @@ describe("place keyword search providers", () => {
 				expect(url.searchParams.get("location")).toBe("116.310900,39.992800");
 				expect(url.searchParams.get("radius")).toBe("1500");
 				expect(url.searchParams.get("types")).toBe("050000");
-				expect(url.searchParams.get("region")).toBe("北京市");
-				expect(url.searchParams.get("city_limit")).toBe("true");
+				expect(url.searchParams.has("region")).toBe(false);
+				expect(url.searchParams.has("city_limit")).toBe(false);
 				expect(url.searchParams.get("sortrule")).toBe("distance");
 				expect(url.searchParams.get("show_fields")).toBe("business");
 				expect(url.searchParams.has("photos")).toBe(false);
@@ -124,29 +124,35 @@ describe("place keyword search providers", () => {
 		const first = await provider.search(request);
 		const second = await provider.search(request);
 
-		expect(first).toEqual([
-			{
-				provider: "AMAP",
-				providerPlaceId: "B000-PRIVATE-POI-ID",
-				providerRank: 1,
-				name: "测试牛肉面",
-				address: "测试路 1 号",
-				location: { latitude: 39.9929, longitude: 116.311, crs: "GCJ02" },
-				distanceMeters: 800,
-				sourceLabel: "高德地图实时餐厅数据",
-				sourceRating: 4.6,
-				averageCostYuan: 28,
-				openStatus: "OPEN",
-				tags: ["牛肉面", "快餐", "餐饮服务", "中餐厅"],
-				dataMode: "LIVE",
-				actions: {
-					navigate: false,
-					call: false,
-					copyAddress: false,
-					share: false,
-				},
+		expect(first).toHaveLength(2);
+		expect(first[0]).toEqual({
+			provider: "AMAP",
+			providerPlaceId: "B000-PRIVATE-POI-ID",
+			providerRank: 1,
+			name: "测试牛肉面",
+			address: "测试路 1 号",
+			location: { latitude: 39.9929, longitude: 116.311, crs: "GCJ02" },
+			distanceMeters: 800,
+			sourceLabel: "高德地图实时餐厅数据",
+			sourceRating: 4.6,
+			averageCostYuan: 28,
+			openStatus: "OPEN",
+			tags: ["牛肉面", "快餐", "餐饮服务", "中餐厅"],
+			dataMode: "LIVE",
+			actions: {
+				navigate: false,
+				call: false,
+				copyAddress: false,
+				share: false,
 			},
-		]);
+		});
+		expect(first[1]).toMatchObject({
+			provider: "AMAP",
+			providerPlaceId: "SHANGHAI-PRIVATE-POI-ID",
+			providerRank: 2,
+			name: "上海测试餐厅",
+			location: { latitude: 31.23, longitude: 121.47, crs: "GCJ02" },
+		});
 		expect(second).toEqual(first);
 		expect(fetchMock).toHaveBeenCalledTimes(2);
 	});

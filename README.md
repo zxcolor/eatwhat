@@ -1,19 +1,20 @@
 # 吃什么
 
-面向北京高校学生和教师的附近美食决策产品。当前仓库包含 Android 原生客户端、NestJS API、Next.js 运营后台和共享接口契约。
+面向全国用户的附近美食决策产品。当前仓库包含 Android 原生客户端、NestJS API、Next.js 运营后台和共享接口契约。
 
 ## 当前可运行范围
 
-- 本地开发默认使用虚构的北京演示餐厅和确定性意图引擎，不调用或缓存任何第三方 POI 数据；生产环境从代码层禁止演示餐厅。
-- Android 已支持固定试点和地点关键词手动选址；关键词经自有 `POST /v1/location-search` JSON body 提交，最多返回 5 个显式标记 `LIVE/DEMO` 的通用地点结果，固定试点在拒绝定位、无网或上游不可用时仍可回退。
-- 在书面授权边界确认后，同时配置高德 Web Service Key 与 `AMAP_ENABLED=true` 才会启用实时查询；生产还必须使用匹配的服务端数字签名私钥并确认固定出口 IP 已进入高德白名单，否则应用在任何高德请求前安全失败。重排、适合度和 POI 引用保存能力仍由 `DATA_RIGHTS_MODE` 控制。
+- 本地开发默认使用虚构演示餐厅和确定性意图引擎，不调用或缓存任何第三方 POI 数据；生产环境从代码层禁止演示餐厅。
+- Android 已支持内置快捷地点和全国地点关键词手动选址；关键词经自有 `POST /v1/location-search` JSON body 提交，最多返回 5 个显式标记 `LIVE/DEMO` 的通用地点结果，快捷地点在拒绝定位、无网或上游不可用时仍可回退。
+- Android 1.0 聚焦“帮用户做决定”：保留自动定位和手动选址作为推荐起点，不展示、不注册路由，也不调用直接餐厅关键词搜索。服务端 `/v1/place-search`、OpenAPI 与 provider 继续作为独立 API 能力保留，不据此在 Android 1.0 恢复搜索入口。
+- ECS 封闭 Alpha 已使用服务端 Web Service Key、匹配数字签名和固定出口 IP 白名单启用 `AMAP_ENABLED=true`，真实地点搜索与推荐技术 smoke 已通过。当前仍固定为 `LIVE_DISPLAY_ONLY`；技术链路可用不等于商业授权、重排、缓存、持久化或公开发布已经获批。
 - 推荐结果的 provider 是受约束、可扩展的数据源代码，并逐条携带 `LIVE/DEMO` 与导航、拨号、复制、分享四项 API v1 动作。为保持契约兼容暂时保留 `share` 字段，但当前 AMAP/DEMO provider 均返回 `false`；Android 1.0 的分享入口由唯一的编译期常量固定关闭，不存在 Gradle 属性或远程开关。底层分享代码只作封存，不属于 1.0 能力或发布门禁，若在 2.0 重新启用必须重新完成产品、数据授权、隐私与安全评审。
 - 公开推荐结果不包含供应商稳定 POI ID，只携带两小时、请求作用域的 43 字符 `resultToken`；行为事件只回传该 token，服务端从短期登记表解析来源并防伪造、跨请求复用和同类重放。
 - 当前只实现 AMAP 与 development/test DEMO adapter。公共契约、推荐引擎和 Android 不依赖高德枚举；未来美团、大众点评等来源只通过正式 API 或商务合作新增 adapter，不抓取、不逆向，也不虚构尚不存在的接口。
 - 配置百炼北京地域工作空间地址、API Key 与 `QWEN_ENABLED=true` 后可启用千问；失败时自动回退确定性规则。
 - Android 工程已用 JDK 17、SDK 36、Gradle 8.13 完成 buildSrc/App JVM 测试、Lint、Debug、AndroidTest 与内部 Alpha 构建；模拟器验收结果和当前 APK SHA-256 以验证报告为准。仓库内 `.tools` 仅为本机忽略目录，不会提交到版本库。
-- 登录已在不使用真实供应商凭据的设备内合成 API 夹具中验证手机号登录、邮箱绑定、退出、邮箱登录和再次退出；微信/QQ AppID 缺失时保持 fail closed。高德已在不使用 Key 或官方网络端点的合成 `LIVE_DISPLAY_ONLY` 响应夹具中验证来源标注、无自有评分、动作关闭和 WGS84 请求边界；两者均不等同于真实供应商联调。
-- 前后端已按独立部署边界拆分：Android 只持有一个环境对应的 HTTPS API 基址和公开 v1 契约，不包含数据库或供应商 Secret；API 通过 `serviceCapabilities` 分别声明推荐、地点搜索和餐厅搜索是否可用，缺失字段时客户端全部关闭并提供手动重连。ECS API 只监听 `127.0.0.1:13001`，数据库只在内部 Docker 网络开放；独立 `api.unfinished-era.com` 模板、readiness、不可变 bundle、权限预检、候选激活/自动回退及备份/恢复/回滚脚本均已落盘。最终候选 release `20260823-024841-cloudsep-final` 已完成镜像和严格预检，但没有启动或切流；DNS、子域证书与真实高德凭据未完成前不会替换现网。
+- 登录已在不使用真实供应商凭据的设备内合成 API 夹具中验证手机号登录、邮箱绑定、退出、邮箱登录和再次退出；微信/QQ AppID 缺失时保持 fail closed。高德的 Android 合成展示边界与 ECS 真实 Web Service 技术链路均已验证：云端地点搜索和推荐明确返回 `AMAP/LIVE`、`fitScore=null`、GCJ-02 结果且分享关闭；这不等于商业授权、App 备案或公开发布已经获批。
+- 前后端已按独立部署边界拆分：Android 只持有一个环境对应的 HTTPS API 基址和公开 v1 契约，不包含数据库或供应商 Secret；API 的 `serviceCapabilities` 仍分别声明推荐、地点搜索和服务端独立餐厅关键词搜索是否可用。Android 1.0 只消费推荐与地点搜索能力并逐字段失败关闭，忽略 `placeSearchEnabled`，不会创建对应入口、路由或请求。ECS 当前 release 为 `20260823T071142Z-nationwide`，API 只监听 `127.0.0.1:13001`，数据库只在内部 Docker 网络开放；`https://api.unfinished-era.com` 已使用独立 DNS、Let's Encrypt 证书和宝塔 vhost 对外提供 v1 API。全国版候选的隔离验收、数据库备份、动态激活和失败自动回退门禁均已通过。
 
 ## 本地启动
 
@@ -52,7 +53,7 @@ API 运行进程；管理员、迁移、维护、导出 worker 和其他父终�
 .\scripts\verify.ps1 -AlphaApiBaseUrl 'https://api.unfinished-era.com/'
 ```
 
-完整验证要求显式给出 Alpha 将嵌入的公网 HTTPS 地址。该脚本会验证 URL 策略、生成的 `BuildConfig` 和 Alpha DEX 确实包含同一地址，也会验证 ECS bundle；它不会把“地址成功嵌入”误当成 DNS、证书或公网可达已通过。公网连通必须在子域和证书就绪后另行运行 ECS `scripts/smoke-test.sh`。脚本会在 Windows 中文工作区路径下临时创建 ASCII 盘符并在结束后撤销，同时构建 Debug、AndroidTest 和启用 R8/资源压缩的独立 Alpha APK。
+完整验证要求显式给出 Alpha 将嵌入的公网 HTTPS 地址。该脚本会验证 URL 策略、生成的 `BuildConfig` 和 Alpha DEX 确实包含同一地址，也会验证 ECS bundle；它不会把“地址成功嵌入”误当成 DNS、证书或公网可达。当前公网连通已另行通过 ECS `scripts/smoke-test.sh` 及工作站 TLS、跳转、readiness、真实高德搜索/推荐和管理端点 404 验收；关闭 Wi-Fi 的外部真机仍需单独复验。脚本会在 Windows 中文工作区路径下临时创建 ASCII 盘符并在结束后撤销，同时构建 Debug、AndroidTest 和启用 R8/资源压缩的独立 Alpha APK。
 
 本地 API 已经启动、Debug APK 已自行安装后，用下面的可重复命令建立设备到 `127.0.0.1:3001` 的调试连接：
 

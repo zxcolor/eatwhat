@@ -587,7 +587,7 @@ class MainActivityRuntimeVersionRaiseTest {
         contractResponse(200).setBody(
             """
                 {
-                  "coverageName": "北京四环试点区",
+                  "coverageName": "全国服务",
                   "dataRightsMode": "LIVE_DISPLAY_ONLY",
                   "aiEnabled": false,
                   "accountsEnabled": false,
@@ -613,7 +613,7 @@ class MainActivityRuntimeVersionRaiseTest {
     ): RecommendationResponse = RecommendationResponse(
         requestId = requestId,
         generatedAt = "2026-08-21T00:00:00Z",
-        coverage = Coverage.BEIJING_FOURTH_RING,
+        coverage = Coverage.NATIONWIDE,
         dataRightsMode = DataRightsMode.LIVE_DISPLAY_ONLY,
         ruleVersion = "rule-runtime-version-v1",
         promptVersion = "prompt-disabled",
@@ -680,7 +680,7 @@ class MainActivityRuntimeVersionRaiseTest {
         private const val RECHECK_ACTION = "重新检查"
         private const val UPDATE_HEADING = "需要更新后继续"
         private const val MANUAL_LOCATION = "北京大学东门"
-        private const val COMPATIBLE_MINIMUM_VERSION = "0.1.0"
+        private const val COMPATIBLE_MINIMUM_VERSION = "0.1.1"
         private const val HIGH_MINIMUM_VERSION = "99.0.0"
         private const val REQUIRED_UPDATE_MESSAGE =
             "当前版本过低，请更新到 99.0.0 或更高版本"

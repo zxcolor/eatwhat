@@ -144,6 +144,59 @@ if ($androidForbiddenSecretIdentifier.Count -gt 0) {
     throw "Android 源码引用了服务端密钥：$($androidForbiddenSecretIdentifier[0].Path):$($androidForbiddenSecretIdentifier[0].LineNumber)"
 }
 
+Write-Host '== Android: decision-only product boundary =='
+$androidMainSourceRoot = Join-Path $workspaceRoot 'apps\android\app\src\main'
+$androidRestaurantSearchFiles = @(
+    'java\com\chishenme\app\data\PlaceSearchRepository.kt',
+    'java\com\chishenme\app\data\remote\PlaceSearchApi.kt',
+    'java\com\chishenme\app\data\remote\PlaceSearchContracts.kt'
+)
+foreach ($relativePath in $androidRestaurantSearchFiles) {
+    $candidate = Join-Path $androidMainSourceRoot $relativePath
+    if (Test-Path -LiteralPath $candidate) {
+        throw "Android 不得保留直接餐厅搜索生产文件：$relativePath"
+    }
+}
+$androidRestaurantSearchUiFiles = @(
+    Get-ChildItem -LiteralPath (
+        Join-Path $androidMainSourceRoot 'java\com\chishenme\app\feature\search'
+    ) -Filter 'PlaceSearch*.kt' -File -ErrorAction SilentlyContinue
+)
+if ($androidRestaurantSearchUiFiles.Count -gt 0) {
+    throw "Android 不得保留直接餐厅搜索界面文件：$($androidRestaurantSearchUiFiles[0].FullName)"
+}
+$androidMainProductSourceFiles = @(
+    Get-ChildItem -LiteralPath $androidMainSourceRoot -Recurse -File |
+        Where-Object { $_.Extension -in @('.kt', '.java', '.xml') }
+)
+$androidRestaurantSearchResidue = @(
+    $androidMainProductSourceFiles |
+        Select-String -CaseSensitive -Pattern @(
+            '\bPlaceSearch[A-Za-z0-9_]*\b',
+            '\bplace-search\b',
+            '\bonOpenPlaceSearch\b',
+            '已经知道想吃什么',
+            '搜索附近餐厅',
+            '餐厅搜索'
+        )
+)
+if ($androidRestaurantSearchResidue.Count -gt 0) {
+    throw "Android 仍包含直接餐厅搜索模块、路由或 API 调用：$($androidRestaurantSearchResidue[0].Path):$($androidRestaurantSearchResidue[0].LineNumber)"
+}
+$serviceCapabilitiesContract = [System.IO.Path]::GetFullPath(
+    (Join-Path $androidMainSourceRoot 'java\com\chishenme\app\data\remote\RecommendationContracts.kt')
+)
+$unexpectedPlaceSearchCapabilityUse = @(
+    $androidMainProductSourceFiles |
+        Select-String -SimpleMatch 'placeSearchEnabled' |
+        Where-Object {
+            [System.IO.Path]::GetFullPath($_.Path) -ne $serviceCapabilitiesContract
+        }
+)
+if ($unexpectedPlaceSearchCapabilityUse.Count -gt 0) {
+    throw "Android 只能在 v1 配置 DTO 中兼容 placeSearchEnabled，产品代码不得消费该字段：$($unexpectedPlaceSearchCapabilityUse[0].Path):$($unexpectedPlaceSearchCapabilityUse[0].LineNumber)"
+}
+
 Write-Host '== Node workspace: lint =='
 pnpm lint
 if ($LASTEXITCODE -ne 0) {

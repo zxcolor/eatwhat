@@ -1,14 +1,13 @@
 package com.chishenme.app.feature.detail
 
 import com.chishenme.app.data.remote.OpenStatus
-import com.chishenme.app.data.remote.PlaceSearchResult
 import com.chishenme.app.data.remote.RecommendationActions
 import com.chishenme.app.data.remote.RecommendationResult
 
 /**
- * Provider-neutral presentation facts shared by recommendation and keyword
- * search details. It deliberately contains no fit score, AI reason, provider
- * identifier, precise coordinate or event/history semantics.
+ * Provider-neutral presentation facts used by recommendation details. It
+ * deliberately contains no fit score, AI reason, provider identifier, precise
+ * coordinate or event/history semantics.
  */
 internal data class RestaurantDisplayModel(
     val name: String,
@@ -35,19 +34,5 @@ internal fun RecommendationResult.toRestaurantDisplayModel() = RestaurantDisplay
     openStatus = openStatus,
     tags = tags,
     dataMode = dataMode.name,
-    actions = actions,
-)
-
-internal fun PlaceSearchResult.toRestaurantDisplayModel() = RestaurantDisplayModel(
-    name = name,
-    address = address,
-    phone = null,
-    sourceLabel = sourceLabel,
-    sourceRating = sourceRating,
-    averageCostYuan = averageCostYuan,
-    distanceMeters = distanceMeters,
-    openStatus = openStatus,
-    tags = tags,
-    dataMode = dataMode,
     actions = actions,
 )

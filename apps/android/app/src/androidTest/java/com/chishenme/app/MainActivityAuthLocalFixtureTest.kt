@@ -505,13 +505,13 @@ class MainActivityAuthLocalFixtureTest {
 
     private fun configurationBody(): String = """
         {
-          "coverageName":"北京四环试点区",
+          "coverageName":"全国服务",
           "dataRightsMode":"LIVE_DISPLAY_ONLY",
           "aiEnabled":false,
           "accountsEnabled":true,
           "favoritesEnabled":false,
           "supportFeedbackEnabled":false,
-          "minimumSupportedVersion":"0.1.0",
+          "minimumSupportedVersion":"0.1.1",
           "ruleVersion":"rule-auth-fixture-v1",
           "promptVersion":"prompt-disabled",
           "modelVersion":"rule-auth-fixture-v1",

@@ -445,7 +445,7 @@ describe("Private persisted recommendation contracts", () => {
 
 	it("fails persistence capabilities closed in live-display-only mode", () => {
 		const base = {
-			coverageName: "北京四环试点区",
+			coverageName: "全国范围",
 			dataRightsMode: "LIVE_DISPLAY_ONLY" as const,
 			aiEnabled: false,
 			accountsEnabled: true,
@@ -471,7 +471,7 @@ describe("Private persisted recommendation contracts", () => {
 
 	it("fails support feedback closed for older responses and keeps the config strict", () => {
 		const base = {
-			coverageName: "北京四环试点区",
+			coverageName: "全国范围",
 			dataRightsMode: "LIVE_DISPLAY_ONLY" as const,
 			aiEnabled: false,
 			accountsEnabled: false,
@@ -499,7 +499,7 @@ describe("Private persisted recommendation contracts", () => {
 
 	it("fails every provider capability closed for older or partial config responses", () => {
 		const base = {
-			coverageName: "北京四环试点区",
+			coverageName: "全国范围",
 			dataRightsMode: "LIVE_DISPLAY_ONLY" as const,
 			aiEnabled: false,
 			accountsEnabled: false,
@@ -676,7 +676,7 @@ describe("Place keyword search contracts", () => {
 	it("keeps the response provider-neutral and actions explicit", () => {
 		const response = {
 			requestId: VALID_UUID,
-			coverage: "BEIJING_FOURTH_RING",
+			coverage: "NATIONWIDE",
 			results: [
 				{
 					resultToken: VALID_RESULT_TOKEN,
@@ -708,12 +708,10 @@ describe("Place keyword search contracts", () => {
 		expect(PlaceSearchResponseSchema.safeParse(response).success).toBe(true);
 		expect(
 			PlaceSearchResponseSchema.safeParse({
-				requestId: VALID_UUID,
-				coverage: "OUTSIDE_PILOT",
-				results: [],
-				notice: "当前地点不在北京四环试点区",
+				...response,
+				coverage: "REGIONAL",
 			}).success,
-		).toBe(true);
+		).toBe(false);
 		expect(
 			PlaceSearchResponseSchema.safeParse({
 				...response,

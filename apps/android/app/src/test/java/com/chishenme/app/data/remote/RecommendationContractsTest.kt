@@ -81,7 +81,7 @@ class RecommendationContractsTest {
             {
               "requestId":"2af305ae-82a1-4f87-86b7-1c97c4a8683f",
               "generatedAt":"2026-08-20T04:00:00Z",
-              "coverage":"BEIJING_FOURTH_RING",
+              "coverage":"NATIONWIDE",
               "dataRightsMode":"LIVE_DISPLAY_ONLY",
               "ruleVersion":"v1",
               "promptVersion":"v1",
@@ -108,6 +108,7 @@ class RecommendationContractsTest {
         )
 
         assertEquals(DataRightsMode.LIVE_DISPLAY_ONLY, response.dataRightsMode)
+        assertEquals(Coverage.NATIONWIDE, response.coverage)
         assertEquals("LOCAL_PARTNER_7", response.results.first().provider)
         assertEquals(RecommendationDataMode.LIVE, response.results.first().dataMode)
         assertTrue(response.results.first().actions.navigate)

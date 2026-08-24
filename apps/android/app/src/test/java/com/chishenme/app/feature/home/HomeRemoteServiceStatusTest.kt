@@ -5,13 +5,14 @@ import com.chishenme.app.data.remote.FeatureConfig
 import com.chishenme.app.data.remote.ServiceCapabilities
 import com.chishenme.app.feature.config.RemoteFeatureConfigState
 import com.chishenme.app.feature.decision.DecisionUiState
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HomeRemoteServiceStatusTest {
     @Test
-    fun `fully available cloud services need no warning card`() {
+    fun `server restaurant search capability is ignored by the Android decision surface`() {
         val message = remoteServiceStatusMessage(
             DecisionUiState(
                 remoteFeatureConfig = RemoteFeatureConfigState.Ready(
@@ -20,7 +21,7 @@ class HomeRemoteServiceStatusTest {
                         ServiceCapabilities(
                             recommendationsEnabled = true,
                             locationSearchEnabled = true,
-                            placeSearchEnabled = true,
+                            placeSearchEnabled = false,
                         ),
                     ),
                 ),
@@ -31,7 +32,7 @@ class HomeRemoteServiceStatusTest {
     }
 
     @Test
-    fun `missing capability object visibly fails every remote service closed`() {
+    fun `missing capability object reports only Android decision dependencies`() {
         val message = requireNotNull(
             remoteServiceStatusMessage(
                 DecisionUiState(
@@ -42,7 +43,7 @@ class HomeRemoteServiceStatusTest {
 
         assertTrue(message.contains("餐厅推荐"))
         assertTrue(message.contains("地点搜索"))
-        assertTrue(message.contains("餐厅搜索"))
+        assertFalse(message.contains("餐厅搜索"))
     }
 
     @Test
@@ -58,7 +59,7 @@ class HomeRemoteServiceStatusTest {
     }
 
     private fun config(capabilities: ServiceCapabilities?) = FeatureConfig(
-        coverageName = "北京四环试点区",
+        coverageName = "全国服务",
         dataRightsMode = DataRightsMode.LIVE_DISPLAY_ONLY,
         aiEnabled = false,
         accountsEnabled = false,

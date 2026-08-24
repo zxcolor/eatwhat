@@ -182,7 +182,7 @@
 				},
 				"responses": {
 					"200": {
-						"description": "推荐结果；试点区外也使用此结构并返回空 results",
+						"description": "全国范围内的推荐结果",
 						"headers": {
 							"X-ChiShenMe-Contract-Version": {
 								"$ref": "#/components/headers/ContractVersion"
@@ -262,7 +262,7 @@
 				},
 				"responses": {
 					"200": {
-						"description": "北京四环试点区内最多十个供应商原序结果；区外明确返回 OUTSIDE_PILOT 和空结果",
+						"description": "全国范围内最多十个供应商原序结果",
 						"headers": {
 							"X-ChiShenMe-Contract-Version": {
 								"$ref": "#/components/headers/ContractVersion"
@@ -2064,7 +2064,7 @@
 					},
 					"coverage": {
 						"type": "string",
-						"enum": ["BEIJING_FOURTH_RING", "OUTSIDE_PILOT"]
+						"const": "NATIONWIDE"
 					},
 					"results": {
 						"maxItems": 10,
@@ -2307,7 +2307,7 @@
 					},
 					"coverage": {
 						"type": "string",
-						"enum": ["BEIJING_FOURTH_RING", "OUTSIDE_PILOT"]
+						"const": "NATIONWIDE"
 					},
 					"dataRightsMode": {
 						"type": "string",

@@ -13,7 +13,7 @@ if [[ "$(id -u)" -ne 0 ]]; then
 fi
 [[ "$#" -eq 0 ]] || die 'reload-nginx-after-certificate-renewal.sh does not accept arguments'
 
-for required_command in awk chmod chown curl flock grep id install openssl realpath sha256sum sleep stat; do
+for required_command in awk chmod chown curl flock grep id install openssl realpath sha256sum sleep stat timeout; do
   command -v "$required_command" >/dev/null || die "required command is unavailable: $required_command"
 done
 
@@ -46,6 +46,32 @@ assert_safe_root_directory() {
   (( (8#$mode & 0022) == 0 )) || return 1
 }
 
+server_name_tokens_from_file() {
+  awk '
+    {
+      line = $0
+      sub(/[[:space:]]*#.*/, "", line)
+      if (collecting) {
+        directive = directive " " line
+      } else if (match(line, /server_name[[:space:]]+/)) {
+        directive = substr(line, RSTART)
+        collecting = 1
+      }
+      if (collecting && index(directive, ";") > 0) {
+        value = directive
+        sub(/^[[:space:]]*server_name[[:space:]]+/, "", value)
+        sub(/;.*/, "", value)
+        count = split(value, tokens, /[[:space:]]+/)
+        for (i = 1; i <= count; i += 1) {
+          print tokens[i]
+        }
+        directive = ""
+        collecting = 0
+      }
+    }
+  ' "$1"
+}
+
 if [[ -e "$lock_directory" || -L "$lock_directory" ]]; then
   assert_safe_root_directory "$lock_directory" || die 'public Nginx lock directory is unsafe'
 else
@@ -66,9 +92,10 @@ flock -n 9 || die 'another public Nginx mutation is already running' 9
 assert_safe_root_directory "$vhost_directory" || die 'BaoTa vhost directory is unsafe'
 assert_root_regular_file "$api_vhost" || die 'active API vhost is unavailable or unsafe'
 assert_root_regular_file "$wordpress_vhost" || die 'WordPress vhost is unavailable or unsafe'
-grep -Fq 'server_name api.unfinished-era.com;' "$api_vhost" || die 'active API vhost has the wrong server name'
+active_server_names="$(server_name_tokens_from_file "$api_vhost")" || die 'could not parse active API server names'
+grep -Fxq 'api.unfinished-era.com' <<<"$active_server_names" || die 'active API vhost has the wrong server name'
 grep -Fq 'proxy_pass http://127.0.0.1:13001;' "$api_vhost" || die 'active API vhost has the wrong upstream'
-! grep -Eq 'server_name[[:space:]]+(www\.)?unfinished-era\.com([[:space:];]|$)' "$api_vhost" ||
+! grep -Exq '(www\.unfinished-era\.com|unfinished-era\.com)' <<<"$active_server_names" ||
   die 'active API vhost claims the WordPress hostname'
 assert_root_regular_file "$certificate" || die 'renewed API certificate is unavailable or unsafe'
 assert_root_regular_file "$key_file_path" || die 'renewed API private key is unavailable or unsafe'
@@ -91,10 +118,30 @@ tls_public_sha="$(openssl pkey -in "$key_file_path" -pubout -outform DER 2>/dev/
 api_vhost_sha_before="$(sha256sum "$api_vhost" | awk '{print $1}')"
 wordpress_sha_before="$(sha256sum "$wordpress_vhost" | awk '{print $1}')"
 
+served_certificate_matches_file() {
+  local expected_sha
+  local served_sha
+  local attempt
+  expected_sha="$(openssl x509 -in "$certificate" -outform DER | sha256sum | awk '{print $1}')"
+  for attempt in {1..8}; do
+    served_sha="$(
+      timeout 3 openssl s_client -connect 127.0.0.1:443 -servername api.unfinished-era.com </dev/null 2>/dev/null |
+        openssl x509 -outform DER 2>/dev/null |
+        sha256sum | awk '{print $1}'
+    )" || true
+    if [[ -n "$expected_sha" && "$served_sha" == "$expected_sha" ]]; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 "$nginx" -t >/dev/null
 "$nginx" -s reload >/dev/null
 sleep 1
 "$nginx" -t >/dev/null
+served_certificate_matches_file || die 'BaoTa Nginx is not serving the renewed API certificate'
 
 [[ "$(sha256sum "$api_vhost" | awk '{print $1}')" == "$api_vhost_sha_before" ]] ||
   die 'API vhost changed during certificate reload'

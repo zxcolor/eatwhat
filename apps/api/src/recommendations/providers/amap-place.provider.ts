@@ -333,8 +333,6 @@ export class AmapPlaceProvider implements PlaceProvider {
 		endpoint.searchParams.set("radius", String(context.radiusMeters));
 		endpoint.searchParams.set("types", "050000");
 		endpoint.searchParams.set("sortrule", "distance");
-		endpoint.searchParams.set("region", "北京市");
-		endpoint.searchParams.set("city_limit", "true");
 		endpoint.searchParams.set("page_size", "25");
 		endpoint.searchParams.set("page_num", "1");
 		// The official response contract documents a photo URL but no stable owned

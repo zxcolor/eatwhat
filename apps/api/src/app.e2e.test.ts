@@ -224,6 +224,7 @@ describe("public HTTP API", () => {
 		expect(response.status).toBe(200);
 		expect(FeatureConfigSchema.safeParse(body).success).toBe(true);
 		expect(body).toMatchObject({
+			coverageName: "全国范围",
 			dataRightsMode: "LIVE_DISPLAY_ONLY",
 			aiEnabled: false,
 			favoritesEnabled: false,
@@ -286,7 +287,7 @@ describe("public HTTP API", () => {
 		).toBe(true);
 	});
 
-	it("returns an empty, explicit response outside the pilot without querying POIs", async () => {
+	it("returns the same nationwide demo baseline for a Shanghai origin", async () => {
 		const response = await fetch(`${baseUrl}/v1/recommendations`, {
 			method: "POST",
 			headers: { "content-type": "application/json" },
@@ -297,8 +298,12 @@ describe("public HTTP API", () => {
 			}),
 		});
 		const body = RecommendationResponseSchema.parse(await response.json());
-		expect(body.coverage).toBe("OUTSIDE_PILOT");
-		expect(body.results).toEqual([]);
+		expect(body.coverage).toBe("NATIONWIDE");
+		expect(body.results.map((result) => result.name)).toEqual([
+			"演示·校园面馆",
+			"演示·家常盖饭",
+			"演示·北方饺子铺",
+		]);
 	});
 
 	it("rejects an invalid recommendation body", async () => {

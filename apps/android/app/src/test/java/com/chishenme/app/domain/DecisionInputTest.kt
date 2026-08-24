@@ -33,7 +33,7 @@ class DecisionInputTest {
 
     @Test
     fun `puts Beijing Electronic Science and Technology Institute first`() {
-        val first = BeijingPilotLocations.choices.first()
+        val first = BuiltInQuickLocations.choices.first()
 
         assertEquals("北京电子科技学院", first.label)
     }

@@ -78,7 +78,7 @@ import com.chishenme.app.data.remote.LocationSearchQueryValidation
 import com.chishenme.app.data.remote.LocationSearchQueryValidator
 import com.chishenme.app.data.remote.TravelMode
 import com.chishenme.app.data.remote.effectiveServiceCapabilities
-import com.chishenme.app.domain.BeijingPilotLocations
+import com.chishenme.app.domain.BuiltInQuickLocations
 import com.chishenme.app.domain.LocationChoice
 import com.chishenme.app.feature.decision.DecisionUiState
 import com.chishenme.app.feature.decision.DecisionViewModel
@@ -101,7 +101,6 @@ fun HomeScreen(
     state: DecisionUiState,
     viewModel: DecisionViewModel,
     onOpenSettings: () -> Unit,
-    onOpenPlaceSearch: () -> Unit,
     onReconnectService: () -> Unit,
     onRecommendationStarted: () -> Unit,
 ) {
@@ -330,43 +329,6 @@ fun HomeScreen(
             }
 
             item {
-                Surface(
-                    color = MaterialTheme.colorScheme.tertiaryContainer,
-                    shape = MaterialTheme.shapes.large,
-                ) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth().padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Text(
-                            "已经知道想吃什么？",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            "直接搜索附近餐厅、菜系或食物。它与“手动选地点”和“帮我决定”是三个独立功能。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer,
-                        )
-                        OutlinedButton(
-                            onClick = {
-                                if (state.input.location == null) {
-                                    viewModel.showMessage("请先自动定位或手动选择地点，再搜索附近餐厅")
-                                } else {
-                                    onOpenPlaceSearch()
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Icon(AppIcons.Restaurant, contentDescription = null)
-                            Spacer(Modifier.width(7.dp))
-                            Text("搜索附近餐厅 / 菜系 / 食物")
-                        }
-                    }
-                }
-            }
-
-            item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionTitle("怎么决定", "极速模式一键给答案，精细模式可调全部条件")
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -555,7 +517,7 @@ internal fun remoteServiceStatusMessage(state: DecisionUiState): String? =
     when (val remote = state.remoteFeatureConfig) {
         is RemoteFeatureConfigState.Loading -> "正在连接云端服务，连接完成后即可开始。"
         is RemoteFeatureConfigState.Unavailable ->
-            "云端配置暂不可用。你仍可尝试一次不含 AI 的规则推荐；地点搜索、餐厅搜索和账号能力已关闭。"
+            "云端配置暂不可用。你仍可尝试一次不含 AI 的规则推荐；地点搜索和账号能力已关闭。"
         is RemoteFeatureConfigState.Incompatible ->
             "当前 App 与云端服务版本不兼容，远程功能已安全关闭。"
         is RemoteFeatureConfigState.Ready -> {
@@ -563,7 +525,6 @@ internal fun remoteServiceStatusMessage(state: DecisionUiState): String? =
             val unavailable = buildList {
                 if (!capabilities.recommendationsEnabled) add("餐厅推荐")
                 if (!capabilities.locationSearchEnabled) add("地点搜索")
-                if (!capabilities.placeSearchEnabled) add("餐厅搜索")
             }
             unavailable.takeIf { it.isNotEmpty() }
                 ?.joinToString(prefix = "云端已连接，但以下服务尚未开放：", postfix = "。")
@@ -898,7 +859,7 @@ private fun LocationChooserDialog(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    "可输入北京的学校、商圈或地址。输入内容仅用于本次搜索，不保存；结果会明确显示数据来源。",
+                    "可输入全国范围内的学校、商圈或地址。输入内容仅用于本次搜索，不保存；结果会明确显示数据来源。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -962,15 +923,15 @@ private fun LocationChooserDialog(
                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                 Text("快捷地点（始终可用）", style = MaterialTheme.typography.titleSmall)
                 Text(
-                    "以下 5 个内置演示地点可在拒绝定位、断网或搜索失败时完成流程。",
+                    "以下内置演示地点可在拒绝定位、断网或搜索失败时完成流程，也可搜索全国其他地点。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                BeijingPilotLocations.choices.forEachIndexed { index, location ->
+                BuiltInQuickLocations.choices.forEachIndexed { index, location ->
                     TextButton(onClick = { onChoose(location) }, modifier = Modifier.fillMaxWidth()) {
                         Text(location.label, modifier = Modifier.weight(1f))
                     }
-                    if (index != BeijingPilotLocations.choices.lastIndex) HorizontalDivider()
+                    if (index != BuiltInQuickLocations.choices.lastIndex) HorizontalDivider()
                 }
             }
         },

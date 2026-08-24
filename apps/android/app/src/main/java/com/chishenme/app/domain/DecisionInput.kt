@@ -97,7 +97,7 @@ object MealPeriodResolver {
     }
 }
 
-object BeijingPilotLocations {
+object BuiltInQuickLocations {
     val choices: List<LocationChoice> = listOf(
         LocationChoice(
             "北京电子科技学院",

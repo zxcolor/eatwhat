@@ -140,7 +140,7 @@ class RecommendationResponseValidatorTest {
     private fun response(result: RecommendationResult) = RecommendationResponse(
         requestId = "2af305ae-82a1-4f87-86b7-1c97c4a8683f",
         generatedAt = "2026-08-20T04:00:00Z",
-        coverage = Coverage.BEIJING_FOURTH_RING,
+        coverage = Coverage.NATIONWIDE,
         dataRightsMode = DataRightsMode.LIVE_DISPLAY_ONLY,
         ruleVersion = "rule-v1",
         promptVersion = "prompt-v1",

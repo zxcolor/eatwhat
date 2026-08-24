@@ -180,16 +180,6 @@ describe("rankCandidates", () => {
 		["over budget", { averageCostYuan: 41 }],
 		["excluded cuisine", { tags: ["火锅"] }],
 		["hierarchical excluded cuisine", { tags: ["重庆火锅"] }],
-		[
-			"place outside pilot",
-			{
-				location: {
-					latitude: 31.2304,
-					longitude: 121.4737,
-					crs: "WGS84" as const,
-				},
-			},
-		],
 	])("hard-filters %s candidates", (_label, overrides) => {
 		const results = rankCandidates({
 			context: context({ excludedCuisines: ["火锅"] }),
@@ -198,6 +188,30 @@ describe("rankCandidates", () => {
 			candidates: [candidate(overrides)],
 		});
 		expect(results).toHaveLength(0);
+	});
+
+	it("accepts a valid nearby candidate at a Shanghai origin", () => {
+		const results = rankCandidates({
+			context: context({
+				location: {
+					latitude: 31.2304,
+					longitude: 121.4737,
+					crs: "WGS84",
+				},
+			}),
+			intent: intent(),
+			dataRightsMode: "LIVE_DISPLAY_ONLY",
+			candidates: [
+				candidate({
+					location: {
+						latitude: 31.231,
+						longitude: 121.474,
+						crs: "WGS84",
+					},
+				}),
+			],
+		});
+		expect(results).toHaveLength(1);
 	});
 
 	it("deduplicates provider IDs and physical places", () => {

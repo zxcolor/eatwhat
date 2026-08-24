@@ -12,7 +12,6 @@ import {
 	type RecommendationContext,
 	type RecommendationReason,
 } from "@chi-shen-me/contracts";
-import { isInsideBeijingFourthRingPilot } from "./coverage.js";
 import type { PlaceCandidate } from "./place-candidate.js";
 
 export interface RankCandidatesInput {
@@ -178,7 +177,6 @@ function hardFilter(input: RankCandidatesInput): PlaceCandidate[] {
 			candidate.openStatus === "CLOSED"
 		)
 			continue;
-		if (!isInsideBeijingFourthRingPilot(candidate.location)) continue;
 		if (candidate.distanceMeters > input.context.radiusMeters) continue;
 		if (
 			input.context.budgetMaxYuan !== null &&

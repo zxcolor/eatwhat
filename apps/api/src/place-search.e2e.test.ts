@@ -78,6 +78,7 @@ describe("place keyword search HTTP flow", () => {
 			CURRENT_CONTRACT_VERSION,
 		);
 		expect(body.results).toHaveLength(1);
+		expect(body.coverage).toBe("NATIONWIDE");
 		expect(body.results[0]).toMatchObject({
 			name: "演示·校园牛肉面",
 			dataMode: "DEMO",
@@ -198,6 +199,7 @@ describe("live place keyword search privacy boundary", () => {
 		const raw = await response.json();
 		const body = PlaceSearchResponseSchema.parse(raw);
 		expect(response.status).toBe(200);
+		expect(body.coverage).toBe("NATIONWIDE");
 		expect(body.results[0]).toMatchObject({
 			name: "测试牛肉面",
 			dataMode: "LIVE",

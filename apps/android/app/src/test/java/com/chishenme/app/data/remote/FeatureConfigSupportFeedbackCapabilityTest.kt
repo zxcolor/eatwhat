@@ -33,7 +33,7 @@ class FeatureConfigSupportFeedbackCapabilityTest {
             .orEmpty()
         return """
             {
-              "coverageName": "北京四环试点区",
+              "coverageName": "全国服务",
               "dataRightsMode": "LIVE_DISPLAY_ONLY",
               "aiEnabled": false,
               "accountsEnabled": false,

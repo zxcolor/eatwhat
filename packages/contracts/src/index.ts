@@ -161,7 +161,7 @@ export type RecommendationResult = z.infer<typeof RecommendationResultSchema>;
 export const RecommendationResponseSchema = z.object({
 	requestId: z.uuid(),
 	generatedAt: z.iso.datetime(),
-	coverage: z.enum(["BEIJING_FOURTH_RING", "OUTSIDE_PILOT"]),
+	coverage: z.literal("NATIONWIDE"),
 	dataRightsMode: DataRightsModeSchema,
 	ruleVersion: z.string(),
 	promptVersion: z.string(),
@@ -1215,7 +1215,7 @@ export type PlaceSearchResult = z.infer<typeof PlaceSearchResultSchema>;
 export const PlaceSearchResponseSchema = z
 	.object({
 		requestId: z.uuid(),
-		coverage: z.enum(["BEIJING_FOURTH_RING", "OUTSIDE_PILOT"]),
+		coverage: z.literal("NATIONWIDE"),
 		results: z.array(PlaceSearchResultSchema).max(10),
 		notice: z.string().trim().min(1).max(160).nullable(),
 	})

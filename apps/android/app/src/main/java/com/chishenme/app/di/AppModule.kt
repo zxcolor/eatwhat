@@ -17,7 +17,6 @@ import com.chishenme.app.data.remote.AccountExportApi
 import com.chishenme.app.data.remote.AccountExportContentApi
 import com.chishenme.app.data.remote.AuthApi
 import com.chishenme.app.data.remote.LocationSearchApi
-import com.chishenme.app.data.remote.PlaceSearchApi
 import com.chishenme.app.data.remote.RecommendationApi
 import com.chishenme.app.data.remote.RuntimeAppVersionInterceptor
 import com.chishenme.app.data.remote.SavedResourcesApi
@@ -89,11 +88,6 @@ object AppModule {
     @Singleton
     fun provideLocationSearchApi(retrofit: Retrofit): LocationSearchApi =
         retrofit.create(LocationSearchApi::class.java)
-
-    @Provides
-    @Singleton
-    fun providePlaceSearchApi(retrofit: Retrofit): PlaceSearchApi =
-        retrofit.create(PlaceSearchApi::class.java)
 
     @Provides
     @Singleton

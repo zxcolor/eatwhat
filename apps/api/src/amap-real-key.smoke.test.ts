@@ -37,8 +37,8 @@ function successfulAmapFetch(observedPaths: string[]): typeof fetch {
 						{
 							name: "固定测试地点",
 							address: "固定测试地址",
-							location: "116.310900,39.992800",
-							adcode: "110108",
+							location: "121.473700,31.230400",
+							adcode: "310101",
 						},
 					],
 				}),
@@ -54,9 +54,9 @@ function successfulAmapFetch(observedPaths: string[]): typeof fetch {
 						id: "PRIVATE-UPSTREAM-POI-ID",
 						name: "固定测试餐厅",
 						address: "固定测试地址",
-						location: "116.311000,39.992900",
+						location: "121.473800,31.230500",
 						distance: "30",
-						adcode: "110108",
+						adcode: "310101",
 						type: "餐饮服务;中餐厅",
 						business: {
 							rating: "4.5",
@@ -158,14 +158,15 @@ describe("AMap real-key smoke safety harness", () => {
 			"固定测试餐厅",
 			"固定测试地址",
 			"PRIVATE-UPSTREAM-POI-ID",
-			"116.310900",
+			"121.473700",
 		]) {
 			expect(output).not.toContain(privateValue);
 		}
 	});
 
 	it("stops after a classified rejection and never emits upstream details", async () => {
-		const privateInfo = "private-live-smoke-key 北京大学 116.310900,39.992800";
+		const privateInfo =
+			"private-live-smoke-key 上海人民广场 121.473700,31.230400";
 		let callCount = 0;
 		const error = await runAmapLiveSmoke({
 			env: enabledEnv(),
@@ -193,7 +194,7 @@ describe("AMap real-key smoke safety harness", () => {
 		expect(callCount).toBe(1);
 		expect(output).not.toContain(privateInfo);
 		expect(output).not.toContain("private-live-smoke-key");
-		expect(output).not.toContain("116.310900");
+		expect(output).not.toContain("121.473700");
 	});
 
 	it("discards a low-level error containing the complete sensitive URL", async () => {
@@ -213,7 +214,7 @@ describe("AMap real-key smoke safety harness", () => {
 		});
 		for (const privateValue of [
 			"private-live-smoke-key",
-			"北京大学",
+			"上海人民广场",
 			"restapi.amap.com",
 		]) {
 			expect(output).not.toContain(privateValue);

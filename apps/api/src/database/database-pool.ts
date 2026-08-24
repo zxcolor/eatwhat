@@ -15,10 +15,12 @@ export const DATABASE_POOL_FACTORY = Symbol("DATABASE_POOL_FACTORY");
 // node-postgres supports a per-query query_timeout at runtime, while its
 // QueryConfig declaration currently exposes it only on ClientConfig. Keeping
 // the option in a named value avoids an unsafe cast and preserves the bound.
-const READINESS_QUERY = Object.freeze({
-	text: "SELECT 1",
-	query_timeout: 2_000,
-});
+function readinessQuery(): { text: string; query_timeout: number } {
+	// node-postgres normalizes QueryConfig objects internally by attaching a
+	// callback. A fresh extensible object avoids both the production TypeError
+	// caused by Object.freeze and shared mutable state across concurrent probes.
+	return { text: "SELECT 1", query_timeout: 2_000 };
+}
 
 /** Safe driver metadata only; never preserves a PostgreSQL message/detail. */
 export class DatabaseQueryError extends Error {
@@ -113,7 +115,7 @@ export class DatabasePool
 		const pool = this.pool;
 		if (pool === null) return false;
 		try {
-			await pool.query(READINESS_QUERY);
+			await pool.query(readinessQuery());
 			return true;
 		} catch {
 			return false;

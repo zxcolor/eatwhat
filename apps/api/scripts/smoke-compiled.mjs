@@ -177,8 +177,64 @@ try {
 		);
 	}
 
+	const shanghaiLocation = {
+		latitude: 31.2304,
+		longitude: 121.4737,
+		crs: "WGS84",
+	};
+	const recommendations = await requireJson(
+		await fetch(`${baseUrl}/v1/recommendations`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				location: shanghaiLocation,
+				mealPeriod: "LUNCH",
+				radiusMeters: 1_500,
+			}),
+			signal: AbortSignal.timeout(2_000),
+		}),
+		200,
+		"/v1/recommendations",
+	);
+	if (
+		recommendations.coverage !== "NATIONWIDE" ||
+		!Array.isArray(recommendations.results) ||
+		recommendations.results.length === 0
+	) {
+		throw new Error(
+			"/v1/recommendations did not cover the Shanghai nationwide smoke origin",
+		);
+	}
+
+	const places = await requireJson(
+		await fetch(`${baseUrl}/v1/place-search`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				location: shanghaiLocation,
+				mealPeriod: "LUNCH",
+				keyword: "牛肉面",
+				radiusMeters: 1_500,
+				openNow: false,
+				limit: 3,
+			}),
+			signal: AbortSignal.timeout(2_000),
+		}),
+		200,
+		"/v1/place-search",
+	);
+	if (
+		places.coverage !== "NATIONWIDE" ||
+		!Array.isArray(places.results) ||
+		places.results.length === 0
+	) {
+		throw new Error(
+			"/v1/place-search did not cover the Shanghai nationwide smoke origin",
+		);
+	}
+
 	console.log(
-		`Compiled API smoke passed on an ephemeral local port: /health 200, /health/ready 200, /v1/config 200, /v1/location-search DEMO 200.`,
+		`Compiled API smoke passed on an ephemeral local port: /health 200, /health/ready 200, /v1/config 200, /v1/location-search DEMO 200, Shanghai /v1/recommendations NATIONWIDE 200, Shanghai /v1/place-search NATIONWIDE 200.`,
 	);
 } finally {
 	await stopChild(child);

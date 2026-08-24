@@ -20,12 +20,6 @@ import com.chishenme.app.feature.account.AccountViewModel
 import com.chishenme.app.feature.detail.DetailSessionExpiredScreen
 import com.chishenme.app.feature.detail.RestaurantDetailScreen
 import com.chishenme.app.feature.home.HomeScreen
-import com.chishenme.app.feature.search.PlaceSearchDetailScreen
-import com.chishenme.app.feature.search.PlaceSearchLoadState
-import com.chishenme.app.feature.search.PlaceSearchCapabilityAuthority
-import com.chishenme.app.feature.search.PlaceSearchScreen
-import com.chishenme.app.feature.search.PlaceSearchSessionExpiredScreen
-import com.chishenme.app.feature.search.PlaceSearchViewModel
 import com.chishenme.app.feature.results.ResultsScreen
 import com.chishenme.app.feature.config.RemoteFeatureConfigState
 import com.chishenme.app.feature.config.RuntimeAppVersionGate
@@ -39,7 +33,6 @@ import com.chishenme.app.feature.saved.SavedResourcesViewModel
 import com.chishenme.app.feature.update.UpdateRequiredScreen
 import com.chishenme.app.data.remote.FeatureConfig
 import com.chishenme.app.data.remote.RecommendationEventType
-import com.chishenme.app.data.remote.effectiveServiceCapabilities
 
 private object Routes {
     const val Home = "home"
@@ -48,8 +41,6 @@ private object Routes {
     const val Settings = "settings"
     const val Account = "account"
     const val SavedResources = "saved-resources"
-    const val PlaceSearch = "place-search"
-    const val PlaceSearchDetail = "place-search-detail"
     const val SupportFeedback = "support-feedback"
 }
 
@@ -57,7 +48,6 @@ private object Routes {
 fun AppNavigation(
     onWithdrawPrivacy: () -> Unit,
     decisionViewModel: DecisionViewModel = hiltViewModel(),
-    placeSearchViewModel: PlaceSearchViewModel = hiltViewModel(),
 ) {
     val decisionState by decisionViewModel.uiState.collectAsStateWithLifecycle()
     val runtimeVersionGateState by
@@ -70,42 +60,17 @@ fun AppNavigation(
         decisionState.remoteFeatureConfig,
         runtimeVersionGateState,
     )
-    val placeSearchState by placeSearchViewModel.state.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
     val supportFeedbackEnabled = effectiveFeatureConfig?.supportFeedbackEnabled == true
-    val placeSearchAuthority =
-        (decisionState.remoteFeatureConfig as? RemoteFeatureConfigState.Ready)?.let { remote ->
-            effectiveFeatureConfig?.let { config ->
-                PlaceSearchCapabilityAuthority(
-                    configurationGeneration = remote.generation,
-                    enabled = config.effectiveServiceCapabilities().placeSearchEnabled,
-                )
-            }
-        }
-    val placeSearchEnabled = placeSearchAuthority?.enabled == true
-    val placeSearchSessionState: (String) -> ResultSessionState = { resultToken ->
-        val remote = decisionViewModel.uiState.value.remoteFeatureConfig
-        val gate = decisionViewModel.runtimeAppVersionGate.currentState
-        when {
-            gate.status == RuntimeAppVersionGate.Status.UPDATE_REQUIRED -> ResultSessionState.EXPIRED
-            effectiveRuntimeFeatureConfig(remote, gate)
-                ?.effectiveServiceCapabilities()?.placeSearchEnabled == true ->
-                placeSearchViewModel.resultSessionState(resultToken)
-            remote is RemoteFeatureConfigState.Loading ||
-                remote is RemoteFeatureConfigState.Ready -> ResultSessionState.CONFIG_UNCONFIRMED
-            else -> ResultSessionState.EXPIRED
-        }
-    }
     val refreshConfigAndInvalidateResultSessions: () -> Unit = {
         decisionViewModel.clearSelectedResult()
-        placeSearchViewModel.clearSession()
         decisionViewModel.startConsentSession()
     }
 
     LaunchedEffect(decisionViewModel) {
         decisionViewModel.ensureConsentSessionStarted()
     }
-    DisposableEffect(lifecycleOwner, decisionViewModel, placeSearchViewModel) {
+    DisposableEffect(lifecycleOwner, decisionViewModel) {
         // Adding an observer to an already-started Lifecycle immediately replays
         // ON_START. Only an ON_START preceded by an observed ON_STOP is a real
         // foreground return; the initial request remains owned by LaunchedEffect.
@@ -126,16 +91,11 @@ fun AppNavigation(
     LaunchedEffect(runtimeVersionGateState.status) {
         if (runtimeVersionGateState.status == RuntimeAppVersionGate.Status.UPDATE_REQUIRED) {
             decisionViewModel.clearSelectedResult()
-            placeSearchViewModel.clearSession()
         }
-    }
-    LaunchedEffect(placeSearchEnabled) {
-        if (!placeSearchEnabled) placeSearchViewModel.clearSession()
     }
 
     val withdrawPrivacy: () -> Unit = {
         decisionViewModel.clearSelectedResult()
-        placeSearchViewModel.clearSession()
         decisionViewModel.clearForPrivacyWithdrawal()
         onWithdrawPrivacy()
     }
@@ -173,103 +133,9 @@ fun AppNavigation(
                 state = decisionState,
                 viewModel = decisionViewModel,
                 onOpenSettings = { navController.navigate(Routes.Settings) },
-                onOpenPlaceSearch = {
-                    if (placeSearchEnabled) {
-                        placeSearchViewModel.clearSession()
-                        navController.navigate(Routes.PlaceSearch)
-                    } else {
-                        decisionViewModel.showMessage(
-                            "餐厅搜索服务当前未开放，请重新连接服务后再试",
-                        )
-                    }
-                },
                 onReconnectService = refreshConfigAndInvalidateResultSessions,
                 onRecommendationStarted = { navController.navigate(Routes.Results) },
             )
-        }
-        composable(Routes.PlaceSearch) {
-            val closeSearch: () -> Unit = {
-                placeSearchViewModel.clearSession()
-                navController.popBackStack()
-            }
-            PlaceSearchScreen(
-                state = placeSearchState,
-                decisionInput = decisionState.input,
-                onKeywordChanged = placeSearchViewModel::updateKeyword,
-                onOpenNowChanged = placeSearchViewModel::setOpenNow,
-                onUseBudgetChanged = placeSearchViewModel::setUseCurrentBudget,
-                onSearch = {
-                    placeSearchViewModel.search(decisionState.input, placeSearchAuthority)
-                },
-                onRetry = { placeSearchViewModel.retry(placeSearchAuthority) },
-                onOpenDetail = { result ->
-                    val ready = placeSearchState.loadState as? PlaceSearchLoadState.Ready
-                    if (ready?.response?.results?.any { it.resultToken == result.resultToken } == true &&
-                        placeSearchSessionState(result.resultToken) == ResultSessionState.CURRENT &&
-                        placeSearchViewModel.selectResultForDetail(result.resultToken)
-                    ) {
-                        runCatching { navController.navigate(Routes.PlaceSearchDetail) }
-                            .onFailure { placeSearchViewModel.clearSelectedResult() }
-                    }
-                },
-                onCancelInFlight = placeSearchViewModel::cancelInFlight,
-                onBack = closeSearch,
-            )
-        }
-        composable(Routes.PlaceSearchDetail) {
-            val persistenceViewModel: SavedResourcesViewModel = hiltViewModel()
-            val persistenceState by persistenceViewModel.state.collectAsStateWithLifecycle()
-            LaunchedEffect(decisionState.remoteFeatureConfig, runtimeVersionGateState) {
-                persistenceViewModel.applyCapabilities(
-                    effectiveFeatureConfig,
-                    runtimeVersionGateState.trustedConfigurationGeneration,
-                )
-            }
-            val result = placeSearchViewModel.selectedResultForDetail()
-            val ready = placeSearchState.loadState as? PlaceSearchLoadState.Ready
-            val resultSessionState = result?.let { placeSearchSessionState(it.resultToken) }
-            val closeDetail: () -> Unit = {
-                if (navController.popBackStack()) placeSearchViewModel.clearSelectedResult()
-            }
-            if (result == null || ready == null || resultSessionState != ResultSessionState.CURRENT ||
-                ready.response.results.none {
-                    it.resultToken == result.resultToken
-                }
-            ) {
-                PlaceSearchSessionExpiredScreen(onBack = closeDetail)
-            } else {
-                PlaceSearchDetailScreen(
-                    response = ready.response,
-                    result = result,
-                    resultSessionState = resultSessionState,
-                    resultSessionStateProvider = { placeSearchSessionState(result.resultToken) },
-                    featureConfig = effectiveFeatureConfig,
-                    persistenceState = persistenceState,
-                    onBack = closeDetail,
-                    onFavorite = { group ->
-                        if (placeSearchSessionState(result.resultToken) == ResultSessionState.CURRENT) {
-                            persistenceViewModel.createFavorite(
-                                effectiveFeatureConfig,
-                                ready.response,
-                                result,
-                                group,
-                            )
-                        }
-                    },
-                    onPrivateFeedback = { type ->
-                        if (placeSearchSessionState(result.resultToken) == ResultSessionState.CURRENT) {
-                            persistenceViewModel.createPrivateFeedback(
-                                effectiveFeatureConfig,
-                                ready.response,
-                                result,
-                                type,
-                            )
-                        }
-                    },
-                    onOpenAccount = { navController.navigate(Routes.Account) },
-                    onConsumePersistenceMessage = persistenceViewModel::consumeMessage,
-                )
-            }
         }
         composable(Routes.Results) {
             ResultsScreen(

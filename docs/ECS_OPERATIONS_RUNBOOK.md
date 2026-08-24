@@ -2,11 +2,13 @@
 
 适用环境：`/opt/chi-shen-me`、宝塔 Nginx、2 核 2 GiB ECS。本文只覆盖 API 云端运行，不会删除或覆盖原 WordPress 文件、MySQL 数据库、证书和恢复点。
 
+当前活动检查点（2026-08-23）：`current` 指向全国版 `20260823T071142Z-nationwide`，镜像 ID 为 `sha256:44041f99d06b1758088b58a22af83707e56db81783c8c4daadc7347e9da7c3a7`，最低客户端版本为 `0.1.1`；`https://api.unfinished-era.com` 已启用独立 vhost 和 Let's Encrypt 证书，证书有效至 2026-11-21，acme.sh 自动续期与加固 reload hook 已动态执行成功。
+
 ## 1. 独立 API 域名边界
 
-预备模板是 `infra/ecs/nginx/api.unfinished-era.com.conf`。它只声明 `api.unfinished-era.com`，只把 `/health`、`/health/ready`、`/v1` 和 `/v1/*` 代理到 `127.0.0.1:13001`，其他路径固定返回 404。`/health` 仅用于进程存活检查；发布、切流和公网 smoke 必须以 `/health/ready` 为准。
+活动模板是 `infra/ecs/nginx/api.unfinished-era.com.conf`。它只声明 `api.unfinished-era.com`，只把 `/health`、`/health/ready`、`/v1` 和 `/v1/*` 代理到 `127.0.0.1:13001`，其他路径固定返回 404。`/health` 仅用于进程存活检查；发布、切流和公网 smoke 必须以 `/health/ready` 为准。
 
-当前不得直接安装最终 HTTPS 模板。必须按以下顺序完成外部条件：
+首次部署、证书重建或灾难恢复时不得直接覆盖活动 HTTPS 模板，必须按以下顺序完成外部条件：
 
 1. 在候选 release 的 root-only Secret 中启用高德并完成严格预检；
 2. 先完成 PostgreSQL 备份及校验，再用候选激活脚本通过回环 readiness 和自动回退门禁；
@@ -22,7 +24,7 @@ cd /opt/chi-shen-me/current/deploy
 scripts/activate-api-subdomain-nginx.sh
 ```
 
-该脚本固定使用 `127.0.0.1:13001`，先运行 release 预检和现有 Nginx 基线检查，再保存 API vhost 现场、隔离检查候选配置、原子安装、执行完整 `nginx -t` 和 reload。随后以本机 `--resolve` 验证 HTTP 跳转、HTTPS SNI/证书、`/health/ready`、`/v1/config`，并证明 `/admin/v1` 固定为 404。开始前和全部 smoke 后都会比较 `/www/server/panel/vhost/nginx/www.unfinished-era.com.conf` 的 SHA-256。
+该脚本固定使用 `127.0.0.1:13001`，先运行 release 预检和现有 Nginx 基线检查，再保存 API vhost 现场、隔离检查候选配置、原子安装、执行完整 `nginx -t` 和 reload。它还通过 `nginx -T` 确认 `api.unfinished-era.com` 只由目标文件声明、主站两个 hostname 的配置归属未变化；随后以本机 `--resolve` 验证 HTTP 跳转、HTTPS SNI/证书、实际在 443 提供的叶证书指纹、`/health/ready`、`/v1/config`，并证明 `/admin/v1` 固定为 404。开始前和全部 smoke 后都会比较 `/www/server/panel/vhost/nginx/www.unfinished-era.com.conf` 的 SHA-256。
 
 任何失败都会只恢复操作前的 API 子域 vhost（或恢复为不存在）并重新检查/reload Nginx；看到 `NGINX_API_SUBDOMAIN_ROLLBACK=FAILED` 或 `RECOVERY_REQUIRED=true` 必须停止公网发布并从脚本输出的 `/www/backup/manual/chi-shen-me-api-vhost-*` 目录人工恢复。成功必须同时看到：
 
@@ -32,7 +34,9 @@ WORDPRESS_VHOST_UNCHANGED=true
 ADMIN_ENDPOINT_PUBLIC=false
 ```
 
-证书自动续期的成功 hook 只能以 root 调用当前 release 的 `scripts/reload-nginx-after-certificate-renewal.sh`。它与激活器共用 `/run/lock/chi-shen-me/public-nginx.lock`，重新核验证书 SAN、有效期和私钥匹配后执行 `nginx -t`、reload 及本机 HTTPS smoke，并再次证明 API/WordPress 两个 vhost 文件的 SHA 均未变化；它不会复制、删除或改写任何 vhost。
+证书自动续期的成功 hook 只能以 root 调用当前 release 的 `scripts/reload-nginx-after-certificate-renewal.sh`。它与激活器共用 `/run/lock/chi-shen-me/public-nginx.lock`，重新核验证书 SAN、有效期和私钥匹配后执行 `nginx -t`、reload，轮询 443 直到实际服务叶证书指纹与磁盘证书一致，再执行本机 HTTPS smoke，并再次证明 API/WordPress 两个 vhost 文件的 SHA 均未变化；它不会复制、删除或改写任何 vhost。
+
+`public-nginx.lock` 只能串行本项目脚本，宝塔面板和宝塔自带证书任务不会自动遵守该锁。运行激活器或续期 hook 时不得同时在宝塔修改站点、证书、rewrite、redirect 或 include；操作窗口内看到任何面板侧并发写入必须停止，不能把本脚本的 reload 当成对并发改动的授权。
 
 不得把新模板写到 `/www/server/panel/vhost/nginx/www.unfinished-era.com.conf`。旧 `activate-baota-nginx.sh` 已固定无条件退出，旧主站 API 模板不再进入部署 bundle；不得复制旧 release 中的同名危险工件来代替子域部署。
 

@@ -187,8 +187,8 @@ describe("place providers", () => {
 				expect(url.searchParams.get("radius")).toBe("1500");
 				expect(url.searchParams.get("types")).toBe("050000");
 				expect(url.searchParams.get("sortrule")).toBe("distance");
-				expect(url.searchParams.get("region")).toBe("北京市");
-				expect(url.searchParams.get("city_limit")).toBe("true");
+				expect(url.searchParams.has("region")).toBe(false);
+				expect(url.searchParams.has("city_limit")).toBe(false);
 				expect(url.searchParams.get("page_size")).toBe("25");
 				expect(url.searchParams.get("page_num")).toBe("1");
 				expect(url.searchParams.get("show_fields")).toBe("business");

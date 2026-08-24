@@ -56,7 +56,7 @@ describe("location search providers", () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
-	it("uses the official HTTPS text endpoint, never caches, and filters malformed or non-Beijing POIs", async () => {
+	it("uses the nationwide HTTPS text endpoint, never caches, and filters malformed POIs", async () => {
 		const fetchMock = vi.fn(
 			async (input: URL | RequestInfo, init?: RequestInit) => {
 				const url = new URL(String(input));
@@ -64,8 +64,8 @@ describe("location search providers", () => {
 				expect(url.pathname).toBe("/v5/place/text");
 				expect(url.searchParams.get("key")).toBe("test-location-key");
 				expect(url.searchParams.get("keywords")).toBe("北京大学");
-				expect(url.searchParams.get("region")).toBe("北京市");
-				expect(url.searchParams.get("city_limit")).toBe("true");
+				expect(url.searchParams.has("region")).toBe(false);
+				expect(url.searchParams.has("city_limit")).toBe(false);
 				expect(url.searchParams.get("page_size")).toBe("5");
 				expect(url.searchParams.get("page_num")).toBe("1");
 				expect(url.searchParams.get("output")).toBe("json");
@@ -88,8 +88,9 @@ describe("location search providers", () => {
 								adcode: "110108",
 							},
 							{
-								id: "NON-BEIJING",
-								name: "外地地点",
+								id: "SHANGHAI-PRIVATE-ID",
+								name: "上海测试地点",
+								address: "上海市测试路 1 号",
 								location: "121.47,31.23",
 								adcode: "310101",
 							},
@@ -117,9 +118,18 @@ describe("location search providers", () => {
 				sourceLabel: "高德地图实时地点数据",
 				providerRank: 1,
 			},
+			{
+				name: "上海测试地点",
+				address: "上海市测试路 1 号",
+				location: { latitude: 31.23, longitude: 121.47, crs: "GCJ02" },
+				sourceLabel: "高德地图实时地点数据",
+				providerRank: 2,
+			},
 		]);
 		expect(second).toEqual(first);
-		expect(JSON.stringify(first)).not.toContain("B000-PRIVATE-ID");
+		expect(JSON.stringify(first)).not.toMatch(
+			/B000-PRIVATE-ID|SHANGHAI-PRIVATE-ID/u,
+		);
 		expect(fetchMock).toHaveBeenCalledTimes(2);
 	});
 

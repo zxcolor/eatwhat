@@ -30,8 +30,6 @@ interface AmapSearchPoi {
 	readonly location?: unknown;
 	readonly distance?: unknown;
 	readonly type?: unknown;
-	readonly adcode?: unknown;
-	readonly ad_info?: unknown;
 	readonly business?: unknown;
 	readonly biz_ext?: unknown;
 }
@@ -89,13 +87,6 @@ function parseLocation(
 		latitude <= 90
 		? { latitude, longitude, crs: "GCJ02" }
 		: null;
-}
-
-function beijingAdcode(poi: AmapSearchPoi): string | null {
-	const direct = boundedString(poi.adcode, 16);
-	const nested = boundedString(objectValue(poi.ad_info)?.adcode, 16);
-	const value = direct ?? nested;
-	return value !== null && /^11\d{4}$/u.test(value) ? value : null;
 }
 
 function tagsFromPoi(
@@ -229,8 +220,6 @@ export class AmapPlaceKeywordSearchProvider
 		endpoint.searchParams.set("radius", String(request.radiusMeters));
 		endpoint.searchParams.set("types", "050000");
 		endpoint.searchParams.set("sortrule", "distance");
-		endpoint.searchParams.set("region", "北京市");
-		endpoint.searchParams.set("city_limit", "true");
 		endpoint.searchParams.set("page_size", "25");
 		endpoint.searchParams.set("page_num", "1");
 		// Photos are deliberately omitted. Only business fields used by this live
@@ -310,7 +299,7 @@ export class AmapPlaceKeywordSearchProvider
 		amapOrigin: ReturnType<typeof toGcj02>,
 	): PlaceKeywordSearchCandidate | null {
 		const poi = objectValue(value) as AmapSearchPoi | null;
-		if (poi === null || beijingAdcode(poi) === null) return null;
+		if (poi === null) return null;
 		const providerPlaceId = boundedString(poi.id, 160);
 		const name = boundedString(poi.name, 160);
 		const location = parseLocation(poi.location);

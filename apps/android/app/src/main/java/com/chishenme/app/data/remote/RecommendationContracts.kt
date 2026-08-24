@@ -21,7 +21,7 @@ enum class DataRightsMode { LIVE_DISPLAY_ONLY, LICENSED_ENRICHMENT }
 enum class Confidence { LOW, MEDIUM, HIGH }
 
 @Serializable
-enum class Coverage { BEIJING_FOURTH_RING, OUTSIDE_PILOT }
+enum class Coverage { NATIONWIDE }
 
 @Serializable
 enum class OpenStatus { OPEN, CLOSED, UNKNOWN }

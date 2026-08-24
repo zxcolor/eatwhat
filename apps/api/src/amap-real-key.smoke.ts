@@ -55,8 +55,8 @@ class AmapLiveSmokeFailure extends Error {
 
 const recommendationContext: RecommendationContext = Object.freeze({
 	location: Object.freeze({
-		latitude: 39.9928,
-		longitude: 116.3109,
+		latitude: 31.2304,
+		longitude: 121.4737,
 		crs: "GCJ02" as const,
 	}),
 	mealPeriod: "LUNCH" as const,
@@ -74,8 +74,8 @@ const recommendationContext: RecommendationContext = Object.freeze({
 
 const placeSearchRequest: PlaceSearchRequest = Object.freeze({
 	location: Object.freeze({
-		latitude: 39.9928,
-		longitude: 116.3109,
+		latitude: 31.2304,
+		longitude: 121.4737,
 		crs: "GCJ02" as const,
 	}),
 	mealPeriod: "LUNCH" as const,
@@ -188,7 +188,9 @@ async function runChain(
 		if (
 			url === null ||
 			url.origin !== "https://restapi.amap.com" ||
-			url.pathname !== expectedPath
+			url.pathname !== expectedPath ||
+			url.searchParams.has("region") ||
+			url.searchParams.has("city_limit")
 		) {
 			endpointMismatch = true;
 			throw new Error("AMAP_LIVE_SMOKE_ENDPOINT_MISMATCH");
@@ -235,7 +237,7 @@ export async function runAmapLiveSmoke(
 			options.fetchImpl,
 			async (fetchImpl) =>
 				await new AmapLocationSearchProvider(config, fetchImpl).search(
-					"北京大学",
+					"上海人民广场",
 				),
 		),
 	);

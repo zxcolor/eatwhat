@@ -30,7 +30,7 @@ export interface Snapshot<T> {
 }
 
 const demoConfig: FeatureConfig = {
-  coverageName: "北京四环以内（首测）",
+  coverageName: "全国范围",
   dataRightsMode: "LIVE_DISPLAY_ONLY",
   aiEnabled: false,
   accountsEnabled: false,

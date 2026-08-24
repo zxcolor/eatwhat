@@ -13,6 +13,8 @@ import com.chishenme.app.data.local.RefreshTokenCipher
 import com.chishenme.app.data.remote.AuthApi
 import com.chishenme.app.data.remote.AuthCapabilities
 import com.chishenme.app.data.remote.AuthTokenResponse
+import com.chishenme.app.data.remote.Confidence
+import com.chishenme.app.data.remote.Coordinate
 import com.chishenme.app.data.remote.CoordinateReferenceSystem
 import com.chishenme.app.data.remote.Coverage
 import com.chishenme.app.data.remote.CreatePrivateFeedbackRequest
@@ -26,9 +28,6 @@ import com.chishenme.app.data.remote.OpenStatus
 import com.chishenme.app.data.remote.PersistedPlacePresentation
 import com.chishenme.app.data.remote.PersistedPresentationStatus
 import com.chishenme.app.data.remote.PersistenceCapabilities
-import com.chishenme.app.data.remote.PlaceSearchCoordinate
-import com.chishenme.app.data.remote.PlaceSearchResponse
-import com.chishenme.app.data.remote.PlaceSearchResult
 import com.chishenme.app.data.remote.PrivateFeedbackPage
 import com.chishenme.app.data.remote.PrivateFeedbackRecord
 import com.chishenme.app.data.remote.PrivateFeedbackType
@@ -36,6 +35,8 @@ import com.chishenme.app.data.remote.RecommendationActions
 import com.chishenme.app.data.remote.RecommendationDataMode
 import com.chishenme.app.data.remote.RecommendationHistoryAction
 import com.chishenme.app.data.remote.RecommendationHistoryPage
+import com.chishenme.app.data.remote.RecommendationResponse
+import com.chishenme.app.data.remote.RecommendationResult
 import com.chishenme.app.data.remote.SavedResourcesApi
 import com.chishenme.app.data.remote.UpdateFavoriteGroupRequest
 import java.lang.reflect.Proxy
@@ -139,8 +140,8 @@ class SavedResourcesCapabilityRefreshLifecycleTest {
             val viewModel = viewModel(api)
             runCurrent()
             val enabled = enabledConfig()
-            val result = searchResult()
-            val response = searchResponse(result)
+            val result = recommendationResult()
+            val response = recommendationResponse(result)
 
             viewModel.start(enabled)
             runCurrent()
@@ -226,10 +227,10 @@ class SavedResourcesCapabilityRefreshLifecycleTest {
             assertEquals(0, api.listFavoritesCalls)
             assertEquals(0, api.createFavoriteCalls)
 
-            val result = searchResult()
+            val result = recommendationResult()
             viewModel.createFavorite(
                 enabledConfig(),
-                searchResponse(result),
+                recommendationResponse(result),
                 result,
                 FavoriteGroup.WANT_TO_GO,
             )
@@ -438,7 +439,7 @@ private class SavedResourcesReversibleCipher : RefreshTokenCipher {
 }
 
 private fun enabledConfig() = FeatureConfig(
-    coverageName = "北京四环试点区",
+    coverageName = "全国服务",
     dataRightsMode = DataRightsMode.LICENSED_ENRICHMENT,
     aiEnabled = false,
     accountsEnabled = true,
@@ -496,27 +497,43 @@ private fun favorite(id: String) = FavoriteRecord(
     ),
 )
 
-private fun searchResponse(result: PlaceSearchResult) = PlaceSearchResponse(
+private fun recommendationResponse(result: RecommendationResult) = RecommendationResponse(
     requestId = REQUEST_ID,
-    coverage = Coverage.BEIJING_FOURTH_RING,
+    generatedAt = NOW,
+    coverage = Coverage.NATIONWIDE,
+    dataRightsMode = DataRightsMode.LICENSED_ENRICHMENT,
+    ruleVersion = "rule-v1",
+    promptVersion = "prompt-v1",
+    modelVersion = "rule-fallback-v1",
+    aiFallbackUsed = false,
     results = listOf(result),
     notice = null,
 )
 
-private fun searchResult() = PlaceSearchResult(
+private fun recommendationResult() = RecommendationResult(
+    provider = "AUTHORIZED_SOURCE",
     resultToken = "S".repeat(43),
+    dataMode = RecommendationDataMode.LIVE,
+    actions = RecommendationActions(false, false, false, false),
     rank = 1,
     name = "学院路面馆",
     address = "海淀区学院路",
-    location = PlaceSearchCoordinate(39.9, 116.4, CoordinateReferenceSystem.GCJ02),
-    distanceMeters = 300,
-    sourceLabel = "经授权餐厅数据",
+    fitScore = 80.0,
     sourceRating = null,
     averageCostYuan = 25.0,
+    distanceMeters = 300.0,
+    estimatedTravelMinutes = 5.0,
+    estimatedMealMinutes = 20.0,
     openStatus = OpenStatus.OPEN,
     tags = listOf("面食"),
-    dataMode = "LIVE",
-    actions = RecommendationActions(false, false, false, false),
+    imageUrl = null,
+    phone = null,
+    location = Coordinate(39.9, 116.4, null, CoordinateReferenceSystem.GCJ02),
+    reasons = emptyList(),
+    warnings = emptyList(),
+    confidence = Confidence.HIGH,
+    aiAssisted = false,
+    sourceAttribution = "经授权餐厅数据",
 )
 
 private const val USER_ID = "11111111-1111-4111-8111-111111111111"

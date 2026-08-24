@@ -213,13 +213,13 @@ class MainActivityAmapLiveFixtureTest {
 
     private fun configurationBody(): String = """
         {
-          "coverageName":"北京四环试点区",
+          "coverageName":"全国服务",
           "dataRightsMode":"LIVE_DISPLAY_ONLY",
           "aiEnabled":false,
           "accountsEnabled":false,
           "favoritesEnabled":false,
           "supportFeedbackEnabled":false,
-          "minimumSupportedVersion":"0.1.0",
+          "minimumSupportedVersion":"0.1.1",
           "ruleVersion":"rule-amap-device-fixture-v1",
           "promptVersion":"prompt-disabled",
           "modelVersion":"rule-amap-device-fixture-v1"
@@ -230,7 +230,7 @@ class MainActivityAmapLiveFixtureTest {
         {
           "requestId":"50000000-0000-4000-8000-000000000001",
           "generatedAt":"2026-08-22T00:00:00Z",
-          "coverage":"BEIJING_FOURTH_RING",
+          "coverage":"NATIONWIDE",
           "dataRightsMode":"LIVE_DISPLAY_ONLY",
           "ruleVersion":"rule-amap-device-fixture-v1",
           "promptVersion":"prompt-disabled",

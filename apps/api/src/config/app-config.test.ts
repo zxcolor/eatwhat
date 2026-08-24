@@ -45,6 +45,7 @@ describe("application safety configuration", () => {
 		expect(defaults.features.favoritesEnabled).toBe(false);
 		expect(defaults.features.historyEnabled).toBe(false);
 		expect(defaults.features.privateFeedbackEnabled).toBe(false);
+		expect(defaults.features.minimumSupportedVersion).toBe("0.1.1");
 
 		const configured = loadAppConfig({
 			NODE_ENV: "test",
