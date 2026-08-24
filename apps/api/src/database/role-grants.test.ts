@@ -5,16 +5,51 @@ import { describe, expect, it } from "vitest";
 const ROLE_GRANTS_PATH = fileURLToPath(
 	new URL("../../../../infra/postgres/role-grants.sql", import.meta.url),
 );
+const BOOTSTRAP_EXTENSIONS_PATH = fileURLToPath(
+	new URL(
+		"../../../../infra/postgres/bootstrap-extensions.sql",
+		import.meta.url,
+	),
+);
+const CI_WORKFLOW_PATH = fileURLToPath(
+	new URL("../../../../.github/workflows/ci.yml", import.meta.url),
+);
 
 async function loadRoleGrants(): Promise<string> {
 	return readFile(ROLE_GRANTS_PATH, "utf8");
 }
 
+async function loadBootstrapExtensions(): Promise<string> {
+	return readFile(BOOTSTRAP_EXTENSIONS_PATH, "utf8");
+}
+
+async function loadCiWorkflow(): Promise<string> {
+	return readFile(CI_WORKFLOW_PATH, "utf8");
+}
+
+function expectFailClosedPsqlBranches(
+	sql: string,
+	expectedBranchCount: number,
+): void {
+	const rejectionBranches = Array.from(
+		sql.matchAll(/\\else\s+([\s\S]*?)\\endif/gu),
+		(match) => match[1] ?? "",
+	);
+
+	expect(sql.startsWith("\\set ON_ERROR_STOP on\n")).toBe(true);
+	expect(sql).not.toMatch(/\\quit(?:\s|$)/u);
+	expect(rejectionBranches).toHaveLength(expectedBranchCount);
+	for (const branch of rejectionBranches) {
+		expect(branch).toContain("RAISE EXCEPTION USING");
+		expect(branch).toMatch(/ERRCODE = '(?:22023|42501|55000)'/u);
+		expect(branch).toMatch(/MESSAGE = '[^']+';/u);
+	}
+}
+
 describe("database role grant deployment gate", () => {
 	it("fails closed and changes privileges in one transaction", async () => {
 		const sql = await loadRoleGrants();
-		expect(sql.startsWith("\\set ON_ERROR_STOP on\n")).toBe(true);
-		expect(sql.match(/\\quit 3/gu)?.length).toBeGreaterThanOrEqual(6);
+		expectFailClosedPsqlBranches(sql, 8);
 		expect(sql.indexOf("BEGIN;")).toBeLessThan(sql.indexOf("REVOKE CREATE"));
 		expect(sql.trimEnd().endsWith("COMMIT;")).toBe(true);
 		expect(sql).toContain("declared_roles_are_distinct");
@@ -25,6 +60,25 @@ describe("database role grant deployment gate", () => {
 		expect(sql).toContain("'USAGE'");
 		expect(sql).toContain("export_worker_role psql variable is required");
 		expect(sql).toContain(":'admin_runtime_role' <> :'export_worker_role'");
+	});
+
+	it("fails extension bootstrap validation with server errors", async () => {
+		const sql = await loadBootstrapExtensions();
+		expectFailClosedPsqlBranches(sql, 4);
+		expect(sql).toContain("CREATE EXTENSION IF NOT EXISTS pgcrypto");
+		expect(sql).toContain("CREATE EXTENSION IF NOT EXISTS postgis");
+		expect(sql).toContain("extensions_are_isolated");
+	});
+
+	it("fails CI psql assertions with real server errors", async () => {
+		const workflow = await loadCiWorkflow();
+		const assertionFailures =
+			workflow.match(
+				/DO \$ci_fail\$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: [^']+'; END \$ci_fail\$;/gu,
+			) ?? [];
+
+		expect(workflow).not.toMatch(/\\q(?:uit)?[\t ]+\S/u);
+		expect(assertionFailures).toHaveLength(31);
 	});
 
 	it("isolates export generation behind a dedicated function-only role", async () => {

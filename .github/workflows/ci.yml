@@ -254,7 +254,7 @@ jobs:
           ) \gset
           \if :{?export_id}
           \else
-            \quit 3
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: export worker did not claim the queued job'; END $ci_fail$;
           \endif
           SELECT * FROM public.export_stage_job_artifact(
             :'export_id'::uuid, repeat('a',64), 'ci-worker-v1',
@@ -263,14 +263,14 @@ jobs:
           ) \gset
           \if :{?new_state_version}
           \else
-            \quit 3
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: export worker did not stage the artifact'; END $ci_fail$;
           \endif
           SELECT count(*) = 1 AS locator_key_version_visible
           FROM public.export_artifact_required_locator_key_versions()
           WHERE key_version = 'ci-artifact-v1' \gset
           \if :locator_key_version_visible
           \else
-            \quit 3
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: artifact locator key version is not visible'; END $ci_fail$;
           \endif
           DO $$
           DECLARE snapshot jsonb;
@@ -306,7 +306,7 @@ jobs:
           ) \gset
           \if :stale_rejected
           \else
-            \quit 3
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: stale export completion was not rejected'; END $ci_fail$;
           \endif
           SELECT count(*) = 1 AS completed
           FROM public.export_complete_job(
@@ -315,7 +315,7 @@ jobs:
           ) \gset
           \if :completed
           \else
-            \quit 3
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: export job did not complete'; END $ci_fail$;
           \endif
           SQL
           export PGUSER=api_runtime PGPASSWORD=ci-runtime-password
@@ -346,7 +346,7 @@ jobs:
           ) \gset
           \if :{?export_id}
           \else
-            \quit 3
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: completed artifact was not claimed for deletion'; END $ci_fail$;
           \endif
           SELECT count(*) = 1 AS artifact_marked
           FROM public.export_mark_artifact_deleted(
@@ -355,7 +355,7 @@ jobs:
           ) \gset
           \if :artifact_marked
           \else
-            \quit 3
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: completed artifact was not marked deleted'; END $ci_fail$;
           \endif
           SQL
           export PGUSER=retention_worker PGPASSWORD=ci-maintenance-password
@@ -374,7 +374,7 @@ jobs:
           ) \gset
           \if :{?new_state_version}
           \else
-            \quit 3
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: lease-recovery artifact staging returned no state'; END $ci_fail$;
           \endif
           DO $$
           DECLARE snapshot jsonb;
@@ -409,7 +409,7 @@ jobs:
           ) \gset
           \if :{?export_id}
           \else
-            \quit 3
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: staged orphan was not claimed for deletion'; END $ci_fail$;
           \endif
           SELECT count(*) = 1 AS staged_orphan_marked
           FROM public.export_mark_artifact_deleted(
@@ -418,7 +418,7 @@ jobs:
           ) \gset
           \if :staged_orphan_marked
           \else
-            \quit 3
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: staged orphan was not marked deleted'; END $ci_fail$;
           \endif
           SQL
           export PGUSER=retention_worker PGPASSWORD=ci-maintenance-password
@@ -434,7 +434,7 @@ jobs:
           ) \gset
           \if :claimed_unstaged
           \else
-            \quit 3
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: unstaged export job was not claimed'; END $ci_fail$;
           \endif
           SQL
           export PGUSER=api_runtime PGPASSWORD=ci-runtime-password
@@ -449,7 +449,7 @@ jobs:
           ) \gset
           \if :no_artifact_delete_claimed
           \else
-            \quit 3
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: unstaged export unexpectedly produced a deletion claim'; END $ci_fail$;
           \endif
           SELECT count(*) = 0 AS stale_unstaged_builder_rejected
           FROM public.export_stage_job_artifact(
@@ -460,7 +460,7 @@ jobs:
           ) \gset
           \if :stale_unstaged_builder_rejected
           \else
-            \quit 3
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: stale unstaged builder was not rejected'; END $ci_fail$;
           \endif
           SQL
           export PGUSER=retention_worker PGPASSWORD=ci-maintenance-password
@@ -969,7 +969,7 @@ jobs:
           SELECT :'first_favorite' = :'second_favorite' AS same_favorite \gset
           \if :same_favorite
           \else
-            \quit 3
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: favorite idempotency returned different identifiers'; END $ci_fail$;
           \endif
           SELECT history_id FROM public.persistence_record_history(
             '10000000-0000-0000-0000-000000000001',
@@ -1011,14 +1011,14 @@ jobs:
           ) AS replayed \gset
           \if :delivered
           \else
-            \quit 3
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: OTP delivery was not recorded'; END $ci_fail$;
           \endif
           \if :consumed
           \else
-            \quit 3
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: OTP verification was not consumed'; END $ci_fail$;
           \endif
           \if :replayed
-            \quit 3
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: OTP verification replay unexpectedly succeeded'; END $ci_fail$;
           \endif
           INSERT INTO public.oauth_states (
             id, provider, purpose, state_hash, state_hash_algorithm,
@@ -1040,10 +1040,10 @@ jobs:
           ) AS oauth_replayed \gset
           \if :oauth_consumed
           \else
-            \quit 3
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: OAuth state was not consumed'; END $ci_fail$;
           \endif
           \if :oauth_replayed
-            \quit 3
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: OAuth state replay unexpectedly succeeded'; END $ci_fail$;
           \endif
           INSERT INTO public.otp_challenges (
             id, channel, purpose, destination_hash, destination_hash_algorithm,
@@ -1090,22 +1090,22 @@ jobs:
           ) AS registration_replayed \gset
           \if :register_delivered
           \else
-            \quit 3
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: registration OTP delivery was not recorded'; END $ci_fail$;
           \endif
           \if :register_phone_consumed
           \else
-            \quit 3
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: registration phone proof was not consumed'; END $ci_fail$;
           \endif
           \if :register_oauth_consumed
           \else
-            \quit 3
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: registration OAuth proof was not consumed'; END $ci_fail$;
           \endif
           \if :registration_claimed
           \else
-            \quit 3
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: registration proofs did not claim the account'; END $ci_fail$;
           \endif
           \if :registration_replayed
-            \quit 3
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: registration proof replay unexpectedly succeeded'; END $ci_fail$;
           \endif
           INSERT INTO public.otp_challenges (
             id, channel, purpose, destination_hash, destination_hash_algorithm,
@@ -1204,11 +1204,11 @@ jobs:
           ) AS compromised \gset
           \if :rotated
           \else
-            \quit 3
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: refresh credential did not rotate'; END $ci_fail$;
           \endif
           \if :compromised
           \else
-            \quit 3
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: refresh replay did not compromise the session family'; END $ci_fail$;
           \endif
           SQL
           export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
@@ -1221,7 +1221,7 @@ jobs:
           ) AS email_revoked \gset
           \if :email_revoked
           \else
-            \quit 3
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: non-primary email binding was not revoked'; END $ci_fail$;
           \endif
           INSERT INTO public.otp_challenges (
             id, channel, purpose, destination_hash, destination_hash_algorithm,
@@ -1246,11 +1246,11 @@ jobs:
           ) AS recovery_consumed \gset
           \if :recovery_delivered
           \else
-            \quit 3
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: recovery OTP delivery was not recorded'; END $ci_fail$;
           \endif
           \if :recovery_consumed
           \else
-            \quit 3
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: recovery OTP was not consumed'; END $ci_fail$;
           \endif
           DO $$
           DECLARE target_binding_id uuid;
@@ -1403,7 +1403,7 @@ jobs:
           ) AS deletion_family_rotated \gset
           \if :deletion_family_rotated
           \else
-            \quit 3
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: deletion session family did not rotate'; END $ci_fail$;
           \endif
           SELECT public.begin_account_deletion(
             '10000000-0000-0000-0000-000000000003',
@@ -1412,7 +1412,7 @@ jobs:
           ) AS deletion_started \gset
           \if :deletion_started
           \else
-            \quit 3
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: account deletion did not start'; END $ci_fail$;
           \endif
           SQL
           if psql -X -c "INSERT INTO public.auth_session_families (user_id,device_label,platform,device_hash,hash_key_version,refresh_expires_at,retain_until) VALUES ('10000000-0000-0000-0000-000000000003','late session','ANDROID',repeat('6',64),'ci-v1',now()+interval '1 day',now()+interval '2 days')" >/tmp/deleting-session.log 2>&1; then
@@ -1478,7 +1478,15 @@ jobs:
           cache: gradle
       - uses: gradle/actions/setup-gradle@v4
       - name: Install Android SDK 36
-        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager="${ANDROID_SDK_ROOT:?ANDROID_SDK_ROOT is not set}/cmdline-tools/latest/bin/sdkmanager"
+          if [[ ! -x "$sdkmanager" ]]; then
+            echo "::error::Android sdkmanager is missing or not executable at $sdkmanager"
+            exit 1
+          fi
+          "$sdkmanager" "platforms;android-36" "build-tools;36.0.0"
       - run: chmod +x gradlew
       - run: ./gradlew testDebugUnitTest lintDebug assembleDebug --stacktrace
       - name: Verify unsigned release fails closed

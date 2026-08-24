@@ -2,18 +2,33 @@
 
 \if :{?migration_owner}
 \else
-  \echo 'migration_owner psql variable is required'
-  \quit 3
+  DO $psql_fail$
+  BEGIN
+    RAISE EXCEPTION USING
+      ERRCODE = '22023',
+      MESSAGE = 'migration_owner psql variable is required';
+  END
+  $psql_fail$;
 \endif
 \if :{?runtime_role}
 \else
-  \echo 'runtime_role psql variable is required'
-  \quit 3
+  DO $psql_fail$
+  BEGIN
+    RAISE EXCEPTION USING
+      ERRCODE = '22023',
+      MESSAGE = 'runtime_role psql variable is required';
+  END
+  $psql_fail$;
 \endif
 \if :{?maintenance_role}
 \else
-  \echo 'maintenance_role psql variable is required'
-  \quit 3
+  DO $psql_fail$
+  BEGIN
+    RAISE EXCEPTION USING
+      ERRCODE = '22023',
+      MESSAGE = 'maintenance_role psql variable is required';
+  END
+  $psql_fail$;
 \endif
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
@@ -37,6 +52,11 @@ WHERE extension.extname IN ('pgcrypto', 'postgis')
 
 \if :extensions_are_isolated
 \else
-  \echo 'required extension version or ownership isolation check failed'
-  \quit 3
+  DO $psql_fail$
+  BEGIN
+    RAISE EXCEPTION USING
+      ERRCODE = '55000',
+      MESSAGE = 'required extension version or ownership isolation check failed';
+  END
+  $psql_fail$;
 \endif

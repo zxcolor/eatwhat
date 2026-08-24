@@ -44,7 +44,7 @@ PostGIS/pgcrypto 通常需要托管库特权，必须由一次性 bootstrap 身�
 2. migration job 仅注入 migration URL，运行 `node dist/database/migrate-cli.js`。
 3. runner 使用固定 `migrations/`、SHA-256、连续版本和 advisory lock；每个迁移独立事务。
 4. migration owner 执行 `psql -X -v migration_owner=... -v runtime_role=... -v maintenance_role=... -v admin_runtime_role=... -v export_worker_role=... -f infra/postgres/role-grants.sql`。
-5. 权限脚本以 `ON_ERROR_STOP`、非零 `\quit` 和单事务 fail closed；先撤历史表/列/序列/函数 ACL，再白名单授权；中途失败完整回滚。
+5. 权限脚本以 `ON_ERROR_STOP`、服务端 `RAISE EXCEPTION` 和单事务 fail closed；前置校验错误会让非交互 psql 返回非零，授权阶段先撤历史表/列/序列/函数 ACL，再白名单授权，中途失败完整回滚。
 6. 用 runtime role 做 schema verify、权限正反例和 API 启动 smoke，失败不启动新实例。
 7. 启动 API；仅在私有 OSS、独立 RAM 角色、locator/反馈解密密钥和 export worker 均就绪后开放数据导出能力。导出专用 RAM 角色只需读取桶版本与生命周期配置，不得修改它们；专用桶必须从未启用版本控制，且 `GetBucketLifecycle` 必须精确返回 `404 NoSuchLifecycle`，任何已配置规则都会拒绝 worker 就绪。maintenance job 独立运行，默认 `--dry-run`；只有明确 `--execute` 才删除到期数据，并在同一受控事务中不可逆销毁已超过 24 小时配额窗口的游客反馈 IP HMAC。
 

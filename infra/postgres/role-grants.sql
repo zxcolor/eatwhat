@@ -5,28 +5,53 @@
 -- executed by the API container.
 \if :{?migration_owner}
 \else
-  \echo 'migration_owner psql variable is required'
-  \quit 3
+  DO $psql_fail$
+  BEGIN
+    RAISE EXCEPTION USING
+      ERRCODE = '22023',
+      MESSAGE = 'migration_owner psql variable is required';
+  END
+  $psql_fail$;
 \endif
 \if :{?runtime_role}
 \else
-  \echo 'runtime_role psql variable is required'
-  \quit 3
+  DO $psql_fail$
+  BEGIN
+    RAISE EXCEPTION USING
+      ERRCODE = '22023',
+      MESSAGE = 'runtime_role psql variable is required';
+  END
+  $psql_fail$;
 \endif
 \if :{?maintenance_role}
 \else
-  \echo 'maintenance_role psql variable is required'
-  \quit 3
+  DO $psql_fail$
+  BEGIN
+    RAISE EXCEPTION USING
+      ERRCODE = '22023',
+      MESSAGE = 'maintenance_role psql variable is required';
+  END
+  $psql_fail$;
 \endif
 \if :{?admin_runtime_role}
 \else
-  \echo 'admin_runtime_role psql variable is required'
-  \quit 3
+  DO $psql_fail$
+  BEGIN
+    RAISE EXCEPTION USING
+      ERRCODE = '22023',
+      MESSAGE = 'admin_runtime_role psql variable is required';
+  END
+  $psql_fail$;
 \endif
 \if :{?export_worker_role}
 \else
-  \echo 'export_worker_role psql variable is required'
-  \quit 3
+  DO $psql_fail$
+  BEGIN
+    RAISE EXCEPTION USING
+      ERRCODE = '22023',
+      MESSAGE = 'export_worker_role psql variable is required';
+  END
+  $psql_fail$;
 \endif
 
 SELECT (
@@ -43,8 +68,13 @@ SELECT (
 ) AS declared_roles_are_distinct \gset
 \if :declared_roles_are_distinct
 \else
-  \echo 'database roles must be pairwise distinct'
-  \quit 3
+  DO $psql_fail$
+  BEGIN
+    RAISE EXCEPTION USING
+      ERRCODE = '22023',
+      MESSAGE = 'database roles must be pairwise distinct';
+  END
+  $psql_fail$;
 \endif
 
 SELECT (
@@ -57,8 +87,13 @@ SELECT (
 ) AS provisioning_authorized \gset
 \if :provisioning_authorized
 \else
-  \echo 'current database role is not authorized to provision migration-owned objects'
-  \quit 3
+  DO $psql_fail$
+  BEGIN
+    RAISE EXCEPTION USING
+      ERRCODE = '42501',
+      MESSAGE = 'current database role is not authorized to provision migration-owned objects';
+  END
+  $psql_fail$;
 \endif
 
 SELECT NOT EXISTS (
@@ -102,8 +137,13 @@ SELECT NOT EXISTS (
   AS least_privilege_roles \gset
 \if :least_privilege_roles
 \else
-  \echo 'database roles violate the least-privilege deployment contract'
-  \quit 3
+  DO $psql_fail$
+  BEGIN
+    RAISE EXCEPTION USING
+      ERRCODE = '42501',
+      MESSAGE = 'database roles violate the least-privilege deployment contract';
+  END
+  $psql_fail$;
 \endif
 
 BEGIN;
