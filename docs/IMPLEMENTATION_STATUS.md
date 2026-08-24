@@ -42,14 +42,15 @@
 - 分享卡底层渲染、只读 FileProvider、单次生成租约、生命周期清理及其测试代码仍在仓库中封存，但 Android 1.0 由唯一的 `BuildConfig.SHARE_FEATURE_ENABLED=false` 编译期常量关闭入口，provider 同时统一返回 `share=false`，且不存在 Gradle 属性或远程开关。这些代码不再作为 1.0 能力、缺口或发布门禁；2.0 重新启用前必须重新完成产品、数据权利、隐私、安全和设备验证评审。
 - Android Studio API 36 模拟器已通过 8 条核心 Activity 用例和 2 条分享封藏负例：兼容态 3 条、配置不可用 1 条、同进程最低版本提高 1 条、启动即强制更新 1 条；账号设备内合成 API 夹具 1 条覆盖手机号登录→邮箱绑定→退出→邮箱登录→退出及 15 个请求严格顺序；高德合成 `LIVE_DISPLAY_ONLY` 展示夹具 1 条覆盖实时来源标注、无自有评分、保持供应商顺序、出站动作关闭及 WGS84/25 元/1500 米/AI 关闭请求边界；分享负例 2 条继续证明 Android 1.0 无入口、Intent 或临时文件。账号与高德夹具均不调用真实外部供应商，不得作为真实凭据或真实数据验收。最终同签名 APK 先通过冷启动强制更新 1 条和恢复兼容 3 条，再通过运行中提高、配置不可用、账号、高德各 1 条及分享封藏 2 条；`scripts/run-android-instrumentation.ps1` 对设备内夹具执行类/参数精确白名单、按设备端口互斥、映射前后复核和外部变更拒绝覆盖。
 - ECS 的真实高德技术 smoke 是独立证据：隔离容器、活动容器和工作站公网均得到 5 条地点结果与 3 条推荐结果；这不改变 Android 模拟器夹具仍为合成数据，也不能替代关闭 Wi-Fi 真机与商业授权验收。
-- Android `0.1.2-alpha01-internal` 已完整移除直接餐厅关键词搜索的入口、路由、页面、ViewModel、repository 和 client；手动地点搜索只用于选择推荐起点。完整门禁通过后在 API 36 模拟器全新安装，选中“北京电子科技学院”取得 3 条真实高德推荐；当前 Alpha SHA-256 为 `ED08D3CB357754D8C98BE7F40E0C9BA74806E172426E95EC0D3BB0182AE789AD`。
+- 普通 Android Debug 已改为默认直连 `https://api.unfinished-era.com/`，并与 Alpha 复用当前单实例 API/PostgreSQL；不新增 Debug 服务容器、端口、域名或数据库。Debug 地址门禁只接受公网 HTTPS，主 Debug APK 使用全局禁止明文的 network security config。确定性 AndroidTest 已迁移到独立 `fixture` build type：它固定使用 `127.0.0.1:3001`、输出到独立路径、不可分发，也不会成为日常 Debug 的隐式回退。当前云端 `accountsEnabled=false`；Debug 的微信/QQ AppID 继续为空，单实例服务端支持受批准的多 AppID 绑定前不得开放。
+- Android `0.1.2-alpha01-internal` 已完整移除直接餐厅关键词搜索的入口、路由、页面、ViewModel、repository 和 client；手动地点搜索只用于选择推荐起点。此前在 API 36 模拟器全新安装后，选中“北京电子科技学院”取得 3 条真实高德推荐；2026-08-24 完整门禁重新构建的当前 Alpha SHA-256 为 `DD7257BCE3098DD658D30A8E7D6EAFECB980D627CCCB9C3B516BF7B32DCCEC07`，该次构建尚未重复设备安装验收。
 - Android 另有启用 R8/资源压缩、独立包名且使用 Debug 签名的内部 Alpha 构建，只用于性能和设备验收。当前完整门禁必须显式执行：
 
   ```powershell
   .\scripts\verify.ps1 -AlphaApiBaseUrl 'https://api.unfinished-era.com/'
   ```
 
-  门禁会复核地址策略并检查同一地址已进入 Alpha `BuildConfig` 和 APK DEX，但不会发起公网探测；DNS、TLS、独立 API vhost 与 `/health/ready` 已由本轮独立公网 smoke 验收，关闭 Wi-Fi 真机与正式 Release 独立签名仍不能由构建门禁替代。
+  门禁会复核地址策略并检查同一地址已进入 Debug/Alpha `BuildConfig` 与 APK DEX，同时证明 Fixture 只含固定回环地址且 AndroidTest 只指向 Fixture；它不会发起公网探测。DNS、TLS、独立 API vhost 与 `/health/ready` 已由独立公网 smoke 验收，关闭 Wi-Fi 真机与正式 Release 独立签名仍不能由构建门禁替代。
 - `scripts/start-api-local.ps1` 可从已忽略的 `.env.local` 注入服务端配置并隐藏密钥值；构建子进程不继承运行时 Secret，API 子进程只接收明确白名单字段。邮件验证码使用标准 SMTP，阿里云只负责短信；仓库内所有中文 PowerShell 脚本均以 UTF-8 BOM 保存，并由验证脚本检查 Windows PowerShell 5.1 兼容性。
 - `pnpm dev:api` 现在先按项目 TypeScript 配置生成带 Nest 装饰器元数据的编译产物，再监听源码并以 Node 运行 `dist`；独立运行时冒烟测试会在随机本机端口验证健康、配置和地点搜索，防止以后退回会破坏依赖注入的直接 esbuild/tsx 执行路径。
 - 已落地 [`openapi.v1.json`](./openapi.v1.json) 作为 OpenAPI 3.1 v1 单一文档源，当前包含 39 个 path、44 个 operation，其中健康探针 2 个、普通 `/v1` 33 个、隔离管理员 `/admin/v1` 9 个；收藏与私有反馈已纳入契约。自动化测试会校验 JSON、本地引用、路由/方法/状态码、Zod input/output、Bearer、安全错误、通用来源代码、请求作用域 `resultToken`、精确坐标只进入推荐 POST body，以及管理员 passkey/RBAC 契约隔离。账号和管理员路由在服务能力、数据库角色或原子事务未具备时统一 fail closed，不把文档存在冒充功能可用；客户端代码生成仍未接入。

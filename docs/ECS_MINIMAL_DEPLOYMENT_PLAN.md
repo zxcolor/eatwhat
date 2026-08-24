@@ -2,11 +2,13 @@
 
 > 当前检查点：2026-08-23，线上全国版 release 为 `20260823T071142Z-nationwide`；不可变 bundle、镜像、权限、Compose、数据库 readiness、真实高德与自动回退门禁均已通过。
 > `AMAP_ENABLED=true`，独立的 `api.unfinished-era.com` DNS、Let's Encrypt 证书、vhost 和自动续期均已激活；ECS 与工作站公网 HTTPS 闭环通过，关闭 Wi-Fi 的外部真机仍待复验。
-> 适用范围：北京地域 2 vCPU / 2 GiB / 40 GiB / 3 Mbps ECS，封闭邀请制 Alpha。
+> 适用范围：北京地域 2 vCPU / 2 GiB / 40 GiB / 3 Mbps ECS，云端 Debug 与封闭邀请制 Alpha 共用单实例 API。
 
 ## 1. 结论与当前状态
 
-现有 ECS 足以承载单实例、少量受邀测试者的 Alpha，不需要把决策算法搬进 APK，也不需要为节省服务器资源删除 Android 1.0 的决策能力。直接餐厅关键词搜索从客户端移除是产品范围收口，不是服务器容量妥协；服务器的主要负担是 PostgreSQL、账号状态和容器运行时，不是规则排序本身。
+现有 ECS 足以承载单实例、少量开发者 Debug 与受邀 Alpha，不需要把决策算法搬进 APK，也不需要为节省服务器资源删除 Android 1.0 的决策能力。普通 Debug 直接连接与 Alpha 相同的公网 API/PostgreSQL；本轮不复制第二个 API 容器、Compose project、宿主端口、域名、Secret、数据库或卷。直接餐厅关键词搜索从客户端移除是产品范围收口，不是服务器容量妥协；服务器的主要负担是 PostgreSQL、账号状态和容器运行时，不是规则排序本身。
+
+共用意味着 Debug 流量计入 Alpha 的 IP 限流、高德配额、配置和未来账号数据。当前 2 GiB 主机不适合再并行启动一套相同 API/数据库；若后续需要隔离破坏性迁移、真实测试账号或不同微信/QQ AppID，应使用独立 staging 域名、Compose project、端口、Secret、数据库角色/卷和上游配额，并先升级到至少 2 vCPU / 4 GiB 或使用另一台服务器。不得让两个环境共享数据库完成实验性迁移。
 
 当前部署严格分为三个检查点：
 
@@ -24,7 +26,7 @@
 ## 2. 当前实际拓扑
 
 ```text
-Android Alpha（公网流量，api.unfinished-era.com）
+Android Debug / Alpha（公网流量，共用 api.unfinished-era.com）
         |
         | HTTPS :443
         v
@@ -241,7 +243,7 @@ Key 能返回数据不等于数据使用和商业授权已经完整解决；自�
    .\scripts\verify.ps1 -AlphaApiBaseUrl 'https://api.unfinished-era.com/'
    ```
 
-   当前 `0.1.2-alpha01-internal` Alpha SHA-256 为 `ED08D3CB357754D8C98BE7F40E0C9BA74806E172426E95EC0D3BB0182AE789AD`。该版本已移除 Android 直接餐厅搜索模块，并由独立公网 smoke 与模拟器真实决策闭环补齐构建门禁不覆盖的运行证据。
+   2026-08-24 完整门禁重新构建的当前 `0.1.2-alpha01-internal` Alpha SHA-256 为 `DD7257BCE3098DD658D30A8E7D6EAFECB980D627CCCB9C3B516BF7B32DCCEC07`。该版本已移除 Android 直接餐厅搜索模块；独立公网 smoke 与此前模拟器真实决策闭环补齐构建门禁不覆盖的运行证据，本次新哈希尚未重复设备安装验收。
 
 下一步只能按以下顺序继续：
 

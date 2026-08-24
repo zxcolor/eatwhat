@@ -1,17 +1,18 @@
 # 验证报告
 
-验证日期：2026-08-22（模拟器历史验收）；2026-08-23（完整自动化、ECS 正式切换、真实高德与公网 HTTPS 验收）
+验证日期：2026-08-22（模拟器历史验收）；2026-08-23（完整自动化、ECS 正式切换、真实高德与公网 HTTPS 验收）；2026-08-24（云端 Debug 默认与独立 Fixture 构建门禁）
 
 本报告记录当前仓库快照的本机自动化、Android 模拟器、ECS 回环与公网 HTTPS 验证。它不是公开发布批准，也不能替代供应商商业授权、Release 签名、法务审查、关闭 Wi-Fi 真机矩阵或 Alpha/Beta 指标。
 
 ## 本轮结论
 
+- 2026-08-24 完整执行 `.\scripts\verify.ps1 -AlphaApiBaseUrl 'https://api.unfinished-era.com/'` 全绿。普通 Debug 默认并经门禁确认只连接与 Alpha 相同的公网 HTTPS API；确定性 AndroidTest 改为独立 Fixture build type，固定回环地址并输出到独立路径。Node lint/typecheck/test/build、ECS bundle、buildSrc、Debug JVM/Lint、Debug/Fixture/FixtureTest/Alpha 构建、端点隔离、运行时类、Manifest、v2 signer、16 KiB zipalign 和服务端 Secret 扫描全部通过。
 - 2026-08-23 决策专注版最终一次 `.\scripts\verify.ps1 -AlphaApiBaseUrl 'https://api.unfinished-era.com/'` 全绿：Node 共享契约 66 / 66、API 78 个文件 667 / 667，类型检查、生产构建与代码规范检查全部通过；Android buildSrc 为 2 个测试套件、8 项测试，App JVM 为 72 个测试套件、327 项测试，失败 / 错误 / 跳过均为 0。
-- Alpha 已与 Debug 地址彻底分离：Debug 继续使用本机回环开发地址，Alpha 构建必须显式提供非回环公网 HTTPS 地址。本轮门禁证明 `https://api.unfinished-era.com/` 进入 Alpha `BuildConfig` 与 DEX，且 APK 不含服务端高德、SMTP、数据库或 OAuth Secret；DNS、TLS、HTTP 跳转、readiness、真实搜索/推荐和管理端点 404 又经独立公网验收通过。
+- Debug 与 Alpha 已统一使用当前云端 API，但客户端包名、可调试性、压缩和分发资格保持隔离；不存在第二套 Debug 服务端。门禁证明 `https://api.unfinished-era.com/` 同时进入 Debug/Alpha `BuildConfig` 与 DEX，且二者不含本机回环或服务端高德、SMTP、数据库、OAuth Secret。Fixture 单独证明只含 `http://127.0.0.1:3001/`，其 localhost 明文白名单不进入普通 Debug。DNS、TLS、HTTP 跳转、readiness、真实搜索/推荐和管理端点 404 仍由独立公网验收覆盖。
 - Android 对 `/v1/config.serviceCapabilities` 中实际消费的推荐与地点搜索字段采用逐字段 fail-closed，并将地点搜索能力绑定可信配置 generation；旧 generation 的 `true` 不能借用新配置的远程访问 lease。Android 1.0 无条件忽略 `placeSearchEnabled`，不展示、不路由，也不调用直接餐厅关键词搜索；服务端 `/v1/place-search`、OpenAPI 与 provider 仍作为独立 API 能力保留。首页只显示当前 Android 功能的云端状态并提供手动重连。API 新增 `/health/ready`，以有界数据库探测和核心推荐 adapter 配置区分“进程存活”与“可提供推荐”。
 - ECS 从 235 项、不含 Secret 的最小源码归档构建 Linux/amd64 镜像 `sha256:44041f99d06b1758088b58a22af83707e56db81783c8c4daadc7347e9da7c3a7`，并激活全国版 root-only release `20260823T071142Z-nationwide`。bundle、镜像 ID/用户、发布坐标、共享 Secret 形状、PostgreSQL TLS 与 Compose 通过严格预检；候选先在临时双网络容器通过 readiness、上海地点搜索、决策、附近搜索和高德三链 smoke，再由唯一激活脚本切换，PostgreSQL 容器未变化。切换前备份 `/opt/chi-shen-me/backups/postgres/20260823T072519Z` 的 SHA-256 与 `pg_restore --list` 复核通过，未执行生产库恢复。
 - `api.unfinished-era.com` 已使用独立 A 记录、Let's Encrypt ECDSA 证书和 API-only 宝塔 vhost；证书 SAN 仅为该子域，有效期至 2026-11-21，私钥为 root-only `0600`。HTTP→HTTPS、SNI/信任链、`/health/ready`、`/v1/config`、上海真实地点搜索、真实餐厅推荐、附近搜索和 `/admin/v1=404` 均从工作站公网通过；公开配置为 `minimumSupportedVersion=0.1.1`、`coverageName=全国范围`。
-- Android buildSrc/JVM 测试和 Lint 全部通过；Debug/AndroidTest/Alpha 均成功构建。统一门禁直接检查三份 APK 的 manifest、DEX 关键类、instrumentation 唯一性、权限/备份/明文流量边界、FileProvider authority、v2 签名、唯一 signer/证书一致性和 16 KiB zipalign，并要求 Android 主源码不存在直接餐厅搜索页面、路由、client、`/v1/place-search` 调用或入口文案，`placeSearchEnabled` 只能作为 v1 DTO 兼容字段存在。Alpha 的 R8、资源压缩、独立包名和 `lintVital` 同样纳入门禁。
+- Android buildSrc/JVM 测试和 Lint 全部通过；Debug、Fixture、Fixture AndroidTest 与 Alpha 均成功构建。统一门禁直接检查四份 APK 的 manifest、DEX 关键类、instrumentation 唯一性、权限/备份/明文流量边界、FileProvider authority、v2 签名、唯一 signer/证书一致性和 16 KiB zipalign，并要求 Android 主源码不存在直接餐厅搜索页面、路由、client、`/v1/place-search` 调用或入口文案，`placeSearchEnabled` 只能作为 v1 DTO 兼容字段存在。Alpha 的 R8、资源压缩、独立包名和 `lintVital` 同样纳入门禁。
 - 2026-08-22 既有 Android 16 模拟器验收中的 8 条核心 Activity instrumentation 用例和 2 条分享封藏负例全部通过：兼容态 3 条、配置不可用 1 条、同进程最低版本提高 1 条、启动即强制更新 1 条、账号设备内合成 API 闭环 1 条、高德合成 `LIVE_DISPLAY_ONLY` 展示边界 1 条，以及分享封藏负例 2 条。账号夹具验证手机号登录、邮箱绑定、退出、邮箱登录、再次退出的 15 个请求严格顺序；高德夹具验证实时来源标注、无自有评分、保持供应商顺序、动作关闭和 WGS84 请求。两项新增夹具均不代表真实供应商联调。
 - 2026-08-22 的设备内夹具曾完成“启动强制更新 1 条 → 恢复兼容 3 条 → 运行中提高 1 条 → 配置不可用 1 条 → 账号夹具 1 条 → 高德展示夹具 1 条 → 分享封藏 2 条”。本轮源码最低兼容版本已升为 `0.1.1`，AndroidTest APK 已重新编译通过；全国版又以全新安装的 `0.1.1-alpha01-internal` 在模拟器手动搜索上海地点并完成真实决策闭环。
 - 分享封藏前后使用完全相同的 DEMO 请求（北京大学东门坐标、午餐、1500 米、关闭 AI）比较，餐厅数量均为 3，名称和顺序均为“演示·校园面馆 → 演示·家常盖饭 → 演示·北方饺子铺”；封藏后每条结果的 `actions.share=false`，召回、过滤、评分与排序没有变化。
@@ -39,7 +40,7 @@
 
 ### Android
 
-本轮通过仓库统一验证脚本完整执行 buildSrc/JVM 测试、Lint、Debug/AndroidTest/Alpha 构建、R8/资源压缩和 APK 完整性检查：
+本轮通过仓库统一验证脚本完整执行 buildSrc/JVM 测试、Lint、云端 Debug、Fixture/Fixture AndroidTest、Alpha 构建、R8/资源压缩和 APK 完整性检查：
 
 ```powershell
 .\scripts\verify.ps1 -AlphaApiBaseUrl 'https://api.unfinished-era.com/'
@@ -52,9 +53,11 @@
 | JVM 失败 / 错误 / 跳过 | 0 / 0 / 0 |
 | `lintDebug` | 通过 |
 | `assembleDebug` | 通过 |
-| `assembleDebugAndroidTest` | 通过 |
+| `assembleFixture` | 通过 |
+| `assembleFixtureAndroidTest` | 通过 |
 | `assembleAlpha` | 通过 |
-| Alpha R8 / 资源压缩 / `lintVital` / 包名 / 签名 / DEX 门禁 | 通过 |
+| Debug/Fixture/Alpha 端点隔离、签名、16 KiB 对齐与 Secret 扫描 | 通过 |
+| Alpha R8 / 资源压缩 / `lintVital` / 包名 / DEX 门禁 | 通过 |
 
 账号相关回归验证了公开用途/方式矩阵 PHONE REGISTER/LOGIN、EMAIL LOGIN/BIND、WECHAT REGISTER/LOGIN、QQ LOGIN/BIND，并验证隐私撤回会先同步阻断登录持久化、使旧 attempt/session 失效，再做尽力而为的 SDK/服务端清理；撤回前发起但之后才到达的 SDK 或网络回调不能写入 token 或恢复账号状态。设备内合成 API 闭环另完成手机号登录、邮箱绑定、退出、邮箱登录和再次退出；账号能力或平台凭证未配置时保持 fail closed。这些自动化证据不等同于真实短信、邮箱、微信或 QQ 联调。
 
@@ -68,9 +71,9 @@
 
 本轮 `0.1.2` 搜索模块移除后的 Alpha UI/真实决策 smoke 使用 `emulator-5556`：全新安装后直接读取 Compose/UIAutomator 语义树，搜索卡片在选址前后均不存在，手动选址与主决策入口存在；选择内置地点后得到 3 条 `AMAP/LIVE` 推荐。以下 `emulator-5554` 内容保留为此前完整 instrumentation 历史证据。
 
-测试使用 Compose 语义查找与断言，不依赖固定屏幕坐标。由于本机 Gradle UTP 宿主控制进程不可用，本轮安装统一构建出的 Debug/Test APK 后，通过设备登记的 `AndroidJUnitRunner` 直接执行；严格运行器动态提取唯一 instrumentation component、接受动态的非零用例数并拒绝 runner 失败标记，ADB 兜底没有绕过失败。配置不可用、运行中最低版本提高、账号与高德四项设备内夹具只接受测试类与唯一 `true` 参数的精确白名单；运行器在接触 `tcp:3001` 前取得按设备/端口命名的互斥锁，并在移除和恢复前复核实时映射。测试结束时停止 App 的失败不会跳过恢复；原映射缺失时恢复、已经恢复时保持不变，被外部进程改成其他目标时则拒绝覆盖并报告清理失败。
+测试使用 Compose 语义查找与断言，不依赖固定屏幕坐标。2026-08-22 历史验收安装了当时统一构建的 Debug/Test APK；2026-08-24 起相同确定性用例由独立 Fixture/FixtureTest APK 承载，普通云端 Debug 不再访问本机接口。严格运行器动态提取唯一 instrumentation component、接受动态的非零用例数并拒绝 runner 失败标记，ADB 兜底没有绕过失败。配置不可用、运行中最低版本提高、账号与高德四项设备内夹具只接受测试类与唯一 `true` 参数的精确白名单；运行器在接触 `tcp:3001` 前取得按设备/端口命名的互斥锁，并在移除和恢复前复核实时映射。测试结束时停止 App 的失败不会跳过恢复；原映射缺失时恢复、已经恢复时保持不变，被外部进程改成其他目标时则拒绝覆盖并报告清理失败。
 
-本轮核心七段成功验收使用以下测试筛选和 instrumentation 参数；`-Install` 只负责安装已经统一构建的干净 APK，可在首次运行或需要重装时添加，不改变用例语义。分享封藏的两条负例单独执行，不纳入 Android 1.0 分享能力或发布门禁：
+2026-08-22 核心七段历史验收使用以下测试筛选和 instrumentation 参数；`-Install` 只负责安装已经统一构建的干净 APK，可在首次运行或需要重装时添加，不改变用例语义。分享封藏的两条负例单独执行，不纳入 Android 1.0 分享能力或发布门禁：
 
 ```powershell
 # 1. 设备内夹具：同进程运行中提高最低版本
@@ -196,9 +199,9 @@
 
 模拟器测试证明单台模拟器、本机反向端口映射、设备内隔离夹具和虚构 DEMO/合成响应下的客户端核心闭环；ECS 与工作站公网 smoke 独立证明真实高德和 HTTPS 服务端链路。两类证据相加仍不能替代关闭 Wi-Fi 的真实手机、API 26–36、主流厂商、弱网/无网、权限、字体放大、深色模式、读屏、真实旋转、后台回收和性能矩阵，也未核验真实电话或外部路线 App。分享设备负例只证明 Android 1.0 固定封藏。
 
-## 当前本地 API 与数据边界
+## 2026-08-22 历史设备夹具 API 与数据边界
 
-本轮设备验证使用以下模式：
+该次历史设备验证使用以下模式：
 
 ```dotenv
 NODE_ENV=development
@@ -219,11 +222,12 @@ DATA_RIGHTS_MODE=LIVE_DISPLAY_ONLY
 
 | 工件 | 路径 | 大小 | SHA-256 |
 |---|---|---:|---|
-| Debug APK | `apps/android/app/build/outputs/apk/debug/app-debug.apk` | 13,863,785 bytes | `CF294675BC45C4CFFE0CD6FE0A7D3C82FD4CF5A1DC417FF3AD95C58FFE74F2FA` |
-| Debug AndroidTest APK | `apps/android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk` | 1,118,054 bytes | `11A622A9A5390D9B68D61B316B05A259B492D7C89922D7127B63E542D26AA2E1` |
-| 内部 Alpha APK | `apps/android/app/build/outputs/apk/alpha/app-alpha.apk` | 2,145,887 bytes | `ED08D3CB357754D8C98BE7F40E0C9BA74806E172426E95EC0D3BB0182AE789AD` |
+| 云端 Debug APK | `apps/android/app/build/outputs/apk/debug/app-debug.apk` | 13,863,669 bytes | `1D49F921BE59CA87EA82A30F59803431159915260219BC26E66AE092361A1805` |
+| 隔离 Fixture APK | `apps/android/app/build/outputs/apk/fixture/app-fixture.apk` | 13,009,183 bytes | `B4769F82428AD11EF1C6462C521A431F59BD96317F18110C129967EEAD4E7B2D` |
+| Fixture AndroidTest APK | `apps/android/app/build/outputs/apk/androidTest/fixture/app-fixture-androidTest.apk` | 1,118,046 bytes | `6F9F0D36BD605C4D6FFB328ABFB52F5EA00A43DD9D578BF0087315F2EE7EB522` |
+| 内部 Alpha APK | `apps/android/app/build/outputs/apk/alpha/app-alpha.apk` | 2,145,887 bytes | `DD7257BCE3098DD658D30A8E7D6EAFECB980D627CCCB9C3B516BF7B32DCCEC07` |
 
-Debug APK 仅用于本地开发；内部 Alpha 启用 R8/资源压缩并已嵌入当前可达的公网 HTTPS API 基址，但仍使用 Debug signer，只是邀请制测试工件。公网可达不能替代独立 Release 签名和生产配置生成的正式发布包。
+普通 Debug 与内部 Alpha 均嵌入当前可达的公网 HTTPS API 基址；Debug 可调试，Alpha 启用 R8/资源压缩且不可调试，但两者仍使用 Debug signer，均不能作为公开 Release。Fixture/FixtureTest 固定回环地址并只供自动化测试，禁止分发；安装 Fixture 会因 applicationId 相同而替换设备上的云端 Debug。公网可达不能替代独立 Release 签名和生产配置生成的正式发布包。
 
 Alpha 混淆阶段仍会输出来自固定微信 OpenSDK 6.8.40 外部字节码的 stack-map 警告；当前 R8、资源压缩、`lintVital`、签名和 APK 完整性门禁均通过。该上游 SDK 警告不等于本轮构建失败，但在升级 SDK 或 Android Gradle Plugin 时必须重新审计，不能长期无条件忽略。
 

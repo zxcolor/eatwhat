@@ -21,11 +21,22 @@ docs              产品、架构、OpenAPI 3.1、数据、测试和发布门禁
 
 Android 只负责隐私同意、用户主动定位或手动选择推荐起点、决策表单与会话内 UI、客户端契约校验和系统
 Intent 门禁；餐厅供应商适配、推荐过滤/排序、账号事务、数据权利判断、数据库和所有
-服务端 Secret 均留在 API/ECS。内部 Alpha 固定访问
-`https://api.unfinished-era.com/`；激活后该子域必须使用独立 DNS、证书和宝塔 Nginx vhost，
-只把 `/health`、`/health/ready`、`/v1` 与 `/v1/*` 代理到宿主机回环
-`127.0.0.1:13001`。它不得覆盖 `www.unfinished-era.com` 或根域的 WordPress vhost，
-Compose 也不得直接占用宿主机 `80/443`。
+服务端 Secret 均留在 API/ECS。普通 Debug 和内部 Alpha 固定访问同一个
+`https://api.unfinished-era.com/` API/PostgreSQL 实例；两者只是包名、可调试性、压缩和分发
+用途不同的客户端，不创建第二套 Debug 服务、Compose project、端口、域名、Secret 或数据库。
+因此两者共享服务能力、最低版本、IP 限流、高德配额、内存事件缓冲及未来启用后的账号数据。
+客户端自报的 build channel 不得用于拆分限流、鉴权、数据授权或选择 provider Secret。
+
+普通 Debug 的默认地址和任何覆盖地址都必须通过公网 HTTPS 门禁；回环 HTTP 只存在于不可
+分发的 `fixture` build type，用于 deterministic instrumentation，避免自动化访问云端真实数据
+或消耗第三方配额。Fixture 不属于日常 Debug，也不能作为测试包发给体验者。当前云端账号能力
+保持关闭；手机号/邮箱未来可在同一环境联调，但 Debug 与 Alpha 因包名/签名不同而需要不同的
+微信/QQ AppID。服务端在完成受批准的多 AppID、OAuth state 与 providerScope 绑定设计前，
+Debug 的微信/QQ入口必须继续 fail closed，不能信任客户端环境头选择 Secret。
+
+公网 API 子域必须使用独立 DNS、证书和 API Nginx vhost，只把 `/health`、
+`/health/ready`、`/v1` 与 `/v1/*` 代理到宿主机回环 `127.0.0.1:13001`；Compose 不得
+直接占用宿主机 `80/443`。
 
 `GET /health` 是 liveness，只证明 NestJS 进程可响应；`GET /health/ready` 是
 readiness，在不访问外部供应商的前提下检查已启用数据库的有界查询和核心推荐
