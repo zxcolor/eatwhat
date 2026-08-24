@@ -279,7 +279,7 @@ jobs:
               '13300000-0000-4000-8000-000000000001',
               repeat('a',64), 'ci-worker-v1'
             );
-            IF jsonb_object_length(snapshot) <> 9
+            IF (SELECT count(*) FROM pg_catalog.jsonb_object_keys(snapshot)) <> 9
               OR NOT snapshot ?& ARRAY[
                 'schemaVersion','generatedAt','account','identities','favorites',
                 'recommendationHistory','privateFeedback','preferences',
@@ -912,6 +912,17 @@ jobs:
               'FEATURE_FLAGS_V1', '{"enabled":true,"rolloutPercentage":25}'::jsonb
             ) OR public.app_config_value_is_valid(
               'FEATURE_FLAGS_V1', '{"enabled":true,"value":"13800138000"}'::jsonb
+            ) OR NOT public.app_config_value_is_valid(
+              'RECOMMENDATION_RULES_V1',
+              '{"qualityWeight":25,"timeWeight":25,"budgetWeight":20,"intentWeight":15,"diversityWeight":10,"operationsAdjustmentMaximum":5}'::jsonb
+            ) OR public.app_config_value_is_valid(
+              'RECOMMENDATION_RULES_V1',
+              '{"qualityWeight":25,"timeWeight":25,"budgetWeight":20,"intentWeight":15,"diversityWeight":10}'::jsonb
+            ) OR NOT public.audit_context_is_valid(
+              'RETENTION_CLEANUP_COMPLETED', '{"affectedCount":1}'::jsonb
+            ) OR public.audit_context_is_valid(
+              'RETENTION_CLEANUP_COMPLETED',
+              '{"affectedCount":1,"unexpectedCount":1}'::jsonb
             ) OR public.audit_context_is_valid(
               'UNSCHEMATIZED_ACTION', '{"value":"116.3,39.9"}'::jsonb
             ) THEN RAISE EXCEPTION 'JSON privacy/schema validator failed'; END IF;

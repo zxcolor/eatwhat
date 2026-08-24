@@ -78,6 +78,7 @@ describe("database role grant deployment gate", () => {
 			) ?? [];
 
 		expect(workflow).not.toMatch(/\\q(?:uit)?[\t ]+\S/u);
+		expect(workflow).not.toContain("jsonb_object_length");
 		expect(assertionFailures).toHaveLength(31);
 	});
 
