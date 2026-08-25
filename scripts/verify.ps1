@@ -276,15 +276,34 @@ try {
         # previously let concurrent Gradle invocations merge DEX buckets from
         # different builds into one incomplete APK.
         $availableDrive = 'W'
-        if (Get-PSDrive -Name $availableDrive -ErrorAction SilentlyContinue) {
-            throw '固定 Android 构建盘符 W: 已被占用；为避免混合 DEX，本次验证已安全停止。'
-        }
-
         $mappedDrive = "${availableDrive}:"
-        & subst $mappedDrive $workspaceRoot
-        $mappedDriveCreated = $LASTEXITCODE -eq 0
-        if (-not $mappedDriveCreated -or -not (Test-Path "$mappedDrive\apps\android")) {
-            throw '创建 Android 临时 ASCII 盘符失败。'
+        $existingDrive = Get-PSDrive -Name $availableDrive -ErrorAction SilentlyContinue
+        if ($existingDrive) {
+            # Some managed runners pre-map W: to the workspace. Reuse it only
+            # after NTFS file IDs prove both paths resolve to the same file.
+            $workspaceIdentityProbe = Join-Path $workspaceRoot 'scripts\verify.ps1'
+            $mappedIdentityProbe = Join-Path $mappedDrive 'scripts\verify.ps1'
+            $workspaceIdentity = & fsutil.exe file queryfileid $workspaceIdentityProbe 2>$null
+            $workspaceIdentityExitCode = $LASTEXITCODE
+            $mappedIdentity = & fsutil.exe file queryfileid $mappedIdentityProbe 2>$null
+            $mappedIdentityExitCode = $LASTEXITCODE
+            $normalizedWorkspaceIdentity = ($workspaceIdentity -join "`n").Trim()
+            $normalizedMappedIdentity = ($mappedIdentity -join "`n").Trim()
+            if ($workspaceIdentityExitCode -ne 0 -or
+                $mappedIdentityExitCode -ne 0 -or
+                [string]::IsNullOrWhiteSpace($normalizedWorkspaceIdentity) -or
+                $normalizedWorkspaceIdentity -ne $normalizedMappedIdentity) {
+                throw '固定 Android 构建盘符 W: 已被其他目标占用；为避免混合 DEX，本次验证已安全停止。'
+            }
+        } else {
+            & subst $mappedDrive $workspaceRoot
+            $mappedDriveCreated = $LASTEXITCODE -eq 0
+            if (-not $mappedDriveCreated) {
+                throw '创建 Android 临时 ASCII 盘符失败。'
+            }
+        }
+        if (-not (Test-Path "$mappedDrive\apps\android")) {
+            throw 'Android 临时 ASCII 工作区不完整。'
         }
         $androidWorkspaceRoot = "$mappedDrive\"
     }
