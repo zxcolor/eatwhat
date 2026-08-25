@@ -676,9 +676,20 @@ jobs:
             IF result_status <> 'INVALID_PROOF' THEN
               RAISE EXCEPTION 'consumed administrator challenge replayed';
             END IF;
-            IF (SELECT count(*) FROM public.admin_authenticate_session(
-              repeat('2',64), 'ci-v1', repeat('f',64), repeat('1',64), 'ci-bind-v1'
-            ) WHERE 'SECURITY_ADMIN_WRITE' = ANY(permission_codes)) <> 1 THEN
+            IF (SELECT count(*)
+              FROM public.admin_authenticate_session(
+                repeat('2',64), 'ci-v1', repeat('f',64), repeat('1',64), 'ci-bind-v1'
+              ) AS authenticated
+              JOIN public.admin_sessions AS session
+                ON session.id = authenticated.session_id
+              WHERE 'SECURITY_ADMIN_WRITE' = ANY(authenticated.permission_codes)
+                AND authenticated.absolute_expires_at = session.absolute_expires_at
+                AND session.idle_expires_at = LEAST(
+                  session.last_seen_at + interval '15 minutes',
+                  session.absolute_expires_at
+                )
+                AND session.idle_expires_at <= session.absolute_expires_at
+            ) <> 1 THEN
               RAISE EXCEPTION 'active administrator permissions were not resolved';
             END IF;
             IF NOT public.admin_begin_enroll_challenge(
