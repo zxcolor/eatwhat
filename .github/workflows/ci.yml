@@ -1366,7 +1366,7 @@ jobs:
             ('20000000-0000-0000-0000-000000000002','PERSIST_PLACE_REFERENCE'),
             ('20000000-0000-0000-0000-000000000003','PERSIST_PLACE_REFERENCE');
           SQL
-          export PGUSER=api_runtime PGPASSWORD=ci-runtime-password
+          export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
           expired_ref=$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT public.persist_licensed_external_place_reference('AMAP','short-lived','20000000-0000-0000-0000-000000000002',now()+interval '6 seconds')")
           psql -X -At -v ON_ERROR_STOP=1 -c "SELECT public.persist_licensed_external_place_reference('AMAP','concurrent','20000000-0000-0000-0000-000000000003',now()+interval '1 hour')" >/tmp/ref-one &
           first_pid=$!
