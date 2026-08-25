@@ -242,7 +242,8 @@ describe("initial schema privacy and governance scan", () => {
 		expect(sql).toContain("pg_catalog.jsonb_each(input_value)");
 		expect(sql).toContain("CREATE FUNCTION public.audit_context_is_valid");
 		expect(sql).toContain("DATA_RIGHTS_AUTHORIZATION_REVOKED");
-		expect(sql).toContain("jsonb_object_length(value) <> 1");
+		expect(sql).toContain("OR NOT value ? expected_key");
+		expect(sql).toContain("count_text ~ '^(0|[1-9][0-9]{0,17})$'");
 		expect(sql).not.toContain("safe_metadata_json");
 	});
 

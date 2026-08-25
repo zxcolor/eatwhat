@@ -14,12 +14,15 @@ describe("fixed migration plan", () => {
 	it("loads the repository migration with a deterministic checksum", async () => {
 		const first = await loadMigrationPlan();
 		const second = await loadMigrationPlan();
-		expect(first).toHaveLength(7);
+		expect(first).toHaveLength(9);
 		expect(first[0]).toMatchObject({
 			version: 1,
 			name: "initial_schema",
 			fileName: "0001_initial_schema.sql",
 		});
+		expect(first[0]?.checksum).toBe(
+			"ebdda07eba3f68b88de87078facab9aa42e71288efcfce753269601ea35a34aa",
+		);
 		expect(first[0]?.checksum).toMatch(/^[0-9a-f]{64}$/u);
 		expect(first[1]).toMatchObject({
 			version: 2,
@@ -57,6 +60,18 @@ describe("fixed migration plan", () => {
 			fileName: "0007_otp_verification_attempt_limit.sql",
 		});
 		expect(first[6]?.checksum).toMatch(/^[0-9a-f]{64}$/u);
+		expect(first[7]).toMatchObject({
+			version: 8,
+			name: "fix_jsonb_object_cardinality",
+			fileName: "0008_fix_jsonb_object_cardinality.sql",
+		});
+		expect(first[7]?.checksum).toMatch(/^[0-9a-f]{64}$/u);
+		expect(first[8]).toMatchObject({
+			version: 9,
+			name: "qualify_admin_session_expiry",
+			fileName: "0009_qualify_admin_session_expiry.sql",
+		});
+		expect(first[8]?.checksum).toMatch(/^[0-9a-f]{64}$/u);
 		expect(second[0]?.checksum).toBe(first[0]?.checksum);
 		expect(second[1]?.checksum).toBe(first[1]?.checksum);
 		expect(second[2]?.checksum).toBe(first[2]?.checksum);
@@ -64,6 +79,8 @@ describe("fixed migration plan", () => {
 		expect(second[4]?.checksum).toBe(first[4]?.checksum);
 		expect(second[5]?.checksum).toBe(first[5]?.checksum);
 		expect(second[6]?.checksum).toBe(first[6]?.checksum);
+		expect(second[7]?.checksum).toBe(first[7]?.checksum);
+		expect(second[8]?.checksum).toBe(first[8]?.checksum);
 	});
 
 	it("requires versions to start at 0001 and remain contiguous", () => {
