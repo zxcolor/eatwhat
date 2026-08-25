@@ -20,6 +20,9 @@ describe("administrator session expiry qualification migration", () => {
 		expect(sql).toContain(
 			"event_time + interval '15 minutes', session_record.absolute_expires_at",
 		);
+		expect(sql).toContain(
+			"RETURN QUERY SELECT session_record.id, admin_user.id, permissions,\n    session_record.absolute_expires_at;",
+		);
 		expect(sql).not.toMatch(
 			/event_time \+ interval '15 minutes',\s+absolute_expires_at/u,
 		);

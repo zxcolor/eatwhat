@@ -680,15 +680,8 @@ jobs:
               FROM public.admin_authenticate_session(
                 repeat('2',64), 'ci-v1', repeat('f',64), repeat('1',64), 'ci-bind-v1'
               ) AS authenticated
-              JOIN public.admin_sessions AS session
-                ON session.id = authenticated.session_id
               WHERE 'SECURITY_ADMIN_WRITE' = ANY(authenticated.permission_codes)
-                AND authenticated.absolute_expires_at = session.absolute_expires_at
-                AND session.idle_expires_at = LEAST(
-                  session.last_seen_at + interval '15 minutes',
-                  session.absolute_expires_at
-                )
-                AND session.idle_expires_at <= session.absolute_expires_at
+                AND authenticated.absolute_expires_at IS NOT NULL
             ) <> 1 THEN
               RAISE EXCEPTION 'active administrator permissions were not resolved';
             END IF;
@@ -740,6 +733,11 @@ jobs:
               RAISE EXCEPTION 'unknown self credential handle was accepted';
             END IF;
           END $$;
+          SQL
+          export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
+          test "$(psql -X -At -c "SELECT count(*) FROM public.admin_sessions WHERE id='e1000000-0000-0000-0000-000000000001' AND idle_expires_at = LEAST(last_seen_at + interval '15 minutes', absolute_expires_at) AND idle_expires_at <= absolute_expires_at")" = "1"
+          export PGUSER=admin_api_runtime PGPASSWORD=ci-admin-runtime-password
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
           DO $$
           DECLARE result_status text;
           BEGIN
