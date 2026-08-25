@@ -247,7 +247,7 @@ try {
     }
 }
 
-Write-Host '== Android: unit tests and lint =='
+Write-Host '== Android: cloud Debug unit tests and lint =='
 $mappedDrive = $null
 $mappedDriveCreated = $false
 $androidWorkspaceRoot = $workspaceRoot
@@ -337,12 +337,23 @@ try {
     # may also be launched by Android Studio through the repository's real
     # non-ASCII path, so reusing merged DEX output across both path identities is
     # unsafe and previously produced an APK with a missing application class.
-    # Compile the instrumented test APK from the same clean path identity as
-    # the app APK so emulator acceptance never reuses a stale mixed-path test build.
-    & $wrapper -p $androidProject clean testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest `
+    # Ordinary Debug is the developer-facing cloud build. Always inject the
+    # same explicitly approved public HTTPS endpoint used for Alpha, so a full
+    # verification can never silently fall back to a workstation API.
+    & $wrapper -p $androidProject clean testDebugUnitTest lintDebug assembleDebug `
+        "-PCHISHENME_DEBUG_API_BASE_URL=$AlphaApiBaseUrl" `
         --stacktrace --no-daemon --no-build-cache --rerun-tasks
     if ($LASTEXITCODE -ne 0) {
-        throw "Android 验证失败，Gradle 退出码：$LASTEXITCODE"
+        throw "Android 云端 Debug 验证失败，Gradle 退出码：$LASTEXITCODE"
+    }
+
+    # Instrumentation owns a separate fixture variant with a fixed loopback
+    # endpoint. Keep both fixture artifacts in their own Gradle invocation so
+    # neither can reuse or overwrite the cloud Debug task graph.
+    & $wrapper -p $androidProject assembleFixture assembleFixtureAndroidTest `
+        --stacktrace --no-daemon --no-build-cache --rerun-tasks
+    if ($LASTEXITCODE -ne 0) {
+        throw "Android 隔离 Fixture 验证失败，Gradle 退出码：$LASTEXITCODE"
     }
 
     # Keep Alpha KAPT/R8 separate from Debug lint. Running both task graphs in
@@ -355,8 +366,13 @@ try {
         throw "Android Alpha 验证失败，Gradle 退出码：$LASTEXITCODE"
     }
 
-    Write-Host '== Android: generated BuildConfig share gate =='
-    foreach ($variant in @('debug', 'alpha')) {
+    Write-Host '== Android: generated BuildConfig endpoint and share gates =='
+    $expectedVariantEndpoints = [ordered]@{
+        debug = $AlphaApiBaseUrl
+        fixture = 'http://127.0.0.1:3001/'
+        alpha = $AlphaApiBaseUrl
+    }
+    foreach ($variant in $expectedVariantEndpoints.Keys) {
         $generatedBuildConfig = Join-Path $androidProject `
             "app\build\generated\source\buildConfig\$variant\com\chishenme\app\BuildConfig.java"
         if (-not (Test-Path $generatedBuildConfig -PathType Leaf)) {
@@ -374,22 +390,27 @@ try {
         if ($generatedShareFlagMentions.Count -ne 1 -or $generatedDisabledShareFlag.Count -ne 1) {
             throw "Android $variant BuildConfig 未把 SHARE_FEATURE_ENABLED 唯一固定为 false。"
         }
-        if ($variant -eq 'alpha') {
-            $expectedAlphaEndpoint =
-                'public static final String API_BASE_URL = "' + $AlphaApiBaseUrl + '";'
-            if (-not $generatedBuildConfigText.Contains($expectedAlphaEndpoint)) {
-                throw 'Android Alpha BuildConfig 没有嵌入本次显式指定的云端 API 地址。'
-            }
+        $expectedEndpoint = $expectedVariantEndpoints[$variant]
+        $generatedEndpointFields = [regex]::Matches(
+            $generatedBuildConfigText,
+            '(?m)^\s*public static final String API_BASE_URL = "([^"]*)";\s*$'
+        )
+        if ($generatedEndpointFields.Count -ne 1 -or
+            $generatedEndpointFields[0].Groups[1].Value -cne $expectedEndpoint) {
+            throw "Android $variant BuildConfig 的 API_BASE_URL 不是预期地址：$expectedEndpoint"
+        }
+        if ($variant -in @('debug', 'alpha')) {
             if ($generatedBuildConfigText -match '(?i)API_BASE_URL\s*=\s*"http://' -or
                 $generatedBuildConfigText -match '(?i)API_BASE_URL\s*=\s*"https?://(?:localhost|127\.)') {
-                throw 'Android Alpha BuildConfig 仍包含明文或回环 API 地址。'
+                throw "Android $variant BuildConfig 仍包含明文或回环 API 地址。"
             }
         }
     }
 
     Write-Host '== Android: installable APK integrity =='
     $debugApkPath = Join-Path $androidProject 'app\build\outputs\apk\debug\app-debug.apk'
-    $testApkPath = Join-Path $androidProject 'app\build\outputs\apk\androidTest\debug\app-debug-androidTest.apk'
+    $fixtureApkPath = Join-Path $androidProject 'app\build\outputs\apk\fixture\app-fixture.apk'
+    $testApkPath = Join-Path $androidProject 'app\build\outputs\apk\androidTest\fixture\app-fixture-androidTest.apk'
     $alphaApkPath = Join-Path $androidProject 'app\build\outputs\apk\alpha\app-alpha.apk'
     $apkAnalyzer = Join-Path $env:ANDROID_HOME 'cmdline-tools\latest\bin\apkanalyzer.bat'
     $buildTools = Join-Path $env:ANDROID_HOME 'build-tools\36.0.0'
@@ -404,7 +425,8 @@ try {
     }
     $apkPaths = [ordered]@{
         Debug = $debugApkPath
-        Test = $testApkPath
+        Fixture = $fixtureApkPath
+        FixtureTest = $testApkPath
         Alpha = $alphaApkPath
     }
     foreach ($label in $apkPaths.Keys) {
@@ -417,7 +439,8 @@ try {
         param(
             [string]$Label,
             [string]$Path,
-            [string]$ExpectedApiBaseUrl = ''
+            [string]$ExpectedApiBaseUrl = '',
+            [string[]]$ForbiddenApiBaseUrls = @()
         )
 
         Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -455,6 +478,12 @@ try {
                         ($dexDumpOutput | Select-String -SimpleMatch $ExpectedApiBaseUrl -Quiet)) {
                         $expectedEndpointObserved = $true
                     }
+                    foreach ($forbiddenApiBaseUrl in $ForbiddenApiBaseUrls) {
+                        if ($dexDumpOutput |
+                            Select-String -SimpleMatch $forbiddenApiBaseUrl -Quiet) {
+                            throw "$Label APK 的 DEX 包含其他变体的 API 地址：$forbiddenApiBaseUrl"
+                        }
+                    }
                     $forbidden = @(
                         $dexDumpOutput | Select-String -Pattern @(
                                 'AMAP_WEB_SERVICE_KEY',
@@ -474,7 +503,7 @@ try {
                     }
                 }
                 if (-not $expectedEndpointObserved) {
-                    throw "$Label APK 的 DEX 未包含本次显式指定的云端 API 地址。"
+                    throw "$Label APK 的 DEX 未包含预期 API 地址：$ExpectedApiBaseUrl"
                 }
             } finally {
                 $archive.Dispose()
@@ -494,10 +523,16 @@ try {
         }
     }
 
-    Assert-ApkHasNoServerSecrets -Label 'Debug' -Path $debugApkPath
-    Assert-ApkHasNoServerSecrets -Label 'Test' -Path $testApkPath
+    Assert-ApkHasNoServerSecrets -Label 'Debug' -Path $debugApkPath `
+        -ExpectedApiBaseUrl $AlphaApiBaseUrl `
+        -ForbiddenApiBaseUrls @('http://127.0.0.1:3001/')
+    Assert-ApkHasNoServerSecrets -Label 'Fixture' -Path $fixtureApkPath `
+        -ExpectedApiBaseUrl 'http://127.0.0.1:3001/' `
+        -ForbiddenApiBaseUrls @($AlphaApiBaseUrl)
+    Assert-ApkHasNoServerSecrets -Label 'FixtureTest' -Path $testApkPath
     Assert-ApkHasNoServerSecrets -Label 'Alpha' -Path $alphaApkPath `
-        -ExpectedApiBaseUrl $AlphaApiBaseUrl
+        -ExpectedApiBaseUrl $AlphaApiBaseUrl `
+        -ForbiddenApiBaseUrls @('http://127.0.0.1:3001/')
 
     function Assert-ApkDexClasses {
         param(
@@ -550,7 +585,13 @@ try {
         'com.chishenme.app.data.local.DecisionHistoryStore',
         'com.chishenme.app.debug.wxapi.WXEntryActivity'
     )
-    Assert-ApkDexClasses -Label 'Test' -Path $testApkPath -RequiredClasses @(
+    Assert-ApkDexClasses -Label 'Fixture' -Path $fixtureApkPath -RequiredClasses @(
+        'com.chishenme.app.ChiShenMeApplication',
+        'com.chishenme.app.MainActivity',
+        'com.chishenme.app.data.local.DecisionHistoryStore',
+        'com.chishenme.app.debug.wxapi.WXEntryActivity'
+    )
+    Assert-ApkDexClasses -Label 'FixtureTest' -Path $testApkPath -RequiredClasses @(
         'androidx.test.runner.AndroidJUnitRunner',
         'com.chishenme.app.MainActivityDecisionFlowTest',
         'com.chishenme.app.MainActivityMinimumVersionGateTest',
@@ -567,13 +608,16 @@ try {
 
     $debugManifest = Get-ApkManifestEvidence -Label 'Debug' -Path $debugApkPath `
         -ExpectedPackage 'com.chishenme.app.debug'
-    $testManifest = Get-ApkManifestEvidence -Label 'Test' -Path $testApkPath `
+    $fixtureManifest = Get-ApkManifestEvidence -Label 'Fixture' -Path $fixtureApkPath `
+        -ExpectedPackage 'com.chishenme.app.debug'
+    $testManifest = Get-ApkManifestEvidence -Label 'FixtureTest' -Path $testApkPath `
         -ExpectedPackage 'com.chishenme.app.debug.test'
     $alphaManifest = Get-ApkManifestEvidence -Label 'Alpha' -Path $alphaApkPath `
         -ExpectedPackage 'com.chishenme.app.alpha'
 
     foreach ($appManifest in @(
         @{ Label = 'Debug'; Evidence = $debugManifest; Package = 'com.chishenme.app.debug' },
+        @{ Label = 'Fixture'; Evidence = $fixtureManifest; Package = 'com.chishenme.app.debug' },
         @{ Label = 'Alpha'; Evidence = $alphaManifest; Package = 'com.chishenme.app.alpha' }
     )) {
         $label = $appManifest.Label
@@ -597,6 +641,9 @@ try {
     }
     if ($debugManifest.Badging -notmatch '(?m)^application-debuggable$') {
         throw 'Debug APK 未标记为 debuggable。'
+    }
+    if ($fixtureManifest.Badging -notmatch '(?m)^application-debuggable$') {
+        throw 'Fixture APK 未标记为 debuggable。'
     }
     if ($alphaManifest.Badging -match '(?m)^application-debuggable$') {
         throw '内部 Alpha APK 不得标记为 debuggable。'
@@ -658,7 +705,7 @@ try {
         }
     }
     if (@($certificateDigests.Values | Select-Object -Unique).Count -ne 1) {
-        throw 'Debug、Test、Alpha APK 的签名证书不一致。'
+        throw 'Debug、Fixture、FixtureTest、Alpha APK 的签名证书不一致。'
     }
 
     foreach ($label in $apkPaths.Keys) {

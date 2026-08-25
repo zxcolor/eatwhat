@@ -35,19 +35,37 @@
 gradle wrapper --gradle-version 8.13
 ```
 
-从仓库根目录执行完整可复现门禁（包含 buildSrc、Debug AndroidTest APK、Alpha 混淆和工件检查）：
+从仓库根目录执行完整可复现门禁（包含 buildSrc、云端 Debug、隔离 Fixture AndroidTest、Alpha 混淆和工件检查）：
 
 ```powershell
 .\scripts\verify.ps1 -AlphaApiBaseUrl 'https://api.unfinished-era.com/'
 ```
 
-只在 Android 工程内做快速开发检查时可运行 `testDebugUnitTest lintDebug assembleDebug`；它不替代上面的完整门禁。
+只在 Android 工程内做快速开发检查时可运行 `testDebugUnitTest lintDebug assembleDebug`；普通 Debug 默认连接云端公网 API，该命令不替代上面的完整门禁。
 
-`debug/app-debug.apk` 用于本机/ADB reverse 开发；`alpha/app-alpha.apk` 是启用 R8 和资源压缩的邀请制测试包，包名为 `com.chishenme.app.alpha`，使用 Debug 签名，不能作为公开 Release。Alpha 必须显式提供独立的 `CHISHENME_ALPHA_API_BASE_URL`，且与 Release 一样只接受非回环公网 HTTPS；Debug 的 `127.0.0.1` 地址不会再进入 Alpha。
+| 构建 | 包名 | API | 用途 |
+| --- | --- | --- | --- |
+| Debug | `com.chishenme.app.debug` | 默认 `https://api.unfinished-era.com/`；只允许受控公网 HTTPS | 日常开发诊断，可与 Alpha 并存；可调试，不得公开发布 |
+| Fixture | `com.chishenme.app.debug` | 固定 `http://127.0.0.1:3001/` | 只供确定性 instrumentation；会替换设备上的 Debug，禁止分发 |
+| Alpha | `com.chishenme.app.alpha` | 与 Debug 复用当前云端 API | 邀请制、R8/资源压缩、不可调试；仍使用 Debug signer，不能当 Release |
+
+普通 Debug 与 Alpha 只是不同的 Android 客户端包装，不是两套服务端环境。它们共用同一服务端配置、数据库状态、IP 限流、高德配额和未来启用后的账号数据；当前不新建第二套 API 容器、端口、域名或数据库。若要隔离破坏性迁移、测试账号或不同微信/QQ AppID，必须另建具备独立域名、Secret、数据库角色/卷和配额的 staging，不能信任客户端自报环境来选择服务端 Secret。
 
 当前服务端真实 adapter 只有 AMAP，另有仅限 development/test 的 DEMO；Android 的公共模型不会因此锁死到高德。未来新增美团、大众点评或其他来源时，必须先有正式 API/商务授权，再由服务端 adapter 归一化为相同契约；客户端不接入抓取、逆向接口或虚构 provider。
 
-Debug 默认访问 `http://127.0.0.1:3001/`。模拟器或真机无法直接复用电脑的回环地址，且旧映射也可能在 ADB/模拟器重启后失效。先自行启动 API，再用仓库脚本完成健康检查、唯一设备选择、同目标 `adb reverse` 的安全刷新和映射复核；不同目标的既有映射不会被静默覆盖：
+### 云端 Debug 与隔离测试 Fixture
+
+普通 Debug 默认访问 `https://api.unfinished-era.com/`，无需本机 API 或 `adb reverse`。从仓库根目录执行：
+
+```powershell
+.\apps\android\gradlew.bat -p .\apps\android `
+    clean testDebugUnitTest lintDebug assembleDebug `
+    --stacktrace --no-daemon --no-build-cache --rerun-tasks
+```
+
+若未来有正式 staging，可临时用 `-PCHISHENME_DEBUG_API_BASE_URL=https://.../` 指向另一个经批准的公网 HTTPS 地址。该属性拒绝 HTTP、localhost、回环、私网、保留地址、user-info、query、fragment 和缺少末尾 `/` 的地址；禁止写入仓库或用户级 `gradle.properties`。Debug 继续使用主源码中的全局明文流量禁用配置。
+
+只有 instrumentation 的 `fixture` 构建固定使用 `127.0.0.1:3001`，以免确定性用例访问真实云端、写入真实账号数据或消耗高德配额。完整 `verify.ps1` 会生成独立的 Fixture App/Test APK。运行需要宿主本地 DEMO API 的 fixture 用例前，才用仓库脚本完成健康检查、唯一设备选择、同目标 `adb reverse` 的安全刷新和映射复核；不同目标的既有映射不会被静默覆盖：
 
 ```powershell
 pnpm dev:api
@@ -55,7 +73,7 @@ pnpm dev:api
 .\scripts\connect-android-debug.ps1
 ```
 
-有多台已就绪设备时必须明确序列号；只有显式增加 `-OpenApp` 才会打开设备上已经安装的 Debug App：
+有多台已就绪设备时必须明确序列号；只有显式增加 `-OpenApp` 才会打开设备上已经安装的 Fixture App：
 
 ```powershell
 .\scripts\connect-android-debug.ps1 -Serial emulator-5554 -OpenApp
@@ -65,7 +83,7 @@ pnpm dev:api
 
 ### 模拟器语义验收
 
-本机 development API 和上述反向映射就绪后，可运行真实启动页 UI 验收。当前有六个
+Fixture APK、本机 development API 和上述反向映射就绪后，可运行真实启动页 UI 验收。当前有六个
 基于 Compose semantics、不会依赖屏幕坐标的 Activity 用例：
 
 1. 从首次隐私同意开始，手动选择内置“北京大学东门”，使用默认极速条件请求本地
@@ -100,7 +118,7 @@ pnpm dev:api
 Gradle/UTP 入口是：
 
 ```powershell
-.\gradlew.bat connectedDebugAndroidTest
+.\gradlew.bat connectedFixtureAndroidTest
 ```
 
 这个无过滤入口会让三项专用类因缺少显式 opt-in 参数而跳过，不能同时证明四种服务端
@@ -108,7 +126,7 @@ Gradle/UTP 入口是：
 
 若宿主机只能构建 APK，但 Gradle 的 UTP 控制台进程无法启动，可在确认这是测试基础设施
 故障、而不是断言失败后，使用 ADB 安装已经构建的 App/Test APK，再调用设备实际登记的
-instrumentation component。当前 Debug 构建和设备 `pm` 事实分别是目标包
+instrumentation component。当前 Fixture 构建和设备 `pm` 事实分别是目标包
 `com.chishenme.app.debug`、测试包 `com.chishenme.app.debug.test`、runner
 `androidx.test.runner.AndroidJUnitRunner`；下面仍会从 `pm list instrumentation` 动态提取
 唯一组件，切换构建类型后不得复用旧值：
@@ -156,22 +174,22 @@ ADB 直跑是 UTP 宿主故障时的等价执行兜底，不会生成标准 Grad
 原目标、已经是原目标时保持不变，若被外部进程改成其他目标则拒绝覆盖并把清理失败上报。
 强制更新用例与普通用例必须使用各自匹配的服务端最低版本，完成后要恢复兼容配置并重新
 运行普通类，证明门禁能够正常解锁。
-`run-android-instrumentation.ps1` 与 `connect-android-debug.ps1` 都不会启动、停止或重启
-宿主机后端；设备内夹具由对应 instrumentation 用例在测试进程中启动。前者也只有显式
-`-Install` 才安装当前统一构建出的 Debug App/Test APK。后者
-不会安装 APK，默认也不会打开 App。
+`run-android-instrumentation.ps1` 与 `connect-android-debug.ps1` 都只服务 Fixture 验收，
+不会启动、停止或重启宿主机后端；设备内夹具由对应 instrumentation 用例在测试进程中
+启动。前者也只有显式 `-Install` 才安装当前统一构建出的 Fixture App/Test APK，后者
+不会安装 APK，默认也不会打开 App。这两个脚本都不是普通云端 Debug 的连接步骤。
 模拟器重启、真机重连或 ADB 服务重置后需再次执行连接脚本。
-若确实需要其他 Debug 地址，可通过
-`-PCHISHENME_DEBUG_API_BASE_URL=http://.../` 覆盖；此时上述固定 3001 端口脚本不适用，
-需要自行建立与该地址一致的安全连接。Alpha 和 Release 都不使用 Debug 地址，分别通过
-Gradle 属性配置公网 HTTPS 地址：
+普通 Debug、Alpha 和 Release 的地址都必须是公网 HTTPS。Debug 默认使用当前云端地址；
+只有迁移到正式 staging 时才可临时用同名 Gradle 属性覆盖，且仍不得使用本机、回环或私网
+地址。Fixture 的固定回环地址没有 Gradle 开关，不能被误带入可分发构建：
 
 ```properties
+CHISHENME_DEBUG_API_BASE_URL=https://api.unfinished-era.com/
 CHISHENME_ALPHA_API_BASE_URL=https://api.unfinished-era.com/
 CHISHENME_API_BASE_URL=https://api.your-company.example/
 ```
 
-Alpha 缺少地址、使用 HTTP、localhost、回环/私网/保留地址或保留域名时，`preAlphaBuild` 会失败。完整验证还会检查该地址确实进入 Alpha DEX；这不证明 DNS、TLS 或公网 API 可达。Release 另需通过进程环境提供 `CHISHENME_RELEASE_STORE_FILE`、`CHISHENME_RELEASE_STORE_PASSWORD`、`CHISHENME_RELEASE_KEY_ALIAS`、`CHISHENME_RELEASE_KEY_PASSWORD`。缺少任一项时构建会主动失败，避免产生指向占位 API 或未签名的包。
+Debug/Alpha 使用 HTTP、localhost、回环/私网/保留地址或保留域名时构建会失败；Alpha 仍要求显式提供地址。完整验证还会检查同一云端地址确实进入 Debug 与 Alpha DEX，并检查 Fixture DEX 只使用固定回环地址；这不证明 DNS、TLS 或公网 API 可达。Release 另需通过进程环境提供 `CHISHENME_RELEASE_STORE_FILE`、`CHISHENME_RELEASE_STORE_PASSWORD`、`CHISHENME_RELEASE_KEY_ALIAS`、`CHISHENME_RELEASE_KEY_PASSWORD`。缺少任一项时构建会主动失败，避免产生指向占位 API 或未签名的包。
 
 微信 AppID 是公开应用标识，不是 Secret；按具体开放平台应用登记的包名与签名，通过 Gradle 属性配置：
 

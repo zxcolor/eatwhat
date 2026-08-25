@@ -1,6 +1,5 @@
 import com.chishenme.buildlogic.ReleaseApiUrlPolicy
 import com.chishenme.buildlogic.QqAppIdPolicy
-import java.net.URI
 
 plugins {
     id("com.android.application")
@@ -60,29 +59,14 @@ listOf(
     }
 }
 val debugApiUrl = providers.gradleProperty("CHISHENME_DEBUG_API_BASE_URL")
-    .orElse("http://127.0.0.1:3001/")
+    .orElse("https://api.unfinished-era.com/")
     .get()
     .trim()
-val parsedDebugApiUrl = runCatching { URI(debugApiUrl) }.getOrNull()
-val debugHost = parsedDebugApiUrl?.host?.lowercase()
-val debugUrlHasNoExtras = parsedDebugApiUrl?.userInfo == null &&
-    parsedDebugApiUrl?.query == null &&
-    parsedDebugApiUrl?.fragment == null
-val isLoopbackDebugHttp = parsedDebugApiUrl?.scheme.equals("http", ignoreCase = true) &&
-    debugHost != null &&
-    debugHost in setOf("127.0.0.1", "localhost") &&
-    (parsedDebugApiUrl?.port ?: -1) in 1..65_535
-val isHttpsDebugApi = parsedDebugApiUrl?.scheme.equals("https", ignoreCase = true) &&
-    !debugHost.isNullOrBlank()
-if (
-    parsedDebugApiUrl == null ||
-    !debugUrlHasNoExtras ||
-    !debugApiUrl.endsWith("/") ||
-    (!isLoopbackDebugHttp && !isHttpsDebugApi)
-) {
+if (!ReleaseApiUrlPolicy.isAllowed(debugApiUrl)) {
     throw GradleException(
-        "Debug API 地址只允许带显式端口的 http://127.0.0.1/localhost，或有效 HTTPS 地址；" +
-            "并且必须以 / 结尾且不含 user-info、query 或 fragment",
+        "Debug API 地址必须是以 / 结尾的公网 HTTPS URL，且不得包含 user-info、" +
+            "query、fragment、localhost、回环/私网/保留地址或保留域名；" +
+            "设备隔离测试只能使用固定的 fixture build type",
     )
 }
 val configuredReleaseApiUrl = releaseApiUrl
@@ -157,11 +141,9 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
-            // The debug network-security overlay permits cleartext only to
-            // localhost/127.0.0.1 for the adb reverse workflow.
+            // Ordinary developer builds use the same public HTTPS API as the
+            // internal Alpha while remaining debuggable and separately packaged.
             manifestPlaceholders["usesCleartextTraffic"] = "false"
-            // `adb reverse tcp:3001 tcp:3001` works consistently for the
-            // official emulator, third-party emulators and physical devices.
             buildConfigField("String", "API_BASE_URL", "\"$debugApiUrl\"")
             // A production AppID is package/signature-bound and must never be
             // silently reused by the .debug application. Configure a separately
@@ -175,6 +157,26 @@ android {
             } else {
                 "tencent-disabled"
             }
+        }
+        create("fixture") {
+            // Non-distributable device-test build. It deliberately keeps the
+            // historical .debug identity so the existing AndroidTest package,
+            // authorities and device cleanup commands remain exact.
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-fixture"
+            isDebuggable = true
+            signingConfig = signingConfigs.getByName("debug")
+            manifestPlaceholders["usesCleartextTraffic"] = "false"
+            buildConfigField("String", "API_BASE_URL", "\"http://127.0.0.1:3001/\"")
+
+            // A synthetic API fixture must never initialize package/signature-
+            // bound third-party login SDKs or borrow credentials from Debug.
+            buildConfigField("String", "CHISHENME_WECHAT_APP_ID", "\"\"")
+            buildConfigField("String", "CHISHENME_QQ_APP_ID", "\"\"")
+            manifestPlaceholders["wechatSdkEnabled"] = "false"
+            manifestPlaceholders["qqSdkEnabled"] = "false"
+            manifestPlaceholders["qqCallbackScheme"] = "tencent-disabled"
         }
         release {
             isMinifyEnabled = true
@@ -210,6 +212,12 @@ android {
             }
         }
     }
+
+    // AndroidTest always targets the isolated loopback fixture rather than the
+    // ordinary cloud-connected Debug APK. Reuse only the package-correct WeChat
+    // callback source; the component remains disabled because fixture AppIDs are empty.
+    testBuildType = "fixture"
+    sourceSets.getByName("fixture").java.srcDir("src/debug/java")
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

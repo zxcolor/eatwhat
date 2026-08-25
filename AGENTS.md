@@ -20,6 +20,12 @@
 - 高德等第三方密钥只能保留在服务端受控环境中，不得进入 Android 代码、APK、日志或测试夹具。
 - 不抓取、复制或缓存未经授权的第三方餐厅数据；保持现有合规和隐私约束。
 
+## Android 环境边界
+
+- 普通 `debug` 构建默认且只允许访问公网 HTTPS API；当前与内部 Alpha 复用 `https://api.unfinished-era.com/`，不得改回本机、回环或私网服务端。
+- `http://127.0.0.1:3001/` 只属于不可分发的 `fixture` 自动化测试构建。不得把该地址写入 `gradle.properties`、用户级 Gradle 配置或普通 Debug APK。
+- Debug 与 Alpha 共用同一服务端配置、限流、高德配额和数据状态；需要隔离迁移、账号数据或第三方 OAuth AppID 时必须另建 staging，不得依赖客户端自报环境选择服务端 Secret。
+
 ## 验证与交付
 
 - 优先运行与改动直接相关的测试；合并前运行完整验证：

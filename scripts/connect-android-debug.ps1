@@ -1,11 +1,12 @@
 ﻿<#
 .SYNOPSIS
-为一台已连接的 Android 调试设备建立本机 API 的 ADB 反向端口映射。
+为 Android 自动化测试 Fixture 建立本机隔离 API 的 ADB 反向端口映射。
 
 .DESCRIPTION
-脚本只验证本机 API、选择已就绪设备并建立 adb reverse。它不会安装 APK，
-不会启动或停止后端，默认也不会打开 App。只有显式传入 -OpenApp 才会打开已安装
-的 com.chishenme.app.debug。
+脚本只服务固定连接 127.0.0.1:3001 的自动化测试 Fixture：验证本机隔离 API、选择
+已就绪设备并建立 adb reverse。它不用于日常云端 Debug，不会安装 APK，不会启动或
+停止后端，默认也不会打开 App。只有显式传入 -OpenApp 才会打开已安装的 Fixture
+测试包 com.chishenme.app.debug。
 
 .PARAMETER AdbPath
 可选的 adb.exe 完整路径。未提供时依次查找 PATH、Android 环境变量、仓库内
@@ -15,7 +16,7 @@
 可选的 adb 设备序列号。未提供时必须恰好有一台状态为 device 的设备。
 
 .PARAMETER OpenApp
-建立并验证端口映射后，打开已经安装的 Debug App。不会安装 APK。
+建立并验证端口映射后，打开已经安装的 Fixture 测试 App。不会安装 APK。
 
 .PARAMETER ShowFullSerial
 显式允许在终端输出完整设备序列号。默认仅显示掩码后的末四位。
@@ -226,7 +227,7 @@ try {
             '-s', $selectedSerial, 'shell', 'pm', 'path', $debugApplicationId
         )
         if (-not (($packagePaths -join [Environment]::NewLine) -match '^package:')) {
-            throw "设备上未安装 $debugApplicationId。请先自行构建并安装 Debug APK；本脚本不会安装应用。"
+            throw "设备上未安装 $debugApplicationId。请先构建并安装 Fixture 测试 APK；本脚本不会安装应用。"
         }
 
         $resolvedActivities = Invoke-AdbCommand -CommandArguments @(
@@ -240,7 +241,7 @@ try {
             Where-Object { $_ -match '^[A-Za-z0-9._]+/[A-Za-z0-9._$]+$' } |
             Select-Object -Last 1
         if ([string]::IsNullOrWhiteSpace($launchComponent)) {
-            throw "无法解析 $debugApplicationId 的启动 Activity。请确认安装的是当前 Debug APK。"
+            throw "无法解析 $debugApplicationId 的启动 Activity。请确认安装的是当前 Fixture 测试 APK。"
         }
 
         $launchOutput = Invoke-AdbCommand -CommandArguments @(
@@ -266,16 +267,16 @@ try {
                 -not [string]::IsNullOrWhiteSpace(($processIds -join '')) -and
                 (($activityState -join [Environment]::NewLine) -match $componentPattern)
             if (-not $isVerifiedSlowLaunch) {
-                throw "Debug App 启动结果不明确：$($launchOutput -join ' ')"
+                throw "Fixture 测试 App 启动结果不明确：$($launchOutput -join ' ')"
             }
-            Write-Warning 'Debug App 已进入前台，但模拟器首次类验证较慢；请等待启动画面结束。'
+            Write-Warning 'Fixture 测试 App 已进入前台，但模拟器首次类验证较慢；请等待启动画面结束。'
         }
-        Write-Host 'Debug App：已打开'
+        Write-Host 'Fixture 测试 App：已打开'
     } else {
-        Write-Host 'Debug App：未打开（如需打开，请显式增加 -OpenApp）'
+        Write-Host 'Fixture 测试 App：未打开（如需打开，请显式增加 -OpenApp）'
     }
 
-    Write-Host 'Android 本地调试连接已就绪。设备或模拟器重启后请重新运行本脚本。'
+    Write-Host 'Android 自动化测试 Fixture 连接已就绪。设备或模拟器重启后请重新运行本脚本。'
 } finally {
     $env:PATH = $previousPath
     $env:ANDROID_HOME = $previousAndroidHome

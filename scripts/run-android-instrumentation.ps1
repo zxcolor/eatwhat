@@ -1,14 +1,15 @@
 ﻿<#
 .SYNOPSIS
-在唯一一台 Android 调试设备上严格执行指定的 instrumentation 测试类。
+在唯一一台 Android 调试设备上使用隔离 Fixture 严格执行指定的 instrumentation 测试类。
 
 .DESCRIPTION
-脚本验证本机 API、ADB 反向映射、已安装的 Debug App/Test 包和设备实际登记的
-instrumentation component，再执行指定测试类。成功条件不是固定测试总数，而是唯一的
-非零 OK 结果、runner 成功终态且不存在失败或跳过标记。
+脚本验证本机隔离 API、ADB 反向映射、已安装的 Fixture App/Test 包和设备实际登记的
+instrumentation component，再执行指定测试类。Fixture 是固定连接 127.0.0.1:3001 的
+自动化测试专用构建，不是日常云端 Debug。成功条件不是固定测试总数，而是唯一的非零
+OK 结果、runner 成功终态且不存在失败或跳过标记。
 
 脚本不会启动、停止或重配 API，也不会默认安装 APK。只有显式传入 -Install 才会把当前
-统一构建产物安装到所选设备。
+隔离 Fixture 构建产物安装到所选设备；因为包名相同，这会替换设备上的普通云端 Debug。
 
 .PARAMETER ClassName
 要执行的完整测试类名，例如 com.chishenme.app.MainActivityDecisionFlowTest。
@@ -26,7 +27,8 @@ instrumentation component，再执行指定测试类。成功条件不是固定�
 App 并恢复原映射。
 
 .PARAMETER Install
-先安装当前 Debug App APK 和 Debug AndroidTest APK。不会构建 APK。
+先安装当前 Fixture App APK 和 Fixture AndroidTest APK。不会构建 APK；这些产物仅供
+自动化测试，不应作为日常 Debug 分发或使用。
 
 .PARAMETER AdbPath
 可选的 adb.exe 完整路径。未提供时依次查找 PATH、Android 环境变量、仓库工具目录和
@@ -62,8 +64,8 @@ $ErrorActionPreference = 'Stop'
 
 $workspaceRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $androidProject = Join-Path $workspaceRoot 'apps\android'
-$debugApplicationId = 'com.chishenme.app.debug'
-$debugTestApplicationId = 'com.chishenme.app.debug.test'
+$fixtureApplicationId = 'com.chishenme.app.debug'
+$fixtureTestApplicationId = 'com.chishenme.app.debug.test'
 $apiBaseUrl = 'http://127.0.0.1:3001'
 $script:ResolvedAdbPath = $null
 $selectedSerial = $null
@@ -373,7 +375,7 @@ try {
     $reverseSnapshot = Get-Tcp3001ReverseSnapshot -OutputLines $reverseResult.Output
     if ($reverseSnapshot.UnrecognizedLines.Count -gt 0 -or
         $reverseSnapshot.Targets.Count -ne 1) {
-        throw '设备缺少唯一、可恢复的 tcp:3001 ADB 反向映射。请先运行 connect-android-debug.ps1。'
+        throw '设备缺少唯一、可恢复的 tcp:3001 ADB 反向映射。请先为自动化 Fixture 运行 connect-android-debug.ps1。'
     }
     $reverseRestoreTarget = $reverseSnapshot.Targets[0]
     if (-not $UseDeviceLocalApiFixture -and $reverseRestoreTarget -cne 'tcp:3001') {
@@ -381,8 +383,8 @@ try {
     }
 
     if ($Install) {
-        $appApk = Join-Path $androidProject 'app\build\outputs\apk\debug\app-debug.apk'
-        $testApk = Join-Path $androidProject 'app\build\outputs\apk\androidTest\debug\app-debug-androidTest.apk'
+        $appApk = Join-Path $androidProject 'app\build\outputs\apk\fixture\app-fixture.apk'
+        $testApk = Join-Path $androidProject 'app\build\outputs\apk\androidTest\fixture\app-fixture-androidTest.apk'
         foreach ($apk in @($appApk, $testApk)) {
             if (-not (Test-Path -LiteralPath $apk -PathType Leaf)) {
                 throw "缺少构建产物：$apk。请先运行 scripts\verify.ps1。"
@@ -391,24 +393,24 @@ try {
                 '-s', $selectedSerial, 'install', '-r', '-t', $apk
             ) | Out-Null
         }
-        Write-Host 'APK：Debug App/Test 当前构建产物已安装'
+        Write-Host 'APK：自动化测试专用 Fixture App/Test 当前构建产物已安装'
     }
 
-    Assert-InstalledPackage -DeviceSerial $selectedSerial -PackageName $debugApplicationId
-    Assert-InstalledPackage -DeviceSerial $selectedSerial -PackageName $debugTestApplicationId
+    Assert-InstalledPackage -DeviceSerial $selectedSerial -PackageName $fixtureApplicationId
+    Assert-InstalledPackage -DeviceSerial $selectedSerial -PackageName $fixtureTestApplicationId
 
     $instrumentationResult = Invoke-AdbCommand -CommandArguments @(
         '-s', $selectedSerial, 'shell', 'pm', 'list', 'instrumentation'
     )
-    $expectedComponent = "$debugTestApplicationId/androidx.test.runner.AndroidJUnitRunner"
+    $expectedComponent = "$fixtureTestApplicationId/androidx.test.runner.AndroidJUnitRunner"
     $expectedInstrumentationLine =
-        "instrumentation:$expectedComponent (target=$debugApplicationId)"
+        "instrumentation:$expectedComponent (target=$fixtureApplicationId)"
     $matchingLines = @($instrumentationResult.Output | Where-Object {
         $_.Trim() -eq $expectedInstrumentationLine
     })
     if ($matchingLines.Count -ne 1) {
         $targetingLines = @($instrumentationResult.Output | Where-Object {
-            $_ -match ('\(target=' + [regex]::Escape($debugApplicationId) + '\)$')
+            $_ -match ('\(target=' + [regex]::Escape($fixtureApplicationId) + '\)$')
         })
         throw "未找到当前 Test 包登记的唯一官方 runner；目标设备记录：$($targetingLines -join '，')"
     }
@@ -527,7 +529,7 @@ try {
         -not [string]::IsNullOrWhiteSpace($reverseRestoreTarget)) {
         try {
             Invoke-AdbCommand -CommandArguments @(
-                '-s', $selectedSerial, 'shell', 'am', 'force-stop', $debugApplicationId
+                '-s', $selectedSerial, 'shell', 'am', 'force-stop', $fixtureApplicationId
             ) | Out-Null
         } catch {
             $cleanupFailureMessages.Add(
