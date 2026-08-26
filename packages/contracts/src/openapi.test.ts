@@ -37,6 +37,10 @@ import {
 	FavoritesPageSchema,
 	FeatureConfigSchema,
 	FeedbackIdPathSchema,
+	FusionAuthTokenRequestSchema,
+	FusionAuthTokenResponseSchema,
+	FusionAuthVerifyRequestSchema,
+	FusionAuthVerifyResponseSchema,
 	IdentityBindingsResponseSchema,
 	LatestAccountExportResponseSchema,
 	ListFavoritesQuerySchema,
@@ -65,6 +69,7 @@ import {
 	RecommendationResultReferenceInputSchema,
 	RecommendationResultSchema,
 	RefreshRequestSchema,
+	RegisterFusionWechatRequestSchema,
 	RegisterPhoneWechatRequestSchema,
 	RevokeSessionResponseSchema,
 	SessionIdPathSchema,
@@ -569,6 +574,38 @@ describe("OpenAPI v1", () => {
 				],
 			},
 			{
+				path: "/v1/auth/phone/fusion-token",
+				method: "post",
+				statuses: [
+					"201",
+					"400",
+					"401",
+					"403",
+					"409",
+					"413",
+					"415",
+					"429",
+					"500",
+					"503",
+				],
+			},
+			{
+				path: "/v1/auth/phone/fusion-verify",
+				method: "post",
+				statuses: [
+					"200",
+					"400",
+					"401",
+					"403",
+					"409",
+					"413",
+					"415",
+					"429",
+					"500",
+					"503",
+				],
+			},
+			{
 				path: "/v1/auth/email/request-code",
 				method: "post",
 				statuses: [
@@ -602,6 +639,22 @@ describe("OpenAPI v1", () => {
 			},
 			{
 				path: "/v1/auth/register/phone-wechat",
+				method: "post",
+				statuses: [
+					"201",
+					"400",
+					"401",
+					"403",
+					"409",
+					"413",
+					"415",
+					"429",
+					"500",
+					"503",
+				],
+			},
+			{
+				path: "/v1/auth/register/fusion-wechat",
 				method: "post",
 				statuses: [
 					"201",
@@ -1005,6 +1058,18 @@ describe("OpenAPI v1", () => {
 			["SupportFeedbackResponse", SupportFeedbackResponseSchema, "output"],
 			["AuthCapabilities", AuthCapabilitiesSchema, "output"],
 			["PhoneRequestCode", PhoneRequestCodeSchema, "input"],
+			["FusionAuthTokenRequest", FusionAuthTokenRequestSchema, "input"],
+			[
+				"FusionAuthTokenResponse",
+				FusionAuthTokenResponseSchema,
+				"output",
+			],
+			["FusionAuthVerifyRequest", FusionAuthVerifyRequestSchema, "input"],
+			[
+				"FusionAuthVerifyResponse",
+				FusionAuthVerifyResponseSchema,
+				"output",
+			],
 			["EmailRequestCode", EmailRequestCodeSchema, "input"],
 			[
 				"PhoneCodeChallengeResponse",
@@ -1019,6 +1084,11 @@ describe("OpenAPI v1", () => {
 			["OAuthStateRequest", OAuthStateRequestSchema, "input"],
 			["OAuthStateResponse", OAuthStateResponseSchema, "output"],
 			["RegisterPhoneWechatRequest", RegisterPhoneWechatRequestSchema, "input"],
+			[
+				"RegisterFusionWechatRequest",
+				RegisterFusionWechatRequestSchema,
+				"input",
+			],
 			["LoginRequest", LoginRequestSchema, "input"],
 			["AuthTokenResponse", AuthTokenResponseSchema, "output"],
 			["RefreshRequest", RefreshRequestSchema, "input"],
@@ -1100,7 +1170,7 @@ describe("OpenAPI v1", () => {
 		expect(emailPurpose.enum).toEqual(["LOGIN", "BIND"]);
 
 		const oauthRequest = documentedSchema("OAuthStateRequest");
-		const oauthBranches = oauthRequest.oneOf;
+		const oauthBranches = oauthRequest.anyOf;
 		if (!Array.isArray(oauthBranches)) {
 			throw new Error("OAuthStateRequest must be a discriminated union");
 		}
@@ -1117,20 +1187,27 @@ describe("OpenAPI v1", () => {
 				const purpose = objectValue(properties, "purpose").const;
 				return typeof purpose === "string" ? [purpose] : [];
 			});
-		expect(requestPurposesFor("WECHAT").sort()).toEqual(["LOGIN", "REGISTER"]);
+		expect([...new Set(requestPurposesFor("WECHAT"))].sort()).toEqual([
+			"LOGIN",
+			"REGISTER",
+		]);
 		expect(requestPurposesFor("QQ").sort()).toEqual(["BIND", "LOGIN"]);
-		const registrationRequest = oauthBranches.find(
+		const registrationRequests = oauthBranches.filter(
 			(branch) =>
 				isObject(branch) &&
 				objectValue(objectValue(branch, "properties"), "purpose").const ===
 					"REGISTER",
 		);
-		if (!isObject(registrationRequest)) {
-			throw new Error("Missing WeChat registration OAuth request branch");
-		}
-		expect(registrationRequest.required).toEqual(
-			expect.arrayContaining(["installationId", "phoneChallengeId"]),
-		);
+		expect(registrationRequests).toHaveLength(2);
+		expect(
+			registrationRequests.map((branch) =>
+				isObject(branch) && Array.isArray(branch.required)
+					? branch.required.includes("phoneChallengeId")
+						? "phoneChallengeId"
+						: "phoneProofId"
+					: "missing",
+			),
+		).toEqual(["phoneChallengeId", "phoneProofId"]);
 
 		const oauthResponse = documentedSchema("OAuthStateResponse");
 		const responseBranches = oauthResponse.oneOf;
@@ -1299,9 +1376,12 @@ describe("OpenAPI v1", () => {
 	it("keeps provider credentials and raw identities out of every auth response", () => {
 		const authSuccesses = [
 			["/v1/auth/phone/request-code", "post", "202"],
+			["/v1/auth/phone/fusion-token", "post", "201"],
+			["/v1/auth/phone/fusion-verify", "post", "200"],
 			["/v1/auth/email/request-code", "post", "202"],
 			["/v1/auth/oauth/state", "post", "201"],
 			["/v1/auth/register/phone-wechat", "post", "201"],
+			["/v1/auth/register/fusion-wechat", "post", "201"],
 			["/v1/auth/login", "post", "200"],
 			["/v1/auth/refresh", "post", "200"],
 			["/v1/auth/logout", "post", "200"],
@@ -1337,6 +1417,51 @@ describe("OpenAPI v1", () => {
 		expect(JSON.stringify(openApi.components.schemas)).not.toMatch(
 			/"(?:appSecret|appKey|providerSecret|providerRefreshToken)"/u,
 		);
+	});
+
+	it("keeps fusion configuration server-owned and the short-lived response uncached", () => {
+		expect(
+			collectReferenceLocations(
+				openApi.paths,
+				"#/components/schemas/FusionAuthTokenRequest",
+			),
+		).toEqual([
+			"/v1/auth/phone/fusion-token.post.requestBody.content.application/json.schema.$ref",
+		]);
+
+		const request = documentedSchema("FusionAuthTokenRequest");
+		const requestText = JSON.stringify(request);
+		expect(requestText).not.toMatch(
+			/packageName|packageSign|schemeCode|durationSeconds|phoneNumber/iu,
+		);
+		expect(
+			objectValue(objectValue(request, "properties"), "purpose").enum,
+		).toEqual(["LOGIN", "REGISTER"]);
+
+		const response = documentedSchema("FusionAuthTokenResponse");
+		const properties = objectValue(response, "properties");
+		expect(objectValue(properties, "authToken")).toMatchObject({
+			readOnly: true,
+			"x-sensitive": "short-lived-fusion-auth-token",
+		});
+		expect(objectValue(properties, "schemeCode")).toMatchObject({
+			readOnly: true,
+			"x-sensitive": "fusion-scheme-code",
+		});
+
+		const success = dereference(
+			objectValue(
+				pathOperation("/v1/auth/phone/fusion-token", "post"),
+				"responses",
+			)["201"],
+		);
+		if (!isObject(success)) throw new Error("Invalid fusion-token response");
+		expect(
+			objectValue(objectValue(success, "headers"), "Cache-Control"),
+		).toEqual({
+			required: true,
+			schema: { type: "string", const: "no-store" },
+		});
 	});
 
 	it("keeps location lookup in the JSON body and provider-neutral on the public wire", () => {

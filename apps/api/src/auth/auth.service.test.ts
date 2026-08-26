@@ -17,11 +17,15 @@ import type {
 } from "./providers/external-identity.provider.js";
 import { ExternalIdentityUnavailableError } from "./providers/external-identity.provider.js";
 import {
+	type FusionAuthProvider,
+	FusionAuthUnavailableError,
+} from "./providers/fusion-auth.provider.js";
+import {
 	type OtpDeliveryProvider,
 	OtpDeliveryUnavailableError,
 } from "./providers/otp-delivery.provider.js";
 
-function enabledConfig() {
+function enabledConfig(overrides: Record<string, string> = {}) {
 	const hashKey = Buffer.alloc(32, 11).toString("base64");
 	const otpPepper = Buffer.alloc(32, 13).toString("base64");
 	const exportKey = Buffer.alloc(32, 12).toString("base64");
@@ -63,6 +67,7 @@ function enabledConfig() {
 		DATA_EXPORT_LOCATOR_KEYS_JSON: JSON.stringify({
 			"locator-v1": exportKey,
 		}),
+		...overrides,
 	});
 }
 
@@ -78,6 +83,13 @@ function fakeRepository(
 		finalizeOtpDelivery: unavailable,
 		findOtpProof: unavailable,
 		findRegistrationFlow: unavailable,
+		createFusionFlow: unavailable,
+		findFusionProof: unavailable,
+		claimFusionVerifyToken: unavailable,
+		findVerifiedFusionProof: unavailable,
+		completeFusionVerification: unavailable,
+		completeFusionLogin: unavailable,
+		completeFusionRegistration: unavailable,
 		createOAuthState: unavailable,
 		findOAuthProof: unavailable,
 		authenticateAccess: unavailable,
@@ -102,6 +114,15 @@ const emailProvider: OtpDeliveryProvider = {
 	channel: "EMAIL",
 	async send() {
 		throw new OtpDeliveryUnavailableError("DISABLED");
+	},
+};
+
+const fusionProvider: FusionAuthProvider = {
+	async issueToken() {
+		throw new FusionAuthUnavailableError("DISABLED");
+	},
+	async verifyToken() {
+		throw new FusionAuthUnavailableError("DISABLED");
 	},
 };
 
@@ -131,14 +152,16 @@ function service(
 	providers = identityProviders(),
 	email: OtpDeliveryProvider = emailProvider,
 	exportArtifactReader: ExportArtifactReader = new UnavailableExportArtifactReader(),
+	fusion: FusionAuthProvider = fusionProvider,
+	config = enabledConfig(),
 ) {
-	const config = enabledConfig();
 	return {
 		service: new AuthService(
 			config,
 			repository,
 			phone,
 			email,
+			fusion,
 			providers.wechat,
 			providers.qq,
 			new DatabaseAuthenticatedUserResolver(config, repository),
@@ -146,6 +169,38 @@ function service(
 		),
 		...providers,
 	};
+}
+
+function fusionEnabledConfig() {
+	const flowHashKey = Buffer.alloc(32, 11).toString("base64");
+	const stableDedupKey = Buffer.alloc(32, 14).toString("base64");
+	return enabledConfig({
+		FUSION_AUTH_ENABLED: "true",
+		AUTH_HASH_KEYS_JSON: JSON.stringify({
+			v1: flowHashKey,
+			"stable-dedup-v1": stableDedupKey,
+		}),
+		AUTH_IDENTITY_DEDUP_KEY_VERSION: "stable-dedup-v1",
+		ALIYUN_FUSION_SCHEME_CODE: "100001",
+		ALIYUN_FUSION_PACKAGE_NAME: "com.chishenme.app",
+		ALIYUN_FUSION_PACKAGE_SIGN: "a".repeat(32),
+	});
+}
+
+function fusionService(
+	repository: AuthRepository,
+	fusion: FusionAuthProvider,
+	providers = identityProviders(),
+) {
+	return service(
+		repository,
+		phoneProvider(),
+		providers,
+		emailProvider,
+		new UnavailableExportArtifactReader(),
+		fusion,
+		fusionEnabledConfig(),
+	);
 }
 
 const installationId = "2af305ae-82a1-4f87-86b7-1c97c4a8683f";
@@ -175,6 +230,318 @@ function authenticatedRepository(
 }
 
 describe("AuthService core workflows", () => {
+	it("issues a server-pinned fusion token for LOGIN or REGISTER without persisting it", async () => {
+		const drafts: unknown[] = [];
+		const repository = fakeRepository({
+			createFusionFlow: async (draft) => {
+				drafts.push(draft);
+				return true;
+			},
+		});
+		const issueToken = vi.fn(async () => ({
+			authToken: "FusionAuthToken_1234567890",
+		}));
+		const fusion: FusionAuthProvider = {
+			issueToken,
+			verifyToken: vi.fn(),
+		};
+		const app = fusionService(repository, fusion).service;
+
+		for (const purpose of ["LOGIN", "REGISTER"] as const) {
+			const response = await app.requestFusionToken(
+				{ purpose, installationId },
+				"203.0.113.7",
+			);
+			expect(response.schemeCode).toBe("100001");
+			expect(response.authToken).toBe("FusionAuthToken_1234567890");
+		}
+		expect(issueToken).toHaveBeenCalledTimes(2);
+		expect(drafts).toHaveLength(2);
+		expect(drafts[0]).toMatchObject({
+			purpose: "LOGIN",
+			registrationFlowReferenceHash: null,
+		});
+		expect(drafts[1]).toMatchObject({ purpose: "REGISTER" });
+		const persisted = JSON.stringify(drafts);
+		expect(persisted).not.toContain("FusionAuthToken_1234567890");
+		expect(persisted).not.toContain(installationId);
+		expect(persisted).not.toContain("203.0.113.7");
+	});
+
+	it("verifies a REGISTER flow into a short-lived masked proof", async () => {
+		const proofExpiresAt = new Date(Date.now() + 4 * 60_000);
+		const pending = {
+			id: challengeId,
+			purpose: "REGISTER" as const,
+			registrationFlowReferenceHash: "d".repeat(64),
+			deviceHash: "e".repeat(64),
+			hashKeyVersion: "v1",
+			expiresAt: new Date(Date.now() + 10 * 60_000),
+		};
+		const completeFusionVerification = vi.fn(async (completion) => {
+			if (completion.verifiedPhone === null) {
+				throw new Error("test expected a verified fusion phone");
+			}
+			return {
+				kind: "SUCCESS" as const,
+				proof: {
+					...pending,
+					expiresAt: proofExpiresAt,
+					verifiedAt: new Date(),
+					verifiedPhone: completion.verifiedPhone,
+				},
+			};
+		});
+		const repository = fakeRepository({
+			findFusionProof: async () => pending,
+			claimFusionVerifyToken: async () => true,
+			completeFusionVerification,
+		});
+		const verifyToken = vi.fn(async () => ({
+			e164PhoneNumber: "+8613800138000",
+		}));
+		const response = await fusionService(repository, {
+			issueToken: vi.fn(),
+			verifyToken,
+		}).service.verifyFusionPhone({
+			flowId: challengeId,
+			verifyToken: "FusionVerifyToken_1234567890",
+			installationId,
+		});
+
+		expect(response).toEqual({
+			proofId: challengeId,
+			expiresAt: proofExpiresAt.toISOString(),
+		});
+		expect(JSON.stringify(completeFusionVerification.mock.calls)).not.toContain(
+			"+8613800138000",
+		);
+		expect(JSON.stringify(completeFusionVerification.mock.calls)).not.toContain(
+			"FusionVerifyToken_1234567890",
+		);
+		expect(completeFusionVerification).toHaveBeenCalledWith(
+			expect.objectContaining({
+				verifyTokenHash: expect.objectContaining({
+					keyVersion: "stable-dedup-v1",
+				}),
+			}),
+		);
+	});
+
+	it("logs in an existing bound phone with a one-time fusion proof", async () => {
+		const pending = {
+			id: challengeId,
+			purpose: "LOGIN" as const,
+			registrationFlowReferenceHash: null,
+			deviceHash: "e".repeat(64),
+			hashKeyVersion: "v1",
+			expiresAt: new Date(Date.now() + 10 * 60_000),
+		};
+		const completeFusionLogin = vi.fn(async (completion) => ({
+			kind: "SUCCESS" as const,
+			userId: "5bf405ae-82a1-4f87-86b7-1c97c4a8683f",
+			sessionId: completion.session?.sessionId ?? challengeId,
+		}));
+		const repository = fakeRepository({
+			findFusionProof: async () => pending,
+			claimFusionVerifyToken: async () => true,
+			completeFusionLogin,
+		});
+		const response = await fusionService(repository, {
+			issueToken: vi.fn(),
+			verifyToken: vi.fn(async () => ({
+				e164PhoneNumber: "+8613800138000",
+			})),
+		}).service.login(
+			{
+				method: "PHONE_FUSION",
+				flowId: challengeId,
+				verifyToken: "FusionVerifyToken_1234567890",
+				device,
+			},
+			"203.0.113.17",
+		);
+
+		expect(response.accessToken).toHaveLength(43);
+		expect(completeFusionLogin).toHaveBeenCalledWith(
+			expect.objectContaining({
+				proof: pending,
+				verifiedPhone: expect.objectContaining({
+					maskedPhone: "+86138****8000",
+				}),
+			}),
+		);
+		expect(JSON.stringify(completeFusionLogin.mock.calls)).not.toContain(
+			"FusionVerifyToken_1234567890",
+		);
+		expect(JSON.stringify(completeFusionLogin.mock.calls)).not.toContain(
+			"+8613800138000",
+		);
+	});
+
+	it("rejects a replay claim before calling the fusion provider", async () => {
+		const pending = {
+			id: challengeId,
+			purpose: "LOGIN" as const,
+			registrationFlowReferenceHash: null,
+			deviceHash: "e".repeat(64),
+			hashKeyVersion: "v1",
+			expiresAt: new Date(Date.now() + 10 * 60_000),
+		};
+		const verifyToken = vi.fn();
+		const claimFusionVerifyToken = vi.fn(async () => false);
+		const repository = fakeRepository({
+			findFusionProof: async () => pending,
+			claimFusionVerifyToken,
+		});
+
+		await expect(
+			fusionService(repository, {
+				issueToken: vi.fn(),
+				verifyToken,
+			}).service.login(
+				{
+					method: "PHONE_FUSION",
+					flowId: challengeId,
+					verifyToken: "FusionVerifyToken_replayed",
+					device,
+				},
+				"203.0.113.17",
+			),
+		).rejects.toMatchObject({ status: 401 });
+		expect(verifyToken).not.toHaveBeenCalled();
+		expect(claimFusionVerifyToken).toHaveBeenCalledWith(
+			pending,
+			expect.arrayContaining([
+				expect.objectContaining({ keyVersion: "v1" }),
+				expect.objectContaining({ keyVersion: "stable-dedup-v1" }),
+			]),
+			expect.objectContaining({ keyVersion: "stable-dedup-v1" }),
+		);
+	});
+
+	it("claims every current and retiring key version for a maximum-sized VerifyToken", async () => {
+		const pending = {
+			id: challengeId,
+			purpose: "LOGIN" as const,
+			registrationFlowReferenceHash: null,
+			deviceHash: "e".repeat(64),
+			hashKeyVersion: "v1",
+			expiresAt: new Date(Date.now() + 10 * 60_000),
+		};
+		const claimFusionVerifyToken = vi.fn(async () => false);
+		const repository = fakeRepository({
+			findFusionProof: async () => pending,
+			claimFusionVerifyToken,
+		});
+
+		await expect(
+			fusionService(repository, {
+				issueToken: vi.fn(),
+				verifyToken: vi.fn(),
+			}).service.login(
+				{
+					method: "PHONE_FUSION",
+					flowId: challengeId,
+					verifyToken: "T".repeat(4_096),
+					device,
+				},
+				"203.0.113.17",
+			),
+		).rejects.toMatchObject({ status: 401 });
+		const candidates = claimFusionVerifyToken.mock.calls[0]?.[1] ?? [];
+		expect(candidates.map((candidate) => candidate.keyVersion).sort()).toEqual([
+			"stable-dedup-v1",
+			"v1",
+		]);
+		expect(new Set(candidates.map((candidate) => candidate.value)).size).toBe(2);
+	});
+
+	it("consumes a claimed flow after provider rejection without leaking details", async () => {
+		const pending = {
+			id: challengeId,
+			purpose: "LOGIN" as const,
+			registrationFlowReferenceHash: null,
+			deviceHash: "e".repeat(64),
+			hashKeyVersion: "v1",
+			expiresAt: new Date(Date.now() + 10 * 60_000),
+		};
+		const claimFusionVerifyToken = vi.fn(async () => true);
+		const completeFusionLogin = vi.fn(async () => ({
+			kind: "INVALID_CREDENTIALS" as const,
+		}));
+		const verifyToken = vi.fn(async () => {
+			throw new FusionAuthUnavailableError("UPSTREAM_REJECTED");
+		});
+		const repository = fakeRepository({
+			findFusionProof: async () => pending,
+			claimFusionVerifyToken,
+			completeFusionLogin,
+		});
+
+		const attempt = fusionService(repository, {
+			issueToken: vi.fn(),
+			verifyToken,
+		}).service.login(
+			{
+				method: "PHONE_FUSION",
+				flowId: challengeId,
+				verifyToken: "FusionVerifyToken_rejected",
+				device,
+			},
+			"203.0.113.17",
+		);
+		await expect(attempt).rejects.toMatchObject({ status: 401 });
+		expect(completeFusionLogin).toHaveBeenCalledWith({
+			proof: pending,
+			verifyTokenHash: expect.objectContaining({
+				keyVersion: "stable-dedup-v1",
+			}),
+			verifiedPhone: null,
+			session: null,
+		});
+		expect(claimFusionVerifyToken.mock.invocationCallOrder[0]).toBeLessThan(
+			verifyToken.mock.invocationCallOrder[0] as number,
+		);
+		expect(verifyToken.mock.invocationCallOrder[0]).toBeLessThan(
+			completeFusionLogin.mock.invocationCallOrder[0] as number,
+		);
+		expect(JSON.stringify(completeFusionLogin.mock.calls)).not.toContain(
+			"FusionVerifyToken_rejected",
+		);
+	});
+
+	it("fails closed when fusion is disabled even if a registration proof remains", async () => {
+		const findVerifiedFusionProof = vi.fn();
+		const repository = fakeRepository({ findVerifiedFusionProof });
+		const app = service(repository).service;
+
+		await expect(
+			app.createOAuthState(
+				{
+					provider: "WECHAT",
+					purpose: "REGISTER",
+					installationId,
+					phoneProofId: challengeId,
+				},
+				null,
+				"203.0.113.18",
+			),
+		).rejects.toMatchObject({ status: 503 });
+		await expect(
+			app.registerWithFusion(
+				{
+					phoneProofId: challengeId,
+					wechatOAuthState: oauthState,
+					wechatAuthorizationCode: "WechatCode123456",
+					device,
+				},
+				"203.0.113.18",
+			),
+		).rejects.toMatchObject({ status: 503 });
+		expect(findVerifiedFusionProof).not.toHaveBeenCalled();
+	});
+
 	it("copies the server registration flow and device hash into WeChat state", async () => {
 		let inserted: OAuthStateDraft | null = null;
 		const repository = fakeRepository({
@@ -208,6 +575,55 @@ describe("AuthService core workflows", () => {
 			deviceHash: "b".repeat(64),
 		});
 		expect(JSON.stringify(inserted)).not.toContain(response.state);
+	});
+
+	it("creates a WeChat REGISTER state from a live fusion phone proof", async () => {
+		let inserted: OAuthStateDraft | null = null;
+		const repository = fakeRepository({
+			findVerifiedFusionProof: async () => ({
+				id: challengeId,
+				purpose: "REGISTER",
+				registrationFlowReferenceHash: "a".repeat(64),
+				deviceHash: "b".repeat(64),
+				hashKeyVersion: "v1",
+				expiresAt: new Date(Date.now() + 5 * 60_000),
+				verifiedAt: new Date(),
+				verifiedPhone: {
+					lookup: { value: "c".repeat(64), keyVersion: "v1" },
+					dedup: {
+						value: "d".repeat(64),
+						keyVersion: "stable-dedup-v1",
+					},
+					maskedPhone: "+86138****8000",
+					verifyTokenHash: {
+						value: "e".repeat(64),
+						keyVersion: "stable-dedup-v1",
+					},
+				},
+			}),
+			createOAuthState: async (draft) => {
+				inserted = draft;
+				return { kind: "CREATED" };
+			},
+		});
+		const response = await fusionService(repository, fusionProvider).service.createOAuthState(
+			{
+				provider: "WECHAT",
+				purpose: "REGISTER",
+				installationId,
+				phoneProofId: challengeId,
+			},
+			null,
+			"203.0.113.8",
+		);
+
+		expect(response.state).toHaveLength(43);
+		expect(inserted).toMatchObject({
+			provider: "WECHAT",
+			purpose: "REGISTER",
+			flowReferenceHash: "a".repeat(64),
+			deviceHash: "b".repeat(64),
+		});
 	});
 
 	it("uses a stable HMAC IP scope for login state without storing the raw IP", async () => {
@@ -387,6 +803,69 @@ describe("AuthService core workflows", () => {
 			expect(publicResponse).not.toContain(privateProof);
 			expect(persistenceCall).not.toContain(privateProof);
 		}
+	});
+
+	it("registers only after matching fusion-phone and WeChat proofs", async () => {
+		const phoneProof = {
+			id: challengeId,
+			purpose: "REGISTER" as const,
+			registrationFlowReferenceHash: "d".repeat(64),
+			deviceHash: "e".repeat(64),
+			hashKeyVersion: "v1",
+			expiresAt: new Date(Date.now() + 5 * 60_000),
+			verifiedAt: new Date(),
+			verifiedPhone: {
+				lookup: { value: "1".repeat(64), keyVersion: "v1" },
+				dedup: {
+					value: "2".repeat(64),
+					keyVersion: "stable-dedup-v1",
+				},
+				maskedPhone: "+86138****8000",
+				verifyTokenHash: {
+					value: "3".repeat(64),
+					keyVersion: "stable-dedup-v1",
+				},
+			},
+		};
+		const oauthProof = {
+			id: "4bf405ae-82a1-4f87-86b7-1c97c4a8683f",
+			provider: "WECHAT" as const,
+			purpose: "REGISTER" as const,
+			flowReferenceHash: phoneProof.registrationFlowReferenceHash,
+			operationTargetHash: null,
+			targetUserId: null,
+			deviceHash: phoneProof.deviceHash,
+			hashKeyVersion: "v1",
+		};
+		const completeFusionRegistration = vi.fn(async (completion) => ({
+			kind: "SUCCESS" as const,
+			userId: "5bf405ae-82a1-4f87-86b7-1c97c4a8683f",
+			sessionId: completion.session.sessionId,
+		}));
+		const repository = fakeRepository({
+			findVerifiedFusionProof: async () => phoneProof,
+			findOAuthProof: async () => oauthProof,
+			completeFusionRegistration,
+		});
+		const authorizationCode = "WechatCode123456";
+		const response = await fusionService(repository, fusionProvider).service.registerWithFusion(
+			{
+				phoneProofId: challengeId,
+				wechatOAuthState: oauthState,
+				wechatAuthorizationCode: authorizationCode,
+				device,
+			},
+			"203.0.113.12",
+		);
+
+		expect(response.accessToken).toHaveLength(43);
+		expect(completeFusionRegistration).toHaveBeenCalledWith(
+			expect.objectContaining({ phoneProof, oauthProof }),
+		);
+		const persisted = JSON.stringify(completeFusionRegistration.mock.calls);
+		expect(persisted).not.toContain(authorizationCode);
+		expect(persisted).not.toContain(oauthState);
+		expect(persisted).not.toContain("+8613800138000");
 	});
 
 	it.each(["PHONE", "EMAIL"] as const)(

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	AccountExportResponseSchema,
 	AccountExportStatusResponseSchema,
+	AuthCapabilitiesSchema,
 	AuthTokenResponseSchema,
 	BindIdentityRequestSchema,
 	CONTRACT_VERSION_HEADER,
@@ -12,6 +13,10 @@ import {
 	FavoriteMutationRequestSchema,
 	FavoriteRecordSchema,
 	FeatureConfigSchema,
+	FusionAuthTokenRequestSchema,
+	FusionAuthTokenResponseSchema,
+	FusionAuthVerifyRequestSchema,
+	FusionAuthVerifyResponseSchema,
 	IdentityBindingSchema,
 	LatestAccountExportResponseSchema,
 	ListFavoritesQuerySchema,
@@ -33,6 +38,7 @@ import {
 	RecommendationEventSchema,
 	RecommendationHistoryItemSchema,
 	RecommendationResultSchema,
+	RegisterFusionWechatRequestSchema,
 	RegisterPhoneWechatRequestSchema,
 	SupportFeedbackCategorySchema,
 	SupportFeedbackRequestSchema,
@@ -771,10 +777,16 @@ describe("Account contracts", () => {
 		expect(registrationShape).not.toMatch(/EMAIL|QQ|email|accessToken|openId/u);
 	});
 
-	it("accepts PHONE/WECHAT and already-bound EMAIL/QQ login shapes", () => {
+	it("accepts PHONE/fusion/WECHAT and already-bound EMAIL/QQ login shapes", () => {
 		const requests = [
 			{ method: "PHONE", challengeId, otpCode: "123456", device },
 			{ method: "EMAIL", challengeId, otpCode: "123456", device },
+			{
+				method: "PHONE_FUSION",
+				flowId: challengeId,
+				verifyToken: "FusionVerifyToken_1234567890",
+				device,
+			},
 			{
 				method: "WECHAT",
 				oauthState: state,
@@ -791,6 +803,143 @@ describe("Account contracts", () => {
 		for (const request of requests) {
 			expect(LoginRequestSchema.safeParse(request).success).toBe(true);
 		}
+	});
+
+	it("keeps fusion provider configuration server-owned for login and registration proofs", () => {
+		expect(
+			FusionAuthTokenRequestSchema.safeParse({
+				purpose: "LOGIN",
+				installationId,
+			}).success,
+		).toBe(true);
+		expect(
+			FusionAuthTokenRequestSchema.safeParse({
+				purpose: "REGISTER",
+				installationId,
+			}).success,
+		).toBe(true);
+
+		for (const forbidden of [
+			{ schemeCode: "scheme-1" },
+			{ packageName: "com.example.app" },
+			{ packageSign: "0".repeat(32) },
+			{ durationSeconds: 900 },
+			{ phoneNumber: "+8613800138000" },
+		]) {
+			expect(
+				FusionAuthTokenRequestSchema.safeParse({
+					purpose: "LOGIN",
+					installationId,
+					...forbidden,
+				}).success,
+			).toBe(false);
+		}
+
+		expect(
+			FusionAuthTokenResponseSchema.safeParse({
+				flowId: challengeId,
+				schemeCode: "fusion_scheme_1",
+				authToken: "FusionAuthToken_1234567890",
+				expiresAt: "2026-08-26T03:00:00.000Z",
+			}).success,
+		).toBe(true);
+		expect(
+			FusionAuthTokenResponseSchema.safeParse({
+				flowId: challengeId,
+				schemeCode: "invalid scheme",
+				authToken: "FusionAuthToken_1234567890",
+				expiresAt: "2026-08-26T03:00:00.000Z",
+			}).success,
+		).toBe(false);
+	});
+
+	it("accepts a short-lived registration proof and requires WeChat for account creation", () => {
+		const verifyRequest = {
+			flowId: challengeId,
+			verifyToken: "FusionVerifyToken_1234567890",
+			installationId,
+		};
+		expect(FusionAuthVerifyRequestSchema.safeParse(verifyRequest).success).toBe(
+			true,
+		);
+		expect(
+			FusionAuthVerifyResponseSchema.safeParse({
+				proofId: challengeId,
+				expiresAt: "2026-08-26T03:00:00.000Z",
+			}).success,
+		).toBe(true);
+		expect(
+			FusionAuthVerifyResponseSchema.safeParse({
+				proofId: challengeId,
+				maskedPhone: "+86138****8000",
+				expiresAt: "2026-08-26T03:00:00.000Z",
+			}).success,
+		).toBe(false);
+		expect(
+			RegisterFusionWechatRequestSchema.safeParse({
+				phoneProofId: challengeId,
+				wechatOAuthState: state,
+				wechatAuthorizationCode: "WechatCode123456",
+				device,
+			}).success,
+		).toBe(true);
+		expect(
+			RegisterFusionWechatRequestSchema.safeParse({
+				phoneProofId: challengeId,
+				device,
+			}).success,
+		).toBe(false);
+	});
+
+	it("bounds fusion verification credentials and rejects undeclared fields", () => {
+		const request = {
+			method: "PHONE_FUSION" as const,
+			flowId: challengeId,
+			verifyToken: "FusionVerifyToken_1234567890",
+			device,
+		};
+		expect(LoginRequestSchema.safeParse(request).success).toBe(true);
+		expect(
+			LoginRequestSchema.safeParse({ ...request, schemeCode: "client-owned" })
+				.success,
+		).toBe(false);
+		expect(
+			LoginRequestSchema.safeParse({ ...request, verifyToken: "x" }).success,
+		).toBe(true);
+		expect(
+			LoginRequestSchema.safeParse({ ...request, verifyToken: "" }).success,
+		).toBe(false);
+		expect(
+			LoginRequestSchema.safeParse({
+				...request,
+				verifyToken: `valid-prefix-${String.fromCharCode(0)}-invalid`,
+			}).success,
+		).toBe(false);
+		expect(
+			LoginRequestSchema.safeParse({
+				...request,
+				verifyToken: "A".repeat(4_097),
+			}).success,
+		).toBe(false);
+	});
+
+	it("fails fusion capability closed when older responses omit it", () => {
+		const capabilities = {
+			accountsEnabled: true,
+			registrationEnabled: true,
+			phoneEnabled: true,
+			wechatEnabled: true,
+			emailEnabled: false,
+			qqEnabled: false,
+			dataExportEnabled: false,
+		};
+		expect(AuthCapabilitiesSchema.parse(capabilities).fusionEnabled).toBe(false);
+		expect(
+			AuthCapabilitiesSchema.parse({
+				...capabilities,
+				fusionEnabled: true,
+			}).fusionEnabled,
+		).toBe(true);
 	});
 
 	it("exposes only the Android 1.0 identity-purpose matrix", () => {
@@ -831,6 +980,15 @@ describe("Account contracts", () => {
 					purpose: "REGISTER",
 					installationId,
 					phoneChallengeId: challengeId,
+				},
+				true,
+			],
+			[
+				{
+					provider: "WECHAT",
+					purpose: "REGISTER",
+					installationId,
+					phoneProofId: challengeId,
 				},
 				true,
 			],
@@ -929,6 +1087,15 @@ describe("Account contracts", () => {
 				installationId,
 				phoneChallengeId: challengeId,
 				extra: true,
+			}).success,
+		).toBe(false);
+		expect(
+			OAuthStateRequestSchema.safeParse({
+				provider: "WECHAT",
+				purpose: "REGISTER",
+				installationId,
+				phoneChallengeId: challengeId,
+				phoneProofId: challengeId,
 			}).success,
 		).toBe(false);
 		expect(

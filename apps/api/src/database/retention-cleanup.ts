@@ -12,6 +12,7 @@ export const RETENTION_POLICY_CODES = Object.freeze([
 	"ACCOUNT_DELETION_TOMBSTONE_30D",
 	"OTP_24H",
 	"OAUTH_STATE_24H",
+	"FUSION_AUTH_24H",
 	"ACCESS_TOKEN_24H_AFTER_EXPIRY",
 	"SESSION_FAMILY_30D_AFTER_EXPIRY",
 	"INACTIVE_EXTERNAL_REFERENCES",
@@ -86,7 +87,10 @@ export async function runRetentionCleanupWithClient(
 				`SELECT policy_code, affected_count::text FROM public.${functionName}()
 				 UNION ALL
 				 SELECT policy_code, affected_count::text
-				 FROM public.${execute ? "execute_persistence_retention_cleanup" : "preview_persistence_retention_cleanup"}()`,
+				 FROM public.${execute ? "execute_persistence_retention_cleanup" : "preview_persistence_retention_cleanup"}()
+				 UNION ALL
+				 SELECT policy_code, affected_count::text
+				 FROM public.${execute ? "execute_fusion_auth_retention_cleanup" : "preview_fusion_auth_retention_cleanup"}()`,
 			);
 			const counts = parsePolicyRows(result.rows);
 			let guestIpHashesDestroyed: number | null = null;

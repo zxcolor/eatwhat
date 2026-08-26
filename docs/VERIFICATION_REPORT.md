@@ -1,11 +1,13 @@
 # 验证报告
 
-验证日期：2026-08-22（模拟器历史验收）；2026-08-23（完整自动化、ECS 正式切换、真实高德与公网 HTTPS 验收）；2026-08-24（云端 Debug 默认与独立 Fixture 构建门禁）
+验证日期：2026-08-22（模拟器历史验收）；2026-08-23（完整自动化、ECS 正式切换、真实高德与公网 HTTPS 验收）；2026-08-24（云端 Debug 默认与独立 Fixture 构建门禁）；2026-08-26（固定 Alpha signer、Fusion 工程全量自动化与显式 SDK 构建验证）
 
 本报告记录当前仓库快照的本机自动化、Android 模拟器、ECS 回环与公网 HTTPS 验证。它不是公开发布批准，也不能替代供应商商业授权、Release 签名、法务审查、关闭 Wi-Fi 真机矩阵或 Alpha/Beta 指标。
 
 ## 本轮结论
 
+- 当前 Fusion 工程快照已完整执行 `.\scripts\verify.ps1 -AlphaApiBaseUrl 'https://api.unfinished-era.com/'` 并全绿：共享契约 71 / 71、API 82 个文件 708 / 708、API runtime smoke、lint/typecheck/生产构建、ECS 无 Secret bundle、Android buildSrc、普通 no-Fusion Debug/Fixture/FixtureTest/Release/Alpha、App JVM、lint、签名、端点、权限、APK 与 Secret 门禁全部通过。另以 `-PCHISHENME_REQUIRE_FUSION_SDK=true` 显式构建三 AAR Fusion Alpha，`verifyFusionAlphaPackage` 的 Manifest、ABI、R8、签名与打包门禁通过。自动化不等于真实 ECS/RAM/IMDSv2、阿里云正式方案与全局策略、真实 PostgreSQL `0010` 迁移或 ARM64 + 中国大陆 SIM 真机验收，因此 Fusion 仍未部署、未开放且不具备发布条件。
+- 2026-08-26 已将内部 Alpha 身份固定为包名 `com.chishenme.app.alpha`、证书 MD5 `7c64a4f134a3ebe121c1fb055c09a70c`、SHA-256 `31f21374f2f5d40697efb3c50e14d4e8d228991f6acbcde262e37c72ae4c0289`。私钥和密码位于仓库外；Gradle 从默认 `%LOCALAPPDATA%\ChiShenMe\signing\alpha-signing.properties` 或四项 `CHISHENME_ALPHA_*` 环境变量读取，缺失、部分配置、错误 alias、过期或摘要不匹配都会拒绝构建，且不再回退到 Debug signer。完整门禁要求 Debug/Fixture/FixtureTest 同证书、Alpha 与其不同并精确匹配固定证书；GitHub CI 无 Alpha 私钥，只验证缺少固定签名时失败且不生成 `app-alpha.apk`。本轮完整验证生成的默认 no-Fusion 固定 signer Alpha APK 为 2,501,571 bytes，SHA-256 为 `429F499B34FEBD7982787DBD694C794026D10548D3194DE124291E937B0BF795`。本轮未执行设备安装验收。
 - 2026-08-24 完整执行 `.\scripts\verify.ps1 -AlphaApiBaseUrl 'https://api.unfinished-era.com/'` 全绿。普通 Debug 默认并经门禁确认只连接与 Alpha 相同的公网 HTTPS API；确定性 AndroidTest 改为独立 Fixture build type，固定回环地址并输出到独立路径。Node lint/typecheck/test/build、ECS bundle、buildSrc、Debug JVM/Lint、Debug/Fixture/FixtureTest/Alpha 构建、端点隔离、运行时类、Manifest、v2 signer、16 KiB zipalign 和服务端 Secret 扫描全部通过。
 - 2026-08-23 决策专注版最终一次 `.\scripts\verify.ps1 -AlphaApiBaseUrl 'https://api.unfinished-era.com/'` 全绿：Node 共享契约 66 / 66、API 78 个文件 667 / 667，类型检查、生产构建与代码规范检查全部通过；Android buildSrc 为 2 个测试套件、8 项测试，App JVM 为 72 个测试套件、327 项测试，失败 / 错误 / 跳过均为 0。
 - Debug 与 Alpha 已统一使用当前云端 API，但客户端包名、可调试性、压缩和分发资格保持隔离；不存在第二套 Debug 服务端。门禁证明 `https://api.unfinished-era.com/` 同时进入 Debug/Alpha `BuildConfig` 与 DEX，且二者不含本机回环或服务端高德、SMTP、数据库、OAuth Secret。Fixture 单独证明只含 `http://127.0.0.1:3001/`，其 localhost 明文白名单不进入普通 Debug。DNS、TLS、HTTP 跳转、readiness、真实搜索/推荐和管理端点 404 仍由独立公网验收覆盖。
@@ -20,7 +22,7 @@
 - 账号公开矩阵固定为 PHONE REGISTER/LOGIN、EMAIL LOGIN/BIND、WECHAT REGISTER/LOGIN、QQ LOGIN/BIND；账号设备内夹具 1 / 1 通过，严格观察 15 个 API v1 请求，完成手机号登录、邮箱绑定、两次身份/会话读取、两次退出和邮箱登录；微信/QQ AppID 缺失时没有 OAuth 动作或请求，访问/刷新令牌不显示在界面。该证据不等于真实短信、邮箱、微信或 QQ 联调。
 - 邮箱验证码已从阿里云 DirectMail 迁移到供应商无关的标准 SMTP；阿里云只保留短信用途。SMTP 启动连接校验、TLS/STARTTLS、固定纯文本验证码、收件人精确匹配、禁用附件和安全错误收敛均进入自动化回归；真实发件地址能否投递仍待所选邮箱服务商实测。
 - 本地启动脚本已修复 Windows 同时发现多个 `pnpm.cmd` 路径时的数组拼接问题，并收紧为最小子进程环境：构建阶段不继承运行时 Secret，API 运行阶段只接收明确白名单配置，已通过 Windows PowerShell 5.1 参数、离线 wrapper 和 Secret 隔离验证。
-- 统一门禁新增仓库与 APK Secret 扫描：私钥文件模式被 Git/Docker 忽略，Android 源码和三份 APK 的 DEX 均不得出现服务端 Key、SMTP 密码字段或高置信度私钥/AccessKey 模式；本轮检查通过，未发现真实凭据入库或进入 APK。
+- 统一门禁新增仓库与 APK Secret 扫描：私钥文件模式被 Git/Docker 忽略，Android 源码和四份 APK 的 DEX 均不得出现服务端 Key、SMTP 密码字段或高置信度私钥/AccessKey 模式；本轮检查通过，未发现真实凭据入库或进入 APK。
 - 本轮全国版 Alpha 以全新安装方式覆盖旧 `0.1.0`：设备确认 `versionCode=2`、`versionName=0.1.1-alpha01-internal`，定位权限仍为拒绝；手动搜索 `Shanghai People Square` 获得上海 `AMAP/LIVE` 地点，选中“朋友AA酒店(上海人民广场店)”后完成决策，返回 3 条推荐，主推荐为“小栖村(黄浦店)”。稳定截图为 `artifacts/emulator/nationwide-result.png`，未出现地域限制、最低版本错误或分享入口。
 - 直接餐厅搜索模块移除后，`0.1.2-alpha01-internal`（`versionCode=3`）已在 `emulator-5556` 全新安装。UI 语义确认搜索卡片/入口为 0，“手动选择”和“帮我决定”均存在；选择内置“北京电子科技学院”后公网 API 返回 3 条真实高德推荐且无错误。定位权限仍为拒绝。首页与结果证据分别为 `artifacts/emulator/android1-decision-only-home.png`、`artifacts/emulator/android1-decision-only-result.png`。
 
@@ -30,17 +32,17 @@
 
 | 范围 | 当前结果 |
 |---|---:|
-| 共享契约 | 66 / 66 通过 |
-| API | 78 个文件、667 / 667 通过 |
+| 共享契约 | 71 / 71 通过 |
+| API | 82 个文件、708 / 708 通过 |
+| API runtime smoke | 通过 |
 | `pnpm typecheck` | 通过 |
-| `pnpm build` | contracts、NestJS API、Next.js Admin 全部通过 |
 | `pnpm lint` | 通过 |
 
-这些结果覆盖仓库当前的请求/响应契约、API 领域与安全边界、账号和数据导出代码路径，但不代表外部供应商、真实 PostgreSQL/OSS 或生产网络已经联调成功。
+这些结果连同 `pnpm build` 和完整 `scripts/verify.ps1` 覆盖当前 Fusion 快照的请求/响应契约、API 领域与安全边界、运行时冒烟、静态检查和可重复构建；它们仍不代表阿里云供应商、真实 PostgreSQL/OSS、ECS RAM/IMDSv2 或生产网络已经联调成功。
 
 ### Android
 
-本轮通过仓库统一验证脚本完整执行 buildSrc/JVM 测试、Lint、云端 Debug、Fixture/Fixture AndroidTest、Alpha 构建、R8/资源压缩和 APK 完整性检查：
+以下 Android 表格和命令属于 2026-08-26 当前 Fusion 快照的本机完整自动化结果；默认构建保持 no-Fusion，显式三 AAR Fusion Alpha 由单独的 `verifyFusionAlphaPackage` 覆盖：
 
 ```powershell
 .\scripts\verify.ps1 -AlphaApiBaseUrl 'https://api.unfinished-era.com/'
@@ -49,19 +51,20 @@
 | 范围 | 当前结果 |
 |---|---:|
 | buildSrc 测试 | 2 个测试套件、8 项测试 |
-| App JVM 测试 | 72 个测试套件、327 项测试 |
+| App JVM 测试 | 77 个测试套件、347 项测试 |
 | JVM 失败 / 错误 / 跳过 | 0 / 0 / 0 |
 | `lintDebug` | 通过 |
 | `assembleDebug` | 通过 |
 | `assembleFixture` | 通过 |
 | `assembleFixtureAndroidTest` | 通过 |
 | `assembleAlpha` | 通过 |
+| `verifyFusionAlphaPackage`（显式三 AAR） | 通过 |
 | Debug/Fixture/Alpha 端点隔离、签名、16 KiB 对齐与 Secret 扫描 | 通过 |
-| Alpha R8 / 资源压缩 / `lintVital` / 包名 / DEX 门禁 | 通过 |
+| no-Fusion/Fusion Alpha Manifest、权限、ABI、R8、资源压缩、`lintVital`、包名与 DEX 门禁 | 通过 |
 
 账号相关回归验证了公开用途/方式矩阵 PHONE REGISTER/LOGIN、EMAIL LOGIN/BIND、WECHAT REGISTER/LOGIN、QQ LOGIN/BIND，并验证隐私撤回会先同步阻断登录持久化、使旧 attempt/session 失效，再做尽力而为的 SDK/服务端清理；撤回前发起但之后才到达的 SDK 或网络回调不能写入 token 或恢复账号状态。设备内合成 API 闭环另完成手机号登录、邮箱绑定、退出、邮箱登录和再次退出；账号能力或平台凭证未配置时保持 fail closed。这些自动化证据不等同于真实短信、邮箱、微信或 QQ 联调。
 
-本轮 JVM 测试覆盖进程级单调最低版本门禁、首次配置不可用 guest 规则 lease、两个旧新 ViewModel 的乱序配置响应、可信配置代际与在途请求撤销、结果会话失效、强制更新后的 503 粘滞锁定，以及可信兼容恢复时清除旧 `transientMessage` / `formError`。地点选择器草稿/加载/结果与推荐详情的跨配置重建状态有 ViewModel 和 Activity 两层回归，敏感结果、坐标和 token 不进入 SavedState。Android 1.0 的直接餐厅关键词搜索产品模块已移除，后续回归只验证入口、路由、client 和请求均不可达；服务端独立接口的验证不作为 Android 能力证据。分享卡的渲染、FileProvider、租约、清理与测试代码只作为封存实现继续编译和执行非发布回归；Android 1.0 没有分享入口，全部 provider 返回 `share=false`，不存在远程开关，分享设备测试也不再构成 1.0 能力证据或发布门禁。Android 单元测试没有依赖真实第三方账号、地图应用或外部 POI。
+本轮 JVM 测试覆盖进程级单调最低版本门禁、首次配置不可用 guest 规则 lease、两个旧新 ViewModel 的乱序配置响应、可信配置代际与在途请求撤销、结果会话失效、强制更新后的 503 粘滞锁定，以及可信兼容恢复时清除旧 `transientMessage` / `formError`。Fusion 回归另覆盖 Activity 可见性计数、进入后台立即取消、一次性证明清除、迟到回调拒绝、ViewModel busy 收口与重新发起；敏感 verify token、手机号和证明不进入 SavedState、磁盘或日志。地点选择器草稿/加载/结果与推荐详情的跨配置重建状态有 ViewModel 和 Activity 两层回归，敏感结果、坐标和 token 不进入 SavedState。Android 1.0 的直接餐厅关键词搜索产品模块已移除，后续回归只验证入口、路由、client 和请求均不可达；服务端独立接口的验证不作为 Android 能力证据。分享卡的渲染、FileProvider、租约、清理与测试代码只作为封存实现继续编译和执行非发布回归；Android 1.0 没有分享入口，全部 provider 返回 `share=false`，不存在远程开关，分享设备测试也不再构成 1.0 能力证据或发布门禁。Android 单元测试没有依赖真实第三方账号、地图应用或外部 POI。
 
 高德回归覆盖 HTTP/业务状态分类、缺失或异常响应的安全降级、诊断信息脱敏、live-smoke 双门禁和离线 wrapper；普通 `start-api-local.ps1` 启动路径与 `AMAP_LIVE_SMOKE_ENABLED` 隔离。Android 合成展示夹具直接验证 AMAP/LIVE 展示、`fitScore=null`、供应商顺序、动作关闭与 WGS84 请求。ECS 真实网络 smoke 已另行证明 Key、数字签名、IP 白名单、`v5/place/text`/周边推荐技术链路和公网 API 可达，但不证明商业授权、配额容量、长期稳定性或全部真实餐厅字段已经完成验收。
 
@@ -220,16 +223,18 @@ DATA_RIGHTS_MODE=LIVE_DISPLAY_ONLY
 
 ## Android 工件
 
+下表为 2026-08-26 当前 Fusion 快照完整 `verify.ps1` 生成的默认 no-Fusion 工件；显式 Fusion Alpha 只用于工程门禁，未作为可分发工件保留：
+
 | 工件 | 路径 | 大小 | SHA-256 |
 |---|---|---:|---|
-| 云端 Debug APK | `apps/android/app/build/outputs/apk/debug/app-debug.apk` | 13,863,669 bytes | `1D49F921BE59CA87EA82A30F59803431159915260219BC26E66AE092361A1805` |
-| 隔离 Fixture APK | `apps/android/app/build/outputs/apk/fixture/app-fixture.apk` | 13,009,183 bytes | `B4769F82428AD11EF1C6462C521A431F59BD96317F18110C129967EEAD4E7B2D` |
+| 云端 Debug APK | `apps/android/app/build/outputs/apk/debug/app-debug.apk` | 14,671,848 bytes | `8424B72852599273C0CB691BCDF2F3F30D7F7645685424469E1994D2EDE0C5A1` |
+| 隔离 Fixture APK | `apps/android/app/build/outputs/apk/fixture/app-fixture.apk` | 13,882,953 bytes | `E1B699B6DF185FFB54268D9D748F2DF32C9F2A412B0A0DC8B5E8665B55C33157` |
 | Fixture AndroidTest APK | `apps/android/app/build/outputs/apk/androidTest/fixture/app-fixture-androidTest.apk` | 1,118,046 bytes | `6F9F0D36BD605C4D6FFB328ABFB52F5EA00A43DD9D578BF0087315F2EE7EB522` |
-| 内部 Alpha APK | `apps/android/app/build/outputs/apk/alpha/app-alpha.apk` | 2,145,887 bytes | `DD7257BCE3098DD658D30A8E7D6EAFECB980D627CCCB9C3B516BF7B32DCCEC07` |
+| 内部 Alpha APK（Fusion 默认关闭） | `apps/android/app/build/outputs/apk/alpha/app-alpha.apk` | 2,501,571 bytes | `429F499B34FEBD7982787DBD694C794026D10548D3194DE124291E937B0BF795` |
 
-普通 Debug 与内部 Alpha 均嵌入当前可达的公网 HTTPS API 基址；Debug 可调试，Alpha 启用 R8/资源压缩且不可调试，但两者仍使用 Debug signer，均不能作为公开 Release。Fixture/FixtureTest 固定回环地址并只供自动化测试，禁止分发；安装 Fixture 会因 applicationId 相同而替换设备上的云端 Debug。公网可达不能替代独立 Release 签名和生产配置生成的正式发布包。
+普通 Debug 与内部 Alpha 均嵌入当前公网 HTTPS API 基址；Debug 可调试，Alpha 启用 R8/资源压缩且不可调试，并只接受固定长期 Alpha 证书。Fixture/FixtureTest 固定回环地址且只供自动化测试，禁止分发；安装 Fixture 会因 applicationId 相同而替换设备上的云端 Debug。Release 仍须使用 `com.chishenme.app` 对应的另一套独立签名，构建通过也不能替代公网、供应商和真机验收。
 
-Alpha 混淆阶段仍会输出来自固定微信 OpenSDK 6.8.40 外部字节码的 stack-map 警告；当前 R8、资源压缩、`lintVital`、签名和 APK 完整性门禁均通过。该上游 SDK 警告不等于本轮构建失败，但在升级 SDK 或 Android Gradle Plugin 时必须重新审计，不能长期无条件忽略。
+Alpha 混淆阶段仍会输出来自固定微信 OpenSDK 6.8.40 外部字节码的 stack-map 警告；显式 Fusion Alpha 还会输出友盟外部字节码的同类警告。当前 R8、资源压缩、`lintVital`、签名和 APK 完整性门禁均通过。该上游 SDK 警告不等于本轮构建失败，但在升级 SDK 或 Android Gradle Plugin 时必须重新审计，不能长期无条件忽略。
 
 ## ECS 基础运行时检查点
 
@@ -238,7 +243,7 @@ Alpha 混淆阶段仍会输出来自固定微信 OpenSDK 6.8.40 外部字节码�
 - 数据库切换前备份 `/opt/chi-shen-me/backups/postgres/20260823T072519Z` 已由 `verify-database-backup.sh` 重新计算 SHA-256 并对比实时 `pg_restore` 清单。该证据仍只是同机备份校验，不等于异机副本或恢复演练完成。
 - 当前 `AMAP_ENABLED=true`；真实 Web Service Key、数字签名私钥和 ECS 出口 IP 白名单仅存在于服务器 root-only Secret，未进入镜像、bundle、APK或报告。
 - `api.unfinished-era.com` 已启用独立证书和 vhost，API vhost SHA-256 为 `15a0ce4679ade503faac4481f19e6b647f1bc4218e545c18c3f2fe81d1e4adf6`；主站 vhost SHA-256 保持 `215a48d7e2c5e43493e89f6ed27f6fa304e7b6b9782a1c72cab3420476b0888e`。原 WordPress 文件、宝塔数据库、证书和恢复点均保留。
-- 封闭邀请制 Alpha 的云端技术链路为 Go；Android 1.0 公开发布仍为 No-Go。下一检查点是关闭 Wi-Fi 外部真机、真实登录供应商、授权/备案、正式签名和发布质量矩阵。
+- 既有全国版 Alpha 的高德、公网 HTTPS 部署证据形成于当前 Fusion 改动之前，只证明当时的推荐云链路；固定 signer、默认 no-Fusion 工件与显式 Fusion Alpha 构建门禁已在当前快照重新验证，但仍不覆盖 Fusion 服务端部署、SDK 真机或数据库迁移。当前 Fusion 保持未开放，Android 1.0 公开发布仍为 No-Go。
 
 ## 公开发布 No-Go
 
@@ -247,7 +252,7 @@ Alpha 混淆阶段仍会输出来自固定微信 OpenSDK 6.8.40 外部字节码�
 1. **高德授权与规模化验收**：Web Service Key、匹配数字签名、固定出口 IP 白名单、`AMAP_ENABLED=true`、`ALLOW_DEMO_DATA=false` 和北京、上海真实搜索/推荐技术 smoke 已通过；仍需以实际运营主体确认技术服务/商业使用许可及逐项书面授权，并完成配额、长期错误降级、营业状态/电话/路线字段和规模化场景验收。
 2. **完整云基础设施与数据权利链路**：ECS 自托管 PostgreSQL 17/PostGIS 3.5 的基础迁移、实际角色和 API 启动已通过，但 GitHub PostGIS 完整负例矩阵、ECS RAM 最小权限与 IMDSv2、RDS/OSS、导出 worker、密钥覆盖、完整性校验、永久 tombstone、保留期 execute、账号注销阻断及异机备份恢复仍未验收。基础健康检查不能替代这些真实联调。
 3. **Release 签名与发布材料**：公网 HTTPS API 已完成；仍需配置独立 Release keystore 和离线备份，重新生成并校验正式 APK/AAB，并完成 App 备案、商标/名称核查、用户协议、隐私政策、第三方 SDK 清单、位置 PIA、算法/等保判断、应用商店素材与审核材料。
-4. **真实账号与个人权利链路**：在正式阿里云短信、所选 SMTP 邮件服务商、微信、QQ 资质及真实数据库/对象存储上，严格按 PHONE REGISTER/LOGIN、EMAIL LOGIN/BIND、WECHAT REGISTER/LOGIN、QQ LOGIN/BIND 验收，并覆盖隐私撤回后的迟到回调拒绝、令牌撤销、导出、清除和注销；Android 1.0 不验收或开放手机号/微信绑定及账号恢复。当前默认 capability 为 `false`，只证明关闭路径、契约矩阵和客户端门控正确。
+4. **真实账号与个人权利链路**：在正式阿里云短信、融合认证、所选 SMTP 邮件服务商、微信、QQ 资质及真实数据库/对象存储上，严格按 PHONE REGISTER/LOGIN、PHONE_FUSION LOGIN、FUSION + WECHAT REGISTER、EMAIL LOGIN/BIND、WECHAT REGISTER/LOGIN、QQ LOGIN/BIND 验收，并覆盖 Fusion 的 ECS RAM/IMDSv2、方案/包名/签名、全局策略、短信/图形降级、三个 AAR 的 ARM64 + 中国大陆 SIM 真机、真实 PostgreSQL `0010` 迁移/权限/回滚/排空，以及隐私撤回后的迟到回调拒绝、令牌撤销、导出、清除和注销；Android 1.0 不验收或开放手机号/微信绑定及账号恢复。当前默认 capability 为 `false`，只证明关闭路径、契约矩阵和客户端门控正确。
 5. **发布质量门槛**：完成 API 26–36 与主流厂商真机矩阵、至少 200 个黄金场景、50–100 人 Beta、稳定性/ANR/性能/成本指标和发布负责人版本化 Go/No-Go 签署。
 
 在以上门禁关闭前，准确状态是“封闭 Alpha 工件可用，真实高德服务端与公网 HTTPS 技术链路已通过”，而不是“外部真机矩阵已通过”“商业授权和备案已完成”或“Android 1.0 已获准公开发布”。

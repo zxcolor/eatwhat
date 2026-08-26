@@ -11,6 +11,10 @@ import type {
 	DeleteAccountResponse,
 	EmailCodeChallengeResponse,
 	EmailRequestCode,
+	FusionAuthTokenRequest,
+	FusionAuthTokenResponse,
+	FusionAuthVerifyRequest,
+	FusionAuthVerifyResponse,
 	IdentityBinding,
 	IdentityBindingsResponse,
 	LatestAccountExportResponse,
@@ -22,6 +26,7 @@ import type {
 	PhoneRequestCode,
 	RefreshRequest,
 	RegisterPhoneWechatRequest,
+	RegisterFusionWechatRequest,
 	RevokeSessionResponse,
 	SessionsResponse,
 	UnbindIdentityResponse,
@@ -61,6 +66,7 @@ import {
 } from "./auth-errors.js";
 import {
 	EMAIL_OTP_PROVIDER,
+	FUSION_AUTH_PROVIDER,
 	PHONE_OTP_PROVIDER,
 	QQ_IDENTITY_PROVIDER,
 	WECHAT_IDENTITY_PROVIDER,
@@ -69,6 +75,7 @@ import type {
 	OAuthProof,
 	OtpProof,
 	SessionIssueDraft,
+	VerifiedFusionPhoneHashes,
 	VerifiedOAuthHashes,
 } from "./auth-workflow.types.js";
 import {
@@ -90,10 +97,14 @@ import {
 	type OtpDeliveryProvider,
 	OtpDeliveryUnavailableError,
 } from "./providers/otp-delivery.provider.js";
+import {
+	type FusionAuthProvider,
+	FusionAuthUnavailableError,
+} from "./providers/fusion-auth.provider.js";
 
 interface ReadyAuthSecrets {
 	readonly hashKeyRing: AuthSecretKeyRing;
-	readonly otpPepperRing: AuthSecretKeyRing;
+	readonly otpPepperRing: AuthSecretKeyRing | null;
 	readonly identityDedupKeyVersion: string;
 }
 
@@ -122,6 +133,8 @@ export class AuthService {
 		private readonly phoneOtpProvider: OtpDeliveryProvider,
 		@Inject(EMAIL_OTP_PROVIDER)
 		private readonly emailOtpProvider: OtpDeliveryProvider,
+		@Inject(FUSION_AUTH_PROVIDER)
+		private readonly fusionAuthProvider: FusionAuthProvider,
 		@Inject(WECHAT_IDENTITY_PROVIDER)
 		private readonly wechatIdentityProvider: WechatIdentityProvider,
 		@Inject(QQ_IDENTITY_PROVIDER)
@@ -167,6 +180,120 @@ export class AuthService {
 		return Object.freeze({ ...challenge, targetType: "EMAIL" as const });
 	}
 
+	async requestFusionToken(
+		input: FusionAuthTokenRequest,
+		clientIp: string,
+	): Promise<FusionAuthTokenResponse> {
+		const secrets = this.readySecrets();
+		const fusion = this.config.auth.fusion;
+		if (!fusion.enabled || fusion.schemeCode === null) {
+			throw new AuthUnavailableException();
+		}
+		let authToken: string;
+		try {
+			authToken = (await this.fusionAuthProvider.issueToken()).authToken;
+		} catch {
+			throw new AuthUnavailableException();
+		}
+		const createdAt = new Date();
+		const expiresAt = new Date(createdAt.getTime() + fusion.tokenTtlMs);
+		const hashKeyVersion = secrets.hashKeyRing.activeVersion;
+		const flowId = randomUUID();
+		const created = await this.repositoryCall(() =>
+			this.repository.createFusionFlow({
+				id: flowId,
+				purpose: input.purpose,
+				registrationFlowReferenceHash:
+					input.purpose === "REGISTER"
+						? hashSensitiveRateLimitValue(
+								"flow-reference",
+								generateOAuthState(),
+								secrets.hashKeyRing,
+								hashKeyVersion,
+							).value
+						: null,
+				requestIpHash: hashSensitiveRateLimitValue(
+					"ip",
+					clientIp,
+					secrets.hashKeyRing,
+					hashKeyVersion,
+				).value,
+				deviceHash: hashSensitiveRateLimitValue(
+					"device",
+					input.installationId,
+					secrets.hashKeyRing,
+					hashKeyVersion,
+				).value,
+				hashKeyVersion,
+				createdAt,
+				expiresAt,
+				retainUntil: new Date(createdAt.getTime() + 24 * 60 * 60_000),
+			}),
+		);
+		if (!created) throw new AuthUnavailableException();
+		return Object.freeze({
+			flowId,
+			schemeCode: fusion.schemeCode,
+			authToken,
+			expiresAt: expiresAt.toISOString(),
+		});
+	}
+
+	async verifyFusionPhone(
+		input: FusionAuthVerifyRequest,
+	): Promise<FusionAuthVerifyResponse> {
+		const secrets = this.readySecrets();
+		if (!this.config.auth.fusion.enabled) {
+			throw new AuthUnavailableException();
+		}
+		const proof = await this.repositoryCall(() =>
+			this.repository.findFusionProof(
+				input.flowId,
+				"REGISTER",
+				deviceHashValues(input.installationId, secrets.hashKeyRing),
+			),
+		);
+		if (proof === null) {
+			throw new AuthUnauthorizedException("INVALID_CREDENTIALS");
+		}
+		const verifiedPhone = await this.verifyFusionToken(
+			input.verifyToken,
+			proof.hashKeyVersion,
+			secrets,
+			async (verifyTokenHashes, primaryVerifyTokenHash) =>
+				this.repositoryCall(() =>
+					this.repository.claimFusionVerifyToken(
+						proof,
+						verifyTokenHashes,
+						primaryVerifyTokenHash,
+					),
+				),
+			async (verifyTokenHash) => {
+				await this.repositoryCall(() =>
+					this.repository.completeFusionVerification({
+						proof,
+						verifyTokenHash,
+						verifiedPhone: null,
+					}),
+				);
+			},
+		);
+		const result = await this.repositoryCall(() =>
+			this.repository.completeFusionVerification({
+				proof,
+				verifyTokenHash: verifiedPhone.verifyTokenHash,
+				verifiedPhone,
+			}),
+		);
+		if (result.kind !== "SUCCESS") {
+			throw new AuthUnauthorizedException("INVALID_CREDENTIALS");
+		}
+		return Object.freeze({
+			proofId: result.proof.id,
+			expiresAt: result.proof.expiresAt.toISOString(),
+		});
+	}
+
 	async createOAuthState(
 		input: OAuthStateRequest,
 		bearer: string | null,
@@ -177,6 +304,13 @@ export class AuthService {
 			input.purpose !== "BIND" &&
 			((input.provider === "WECHAT" && !this.config.auth.wechat.enabled) ||
 				(input.provider === "QQ" && !this.config.auth.qq.enabled))
+		) {
+			throw new AuthUnavailableException();
+		}
+		if (
+			input.purpose === "REGISTER" &&
+			"phoneProofId" in input &&
+			(!this.config.auth.fusion.enabled || !this.config.auth.wechat.enabled)
 		) {
 			throw new AuthUnavailableException();
 		}
@@ -192,12 +326,20 @@ export class AuthService {
 		let targetUserId: string | null = null;
 		let operationTargetHash: string | null = null;
 		if (input.purpose === "REGISTER") {
-			const flow = await this.repositoryCall(() =>
-				this.repository.findRegistrationFlow(
-					input.phoneChallengeId,
-					deviceCandidates,
-				),
-			);
+			const flow =
+				"phoneProofId" in input
+					? await this.repositoryCall(() =>
+							this.repository.findVerifiedFusionProof(
+								input.phoneProofId,
+								deviceCandidates,
+							),
+						)
+					: await this.repositoryCall(() =>
+							this.repository.findRegistrationFlow(
+								input.phoneChallengeId,
+								deviceCandidates,
+							),
+						);
 			if (flow === null)
 				throw new AuthUnauthorizedException("INVALID_CREDENTIALS");
 			hashKeyVersion = flow.hashKeyVersion;
@@ -323,7 +465,7 @@ export class AuthService {
 			input.phoneOtpCode,
 			otpProof.codeHash,
 			otpProof.codeHashKeyVersion,
-			secrets.otpPepperRing,
+			this.readyOtpPepper(secrets),
 		);
 		if (!otpValid) {
 			await this.repositoryCall(() =>
@@ -361,6 +503,69 @@ export class AuthService {
 		return this.tokenResponse(result, issued);
 	}
 
+	async registerWithFusion(
+		input: RegisterFusionWechatRequest,
+		clientIp: string,
+	): Promise<AuthTokenResponse> {
+		const secrets = this.readySecrets();
+		if (
+			!this.config.auth.fusion.enabled ||
+			!this.config.auth.wechat.enabled
+		) {
+			throw new AuthUnavailableException();
+		}
+		assertDeviceLabel(input.device.label);
+		const deviceCandidates = deviceHashValues(
+			input.device.installationId,
+			secrets.hashKeyRing,
+		);
+		const phoneProof = await this.repositoryCall(() =>
+			this.repository.findVerifiedFusionProof(
+				input.phoneProofId,
+				deviceCandidates,
+			),
+		);
+		const oauthProof = await this.repositoryCall(() =>
+			this.repository.findOAuthProof(
+				hashCandidates(
+					"oauth-state",
+					input.wechatOAuthState,
+					secrets.hashKeyRing,
+				),
+				"WECHAT",
+				"REGISTER",
+				deviceCandidates,
+			),
+		);
+		if (
+			phoneProof === null ||
+			oauthProof === null ||
+			phoneProof.registrationFlowReferenceHash !==
+				oauthProof.flowReferenceHash ||
+			phoneProof.deviceHash !== oauthProof.deviceHash
+		) {
+			throw new AuthUnauthorizedException("INVALID_CREDENTIALS");
+		}
+		const verified = await this.verifyWechat(input.wechatAuthorizationCode);
+		const issued = this.issueSession(
+			input.device,
+			clientIp,
+			phoneProof.hashKeyVersion,
+			secrets.hashKeyRing,
+			phoneProof.deviceHash,
+		);
+		const result = await this.repositoryCall(() =>
+			this.repository.completeFusionRegistration({
+				newUserId: randomUUID(),
+				phoneProof,
+				oauthProof,
+				verifiedWechatIdentity: this.identityHashes(verified, secrets),
+				session: issued.draft,
+			}),
+		);
+		return this.tokenResponse(result, issued);
+	}
+
 	async login(
 		input: LoginRequest,
 		clientIp: string,
@@ -369,6 +574,9 @@ export class AuthService {
 		assertDeviceLabel(input.device.label);
 		if (input.method === "PHONE" || input.method === "EMAIL") {
 			return this.loginWithOtp(input, clientIp, secrets);
+		}
+		if (input.method === "PHONE_FUSION") {
+			return this.loginWithFusion(input, clientIp, secrets);
 		}
 		return this.loginWithOAuth(input, clientIp, secrets);
 	}
@@ -474,7 +682,7 @@ export class AuthService {
 				input.otpCode,
 				proof.codeHash,
 				proof.codeHashKeyVersion,
-				secrets.otpPepperRing,
+				this.readyOtpPepper(secrets),
 			);
 			const result = await this.repositoryCall(() =>
 				this.repository.completeOtpBinding({
@@ -855,7 +1063,7 @@ export class AuthService {
 
 		const code = generateSixDigitOtp();
 		const idempotencyKey = generateOAuthState();
-		const codeHash = await hashOtpCode(code, secrets.otpPepperRing);
+		const codeHash = await hashOtpCode(code, this.readyOtpPepper(secrets));
 		const createdAt = new Date();
 		const expiresAt = new Date(createdAt.getTime() + this.config.auth.otpTtlMs);
 		const resendAvailableAt = new Date(
@@ -992,7 +1200,7 @@ export class AuthService {
 			input.otpCode,
 			proof.codeHash,
 			proof.codeHashKeyVersion,
-			secrets.otpPepperRing,
+			this.readyOtpPepper(secrets),
 		);
 		const issued = valid
 			? this.issueSession(
@@ -1012,6 +1220,65 @@ export class AuthService {
 		);
 		if (issued === null)
 			throw new AuthUnauthorizedException("INVALID_CREDENTIALS");
+		return this.tokenResponse(result, issued);
+	}
+
+	private async loginWithFusion(
+		input: Extract<LoginRequest, { method: "PHONE_FUSION" }>,
+		clientIp: string,
+		secrets: ReadyAuthSecrets,
+	): Promise<AuthTokenResponse> {
+		if (!this.config.auth.fusion.enabled) {
+			throw new AuthUnavailableException();
+		}
+		const proof = await this.repositoryCall(() =>
+			this.repository.findFusionProof(
+				input.flowId,
+				"LOGIN",
+				deviceHashValues(input.device.installationId, secrets.hashKeyRing),
+			),
+		);
+		if (proof === null) {
+			throw new AuthUnauthorizedException("INVALID_CREDENTIALS");
+		}
+		const verifiedPhone = await this.verifyFusionToken(
+			input.verifyToken,
+			proof.hashKeyVersion,
+			secrets,
+			async (verifyTokenHashes, primaryVerifyTokenHash) =>
+				this.repositoryCall(() =>
+					this.repository.claimFusionVerifyToken(
+						proof,
+						verifyTokenHashes,
+						primaryVerifyTokenHash,
+					),
+				),
+			async (verifyTokenHash) => {
+				await this.repositoryCall(() =>
+					this.repository.completeFusionLogin({
+						proof,
+						verifyTokenHash,
+						verifiedPhone: null,
+						session: null,
+					}),
+				);
+			},
+		);
+		const issued = this.issueSession(
+			input.device,
+			clientIp,
+			proof.hashKeyVersion,
+			secrets.hashKeyRing,
+			proof.deviceHash,
+		);
+		const result = await this.repositoryCall(() =>
+			this.repository.completeFusionLogin({
+				proof,
+				verifyTokenHash: verifiedPhone.verifyTokenHash,
+				verifiedPhone,
+				session: issued.draft,
+			}),
+		);
 		return this.tokenResponse(result, issued);
 	}
 
@@ -1054,6 +1321,64 @@ export class AuthService {
 			}),
 		);
 		return this.tokenResponse(result, issued);
+	}
+
+	private async verifyFusionToken(
+		verifyToken: string,
+		hashKeyVersion: string,
+		secrets: ReadyAuthSecrets,
+		claimVerifyToken: (
+			verifyTokenHashes: readonly VersionedHash[],
+			primaryVerifyTokenHash: VersionedHash,
+		) => Promise<boolean>,
+		recordInvalidAttempt: (verifyTokenHash: VersionedHash) => Promise<void>,
+	): Promise<VerifiedFusionPhoneHashes> {
+		const verifyTokenHashes = secrets.hashKeyRing.versions().map((version) =>
+			hashSensitiveRateLimitValue(
+				"fusion-verify-token",
+				verifyToken,
+				secrets.hashKeyRing,
+				version,
+			),
+		);
+		const verifyTokenHash = verifyTokenHashes.find(
+			(candidate) => candidate.keyVersion === secrets.identityDedupKeyVersion,
+		);
+		if (verifyTokenHash === undefined) throw new AuthUnavailableException();
+		if (!(await claimVerifyToken(verifyTokenHashes, verifyTokenHash))) {
+			throw new AuthUnauthorizedException("INVALID_CREDENTIALS");
+		}
+		try {
+			const verified = await this.fusionAuthProvider.verifyToken(verifyToken);
+			return Object.freeze({
+				lookup: hashIdentityLookup(
+					"PHONE",
+					"e164",
+					verified.e164PhoneNumber,
+					secrets.hashKeyRing,
+					hashKeyVersion,
+				),
+				dedup: hashIdentityLookup(
+					"PHONE",
+					"e164",
+					verified.e164PhoneNumber,
+					secrets.hashKeyRing,
+					secrets.identityDedupKeyVersion,
+				),
+				maskedPhone: maskPhone(verified.e164PhoneNumber),
+				verifyTokenHash,
+			});
+		} catch (error) {
+			await recordInvalidAttempt(verifyTokenHash);
+			if (
+				error instanceof FusionAuthUnavailableError &&
+				(error.reason === "INVALID_PROOF" ||
+					error.reason === "UPSTREAM_REJECTED")
+			) {
+				throw new AuthUnauthorizedException("INVALID_CREDENTIALS");
+			}
+			throw new AuthUnavailableException();
+		}
 	}
 
 	private issueSession(
@@ -1267,7 +1592,6 @@ export class AuthService {
 			!this.config.auth.enabled ||
 			!this.repository.isAvailable() ||
 			this.config.auth.hashKeyRing === null ||
-			this.config.auth.otpPepperRing === null ||
 			this.config.auth.identityDedupKeyVersion === null
 		) {
 			throw new AuthUnavailableException();
@@ -1277,6 +1601,13 @@ export class AuthService {
 			otpPepperRing: this.config.auth.otpPepperRing,
 			identityDedupKeyVersion: this.config.auth.identityDedupKeyVersion,
 		});
+	}
+
+	private readyOtpPepper(secrets: ReadyAuthSecrets): AuthSecretKeyRing {
+		if (secrets.otpPepperRing === null) {
+			throw new AuthUnavailableException();
+		}
+		return secrets.otpPepperRing;
 	}
 
 	private async repositoryCall<T>(operation: () => Promise<T>): Promise<T> {

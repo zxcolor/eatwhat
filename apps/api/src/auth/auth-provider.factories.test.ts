@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { loadAppConfig } from "../config/app-config.js";
 import {
 	createEmailOtpProvider,
+	createFusionAuthProvider,
 	createPhoneOtpProvider,
 } from "./auth-provider.factories.js";
 import { UnavailableOtpDeliveryProvider } from "./providers/unavailable-otp.provider.js";
@@ -62,6 +63,23 @@ describe("account provider startup factories", () => {
 		});
 		expect(() => createEmailOtpProvider(config, undefined)).toThrow(
 			"账号邮件供应商客户端未配置",
+		);
+	});
+
+	it("fails startup when enabled fusion authentication has no official client", () => {
+		const environment = enabledConfigEnvironment();
+		delete environment.PHONE_AUTH_ENABLED;
+		delete environment.AUTH_OTP_PEPPER_ACTIVE_VERSION;
+		delete environment.AUTH_OTP_PEPPER_KEYS_JSON;
+		const config = loadAppConfig({
+			...environment,
+			FUSION_AUTH_ENABLED: "true",
+			ALIYUN_FUSION_SCHEME_CODE: "scheme_100001",
+			ALIYUN_FUSION_PACKAGE_NAME: "com.chishenme.app",
+			ALIYUN_FUSION_PACKAGE_SIGN: "a".repeat(32),
+		});
+		expect(() => createFusionAuthProvider(config, undefined)).toThrow(
+			"账号融合认证供应商客户端未配置",
 		);
 	});
 });

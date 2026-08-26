@@ -34,6 +34,14 @@ Intent 门禁；餐厅供应商适配、推荐过滤/排序、账号事务、数
 微信/QQ AppID。服务端在完成受批准的多 AppID、OAuth state 与 providerScope 绑定设计前，
 Debug 的微信/QQ入口必须继续 fail closed，不能信任客户端环境头选择 Secret。
 
+内部 Alpha 的客户端身份固定为 `com.chishenme.app.alpha` 和长期证书（MD5
+`7c64a4f134a3ebe121c1fb055c09a70c`，SHA-256
+`31f21374f2f5d40697efb3c50e14d4e8d228991f6acbcde262e37c72ae4c0289`）。私钥与密码只存在于
+仓库外的本机签名配置；仓库只保留公开证书摘要。构建门禁要求 Debug/Fixture/FixtureTest
+共用测试证书、Alpha 使用与其不同且完全匹配固定摘要的证书，缺失或错误签名时拒绝生成
+Alpha APK。最终 Release 的 `com.chishenme.app` 继续使用另行生成、备份和登记的独立证书，
+不能借用 Alpha signer。
+
 公网 API 子域必须使用独立 DNS、证书和 API Nginx vhost，只把 `/health`、
 `/health/ready`、`/v1` 与 `/v1/*` 代理到宿主机回环 `127.0.0.1:13001`；Compose 不得
 直接占用宿主机 `80/443`。
@@ -143,8 +151,9 @@ API Schema 校验 -> 全国坐标、半径和用户约束校验
   ```
 
   该命令验证公网 HTTPS 地址策略，并确认指定地址进入 Alpha `BuildConfig` 和 APK
-  DEX；它不发起 DNS/TLS/公网访问，不能替代独立子域切流、`/health/ready` 公网
-  smoke 或关闭 Wi-Fi 的真机闭环。
+  DEX；同时核对固定 Alpha signer 的单 signer/v2、公开 MD5/SHA-256、与 Debug 测试
+  证书隔离及 16 KiB 对齐。它不发起 DNS/TLS/公网访问，不能替代独立子域切流、
+  `/health/ready` 公网 smoke 或关闭 Wi-Fi 的真机闭环。
 
 ## 透明排序
 

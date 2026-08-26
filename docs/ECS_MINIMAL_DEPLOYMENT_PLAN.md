@@ -152,6 +152,11 @@ POSTGRES_VOLUME_NAME=chi-shen-me-alpha_postgres_data
 POSTGIS_IMAGE_ID=sha256:<已校验的 PostGIS 镜像 ID>
 MINIMUM_SUPPORTED_VERSION=0.1.1
 AMAP_ENABLED=true
+ACCOUNTS_ENABLED=false
+PHONE_AUTH_ENABLED=false
+FUSION_AUTH_ENABLED=false
+WECHAT_AUTH_ENABLED=false
+ALIBABA_CLOUD_ECS_METADATA=<最小权限 RAM 实例角色名>
 RETENTION_MODE=--dry-run
 ```
 
@@ -171,10 +176,13 @@ DATABASE_EXPORT_WORKER_ROLE_NAME=data_export_worker
 DATA_RIGHTS_MODE=LIVE_DISPLAY_ONLY
 ALLOW_DEMO_DATA=false
 QWEN_ENABLED=false
-ACCOUNTS_ENABLED=false
+ACCOUNTS_ENABLED=${ACCOUNTS_ENABLED}
+PHONE_AUTH_ENABLED=${PHONE_AUTH_ENABLED}
+FUSION_AUTH_ENABLED=${FUSION_AUTH_ENABLED}
+WECHAT_AUTH_ENABLED=${WECHAT_AUTH_ENABLED}
 ```
 
-`api.env`、`migration.env` 和 `maintenance.env` 分别只保存对应进程需要的 URL、CA 和服务端 Secret。真实值只在 ECS 的 root 管理目录录入，不在本文示例中展开。
+`api.env`、`migration.env` 和 `maintenance.env` 分别只保存对应进程需要的 URL、CA 和服务端 Secret。账号关闭时 `api.env` 仍保持最小数据库/高德字段；账号开启时严格预检才允许按启用通道增加认证哈希、微信、短信或融合认证字段，其他未知字段继续拒绝。真实值只在 ECS 的 root 管理目录录入，不在本文示例中展开。
 
 ## 7. 高德阶段 A 门禁
 
@@ -272,9 +280,22 @@ Key 能返回数据不等于数据使用和商业授权已经完整解决；自�
 
 ## 12. 登录阶段 B
 
-阶段 A 全部通过后，才准备并启用账号。当前代码要求手机号与微信注册链路同时就绪，不能通过只开一个开关伪装完成。邮箱将来只需要标准 SMTP；阿里云在此处只负责手机号短信验证码。
+阶段 A 全部通过后，才准备并启用账号。当前代码要求微信注册链路与至少一条手机
+验证链路同时就绪：`PHONE_AUTH_ENABLED`（短信验证码）或
+`FUSION_AUTH_ENABLED`（融合认证）。不能只开微信或只开手机通道伪装完成。邮箱
+仍只需要标准 SMTP；阿里云短信与融合认证共享 ECS RAM 临时凭据链，但权限按实际
+启用的 API 最小化。
 
-登录阶段还需要：短信签名与模板、ECS RAM 实例角色与 IMDSv2、微信移动应用的 Alpha 包名/签名登记、微信 AppID/AppSecret、认证哈希与 OTP pepper 密钥环，以及 retention worker 的先 dry-run 后 execute 验收。这些凭据均不属于当前基础部署，不得提前写入 APK 或仓库。
+融合认证主链还需要：控制台方案 Code、场景 `100001` 的全局策略、Alpha 包名/签名
+登记、三 AAR 精确哈希、ECS RAM 角色的 `GetFusionAuthToken` /
+`VerifyWithFusionAuthToken` 权限、微信 AppID/AppSecret 和认证哈希密钥环。若同时
+启用短信降级，再补短信签名/模板与 OTP pepper 密钥环。所有私有值只进入
+root-owned `api.env` 或 RAM 临时凭据链，不进入 APK、Git、镜像或 bundle。
+
+`preflight-deployment.sh` 会核对四个账号开关的组合、真实 RAM 角色名、`api.env`
+精确字段集合、Alpha 包名和包签名形状；任一不满足时拒绝启动。首次启用前必须先
+备份数据库、运行 0010 迁移、在候选容器完成融合登录/注册失败关闭 smoke，再由唯一
+激活脚本切换。ARM64 + 中国大陆 SIM 真机闭环仍是独立门禁。
 
 ## 13. 回滚与恢复
 

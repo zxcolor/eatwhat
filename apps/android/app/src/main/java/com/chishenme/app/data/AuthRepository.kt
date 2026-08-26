@@ -9,6 +9,7 @@ import com.chishenme.app.data.remote.AuthDeviceContext
 import com.chishenme.app.data.remote.AuthIdentityBinding
 import com.chishenme.app.data.remote.AuthIdentityBindingsResponse
 import com.chishenme.app.data.remote.AuthIdentityType
+import com.chishenme.app.data.remote.AuthLoginMethod
 import com.chishenme.app.data.remote.AuthLoginRequest
 import com.chishenme.app.data.remote.AuthResponseValidator
 import com.chishenme.app.data.remote.AuthSessionSummary
@@ -18,6 +19,11 @@ import com.chishenme.app.data.remote.BindIdentityRequest
 import com.chishenme.app.data.remote.DeleteAccountRequest
 import com.chishenme.app.data.remote.DeleteAccountResponse
 import com.chishenme.app.data.remote.EmailCodeRequest
+import com.chishenme.app.data.remote.FusionAuthPurpose
+import com.chishenme.app.data.remote.FusionAuthTokenRequest
+import com.chishenme.app.data.remote.FusionAuthTokenResponse
+import com.chishenme.app.data.remote.FusionRegistrationPhoneProof
+import com.chishenme.app.data.remote.FusionRegistrationVerifyRequest
 import com.chishenme.app.data.remote.OAuthPurpose
 import com.chishenme.app.data.remote.OAuthStateRequest
 import com.chishenme.app.data.remote.OAuthStateResponse
@@ -25,6 +31,7 @@ import com.chishenme.app.data.remote.OtpPurpose
 import com.chishenme.app.data.remote.PhoneCodeRequest
 import com.chishenme.app.data.remote.RefreshSessionRequest
 import com.chishenme.app.data.remote.RegisterPhoneWechatRequest
+import com.chishenme.app.data.remote.RegisterFusionWechatRequest
 import com.chishenme.app.data.remote.hasIncompatibleApiContractCause
 import com.chishenme.app.feature.consent.PrivacyAuthorizationGate
 import java.net.SocketTimeoutException
@@ -214,6 +221,27 @@ class AuthRepository @Inject constructor(
         }
     }
 
+    override suspend fun requestFusionToken(
+        purpose: FusionAuthPurpose,
+    ): AuthOutcome<FusionAuthTokenResponse> {
+        if (!privacyAuthorizationGate.isAcceptedFailClosed()) return privacyBlockedFailure()
+        if (privacyIsBlocked()) return privacyBlockedFailure()
+        return remote {
+            val attempt = beginAuthAttempt() ?: throw AuthenticationAttemptInvalidated()
+            val response = api.requestFusionToken(
+                FusionAuthTokenRequest(
+                    purpose = purpose,
+                    installationId = sessionStore.installationId(),
+                ),
+            )
+            if (!isAuthAttemptCurrent(attempt)) throw AuthenticationAttemptInvalidated()
+            if (!AuthResponseValidator.validFusionToken(response, Instant.now())) {
+                throw InvalidAuthResponse()
+            }
+            response
+        }
+    }
+
     override suspend fun requestEmailCode(
         rawEmail: String,
         purpose: OtpPurpose,
@@ -278,10 +306,45 @@ class AuthRepository @Inject constructor(
                     purpose = purpose,
                     installationId = sessionStore.installationId(),
                     phoneChallengeId = phoneChallengeId,
+                    phoneProofId = null,
                 ),
             )
             if (!isAuthAttemptCurrent(attempt)) throw AuthenticationAttemptInvalidated()
             if (!AuthResponseValidator.validOAuthState(response, provider, purpose, Instant.now())) {
+                throw InvalidAuthResponse()
+            }
+            response
+        }
+    }
+
+    override suspend fun createWechatRegistrationStateForFusion(
+        phoneProofId: String,
+    ): AuthOutcome<OAuthStateResponse> {
+        if (!privacyAuthorizationGate.isAcceptedFailClosed()) return privacyBlockedFailure()
+        if (privacyIsBlocked()) return privacyBlockedFailure()
+        if (!AuthResponseValidator.run { phoneProofId.isCanonicalUuid() }) {
+            return invalidInput("融合认证手机号证明格式无效")
+        }
+        return remote {
+            val attempt = beginAuthAttempt() ?: throw AuthenticationAttemptInvalidated()
+            val response = api.createOAuthState(
+                authorization = null,
+                request = OAuthStateRequest(
+                    provider = AuthIdentityType.WECHAT,
+                    purpose = OAuthPurpose.REGISTER,
+                    installationId = sessionStore.installationId(),
+                    phoneChallengeId = null,
+                    phoneProofId = phoneProofId,
+                ),
+            )
+            if (!isAuthAttemptCurrent(attempt)) throw AuthenticationAttemptInvalidated()
+            if (!AuthResponseValidator.validOAuthState(
+                    response,
+                    AuthIdentityType.WECHAT,
+                    OAuthPurpose.REGISTER,
+                    Instant.now(),
+                )
+            ) {
                 throw InvalidAuthResponse()
             }
             response
@@ -310,6 +373,56 @@ class AuthRepository @Inject constructor(
         }
     }
 
+    override suspend fun verifyFusionForRegistration(
+        flowId: String,
+        verifyToken: String,
+    ): AuthOutcome<FusionRegistrationPhoneProof> {
+        if (!AuthResponseValidator.run { flowId.isCanonicalUuid() } ||
+            !verifyToken.matches(FUSION_TOKEN)
+        ) {
+            return invalidInput("手机号一键验证结果格式无效")
+        }
+        if (!privacyAuthorizationGate.isAcceptedFailClosed()) return privacyBlockedFailure()
+        if (privacyIsBlocked()) return privacyBlockedFailure()
+        return remote {
+            val attempt = beginAuthAttempt() ?: throw AuthenticationAttemptInvalidated()
+            val response = api.verifyFusionForRegistration(
+                FusionRegistrationVerifyRequest(
+                    flowId = flowId,
+                    verifyToken = verifyToken,
+                    installationId = sessionStore.installationId(),
+                ),
+            )
+            if (!isAuthAttemptCurrent(attempt)) throw AuthenticationAttemptInvalidated()
+            if (!AuthResponseValidator.validFusionRegistrationProof(response, Instant.now())) {
+                throw InvalidAuthResponse()
+            }
+            response
+        }
+    }
+
+    override suspend fun registerFusionWechat(
+        phoneProofId: String,
+        oauthState: String,
+        authorizationCode: String,
+    ): AuthOutcome<LocalAuthSession> {
+        if (!AuthResponseValidator.run { phoneProofId.isCanonicalUuid() } ||
+            !validOAuthProof(oauthState, authorizationCode)
+        ) {
+            return invalidInput("手机号证明或微信授权结果格式无效")
+        }
+        return authenticate {
+            api.registerFusionWechat(
+                RegisterFusionWechatRequest(
+                    phoneProofId = phoneProofId,
+                    wechatOAuthState = oauthState,
+                    wechatAuthorizationCode = authorizationCode,
+                    device = deviceContext(),
+                ),
+            )
+        }
+    }
+
     override suspend fun loginWithOtp(
         type: AuthIdentityType,
         challengeId: String,
@@ -320,12 +433,38 @@ class AuthRepository @Inject constructor(
         ) {
             return invalidInput("验证码登录参数无效")
         }
+        val method = when (type) {
+            AuthIdentityType.PHONE -> AuthLoginMethod.PHONE
+            AuthIdentityType.EMAIL -> AuthLoginMethod.EMAIL
+            else -> return invalidInput("验证码登录方式无效")
+        }
         return authenticate {
             api.login(
                 AuthLoginRequest(
-                    method = type,
+                    method = method,
                     challengeId = challengeId,
                     otpCode = otpCode,
+                    device = deviceContext(),
+                ),
+            )
+        }
+    }
+
+    override suspend fun loginWithFusion(
+        flowId: String,
+        verifyToken: String,
+    ): AuthOutcome<LocalAuthSession> {
+        if (!AuthResponseValidator.run { flowId.isCanonicalUuid() } ||
+            !verifyToken.matches(FUSION_TOKEN)
+        ) {
+            return invalidInput("手机号一键验证结果格式无效")
+        }
+        return authenticate {
+            api.login(
+                AuthLoginRequest(
+                    method = AuthLoginMethod.PHONE_FUSION,
+                    flowId = flowId,
+                    verifyToken = verifyToken,
                     device = deviceContext(),
                 ),
             )
@@ -340,7 +479,7 @@ class AuthRepository @Inject constructor(
         return authenticate {
             api.login(
                 AuthLoginRequest(
-                    method = AuthIdentityType.WECHAT,
+                    method = AuthLoginMethod.WECHAT,
                     oauthState = oauthState,
                     authorizationCode = authorizationCode,
                     device = deviceContext(),
@@ -362,7 +501,7 @@ class AuthRepository @Inject constructor(
         return authenticate {
             api.login(
                 AuthLoginRequest(
-                    method = AuthIdentityType.QQ,
+                    method = AuthLoginMethod.QQ,
                     oauthState = oauthState,
                     accessToken = qqAccessToken,
                     device = deviceContext(),
@@ -1033,6 +1172,7 @@ class AuthRepository @Inject constructor(
         val OTP = Regex("^\\d{6}$")
         val OPAQUE_TOKEN = Regex("^[A-Za-z0-9_-]{43}$")
         val SAFE_EXTERNAL_CREDENTIAL = Regex("^[A-Za-z0-9._~+/=-]+$")
+		val FUSION_TOKEN = Regex("^[^\\s\\u0000-\\u001F\\u007F]{1,4096}$")
         const val CANCELLED_AUTH_CLEANUP_TIMEOUT_MILLIS = 1_000L
     }
 }

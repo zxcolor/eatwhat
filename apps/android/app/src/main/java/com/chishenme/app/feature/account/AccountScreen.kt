@@ -1,8 +1,10 @@
 package com.chishenme.app.feature.account
 
+import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -52,6 +54,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -61,6 +64,7 @@ import com.chishenme.app.data.remote.AccountExportStatusResponse
 import com.chishenme.app.data.remote.AuthIdentityBinding
 import com.chishenme.app.data.remote.AuthIdentityType
 import com.chishenme.app.data.remote.AuthSessionSummary
+import com.chishenme.app.data.remote.FusionAuthPurpose
 import com.chishenme.app.data.remote.OtpPurpose
 import com.chishenme.app.feature.config.RemoteFeatureConfigState
 import com.chishenme.app.feature.config.configOrNull
@@ -84,6 +88,42 @@ fun AccountScreen(
     var pendingUnbind by remember { mutableStateOf<AuthIdentityBinding?>(null) }
     var pendingRevoke by remember { mutableStateOf<AuthSessionSummary?>(null) }
     val hostActivity = LocalContext.current.findActivity()
+    val context = LocalContext.current
+    var pendingFusionPurpose by remember { mutableStateOf<FusionAuthPurpose?>(null) }
+    val requestPhoneStatePermission = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val purpose = pendingFusionPurpose.also { pendingFusionPurpose = null }
+        val activity = hostActivity
+        if (granted && purpose != null && activity != null) {
+            when (purpose) {
+                FusionAuthPurpose.LOGIN -> viewModel.startFusionLogin(activity)
+                FusionAuthPurpose.REGISTER -> viewModel.startFusionRegistration(activity)
+            }
+        } else if (purpose != null) {
+            viewModel.reportFusionPermissionDenied()
+        }
+    }
+    val launchFusion: (FusionAuthPurpose) -> Unit = { purpose ->
+        val activity = hostActivity
+        if (activity == null) {
+            viewModel.reportFusionPermissionDenied()
+        } else if (
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.READ_PHONE_STATE,
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            when (purpose) {
+                FusionAuthPurpose.LOGIN -> viewModel.startFusionLogin(activity)
+                FusionAuthPurpose.REGISTER -> viewModel.startFusionRegistration(activity)
+            }
+        } else {
+            // Permission is requested only after this explicit user action.
+            pendingFusionPurpose = purpose
+            requestPhoneStatePermission.launch(Manifest.permission.READ_PHONE_STATE)
+        }
+    }
     val createExportDocument = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/json"),
     ) { uri ->
@@ -108,7 +148,10 @@ fun AccountScreen(
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            viewModel.cancelFusionForPageExit()
+        }
     }
 
     LaunchedEffect(state.message) {
@@ -154,6 +197,23 @@ fun AccountScreen(
                 state.status == AccountStatus.GUEST -> {
                     val guestCapabilities = requireNotNull(capabilities)
                     item { GuestNoticeCard() }
+                    if (
+                        guestCapabilities.fusionEnabled &&
+                        state.fusionClientConfigured
+                    ) {
+                        item {
+                            FusionAuthCard(
+                                registrationEnabled =
+                                    guestCapabilities.registrationEnabled &&
+                                        guestCapabilities.wechatEnabled &&
+                                        state.wechatClientConfigured,
+                                hostAvailable = hostActivity != null,
+                                busy = state.busy,
+                                onLogin = { launchFusion(FusionAuthPurpose.LOGIN) },
+                                onRegister = { launchFusion(FusionAuthPurpose.REGISTER) },
+                            )
+                        }
+                    }
                     item {
                         OtpLoginCard(
                             state = state,
@@ -325,7 +385,7 @@ private fun CapabilityUnavailableCard() {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Icon(Icons.Rounded.Info, null, tint = MaterialTheme.colorScheme.primary)
             Text("账号能力当前未开放", style = MaterialTheme.typography.titleLarge)
-            Text("游客仍可使用全部核心推荐。账号服务只有在数据库、短信和微信授权都通过部署门禁后才会开放。")
+            Text("游客仍可使用全部核心推荐。账号服务只有在数据库、至少一种手机号验证通道（短信或一键认证）和微信授权都通过部署门禁后才会开放。")
         }
     }
 }
@@ -336,6 +396,43 @@ private fun GuestNoticeCard() {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("不登录也能决定吃什么", style = MaterialTheme.typography.titleLarge)
             Text("登录只用于跨设备同步、身份绑定和账号数据权利；不会改变自然推荐排序。")
+        }
+    }
+}
+
+@Composable
+private fun FusionAuthCard(
+    registrationEnabled: Boolean,
+    hostAvailable: Boolean,
+    busy: Boolean,
+    onLogin: () -> Unit,
+    onRegister: () -> Unit,
+) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                "手机号一键验证",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Text("由运营商验证本机号码；只有主动点击后才会申请电话状态权限并启动认证。")
+            Button(
+                onClick = onLogin,
+                enabled = hostAvailable && !busy,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("手机号一键登录") }
+            if (registrationEnabled) {
+                OutlinedButton(
+                    onClick = onRegister,
+                    enabled = hostAvailable && !busy,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("验证手机号并用微信创建账号") }
+                Text(
+                    "创建账号仍必须继续完成微信授权；仅验证手机号不会创建账号。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
@@ -467,13 +564,17 @@ private fun PhoneWechatRegistrationCard(
 
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("创建账号", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Text("新账号必须按顺序完成手机号验证码和微信授权；两份证明只在同一注册流程中一次性配对。")
+            Text(
+                "短信验证码 + 微信创建账号",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Text("使用此通道时，必须按顺序完成手机号验证码和微信授权；两份证明只在同一注册流程中一次性配对。")
             if (!available) {
                 Text(
                     when {
                         !capabilities.registrationEnabled -> "当前部署尚未开放账号注册，游客功能不受影响。"
-                        !capabilities.phoneEnabled -> "当前手机号验证渠道尚未开放。"
+                        !capabilities.phoneEnabled -> "当前短信验证码注册通道尚未开放。"
                         !capabilities.wechatEnabled -> "当前服务端尚未开放微信注册。"
                         else -> "此安装包未配置微信开放平台 AppID，注册已安全关闭。"
                     },

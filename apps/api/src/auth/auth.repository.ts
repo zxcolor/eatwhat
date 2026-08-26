@@ -12,6 +12,8 @@ import type {
 	CompleteCredentialResult,
 	CreateOAuthStateResult,
 	CreateOtpChallengeResult,
+	FusionAuthFlowDraft,
+	FusionAuthProof,
 	OAuthProof,
 	OAuthStateDraft,
 	OtpChallengeDraft,
@@ -20,6 +22,8 @@ import type {
 	RefreshSessionResult,
 	RegistrationFlowProof,
 	SessionIssueDraft,
+	VerifiedFusionAuthProof,
+	VerifiedFusionPhoneHashes,
 	VerifiedOAuthHashes,
 } from "./auth-workflow.types.js";
 import type { AuthenticatedUserContext } from "./authenticated-user.resolver.js";
@@ -158,6 +162,24 @@ interface RefreshCredentialRow extends QueryResultRow {
 	readonly user_status: "ACTIVE" | "LOCKED" | "DELETION_PENDING";
 }
 
+interface FusionProofRow extends QueryResultRow {
+	readonly id: string;
+	readonly purpose: "LOGIN" | "REGISTER";
+	readonly registration_flow_reference_hash: string | null;
+	readonly device_hash: string;
+	readonly hash_key_version: string;
+	readonly expires_at: Date | string;
+	readonly verified_phone_lookup_hash: string | null;
+	readonly verified_phone_lookup_key_version: string | null;
+	readonly verified_phone_dedup_hash: string | null;
+	readonly verified_phone_dedup_key_version: string | null;
+	readonly masked_phone: string | null;
+	readonly verify_token_hash: string | null;
+	readonly verify_token_hash_key_version: string | null;
+	readonly verified_at: Date | string | null;
+	readonly proof_expires_at: Date | string | null;
+}
+
 export interface OtpLoginCompletion {
 	readonly proof: OtpProof;
 	readonly verificationSucceeded: boolean;
@@ -168,6 +190,27 @@ export interface OAuthLoginCompletion {
 	readonly verifiedIdentity: VerifiedOAuthHashes;
 	readonly session: SessionIssueDraft;
 }
+export interface FusionLoginCompletion {
+	readonly proof: FusionAuthProof;
+	readonly verifyTokenHash: VersionedHash;
+	readonly verifiedPhone: VerifiedFusionPhoneHashes | null;
+	readonly session: SessionIssueDraft | null;
+}
+export interface FusionVerificationCompletion {
+	readonly proof: FusionAuthProof;
+	readonly verifyTokenHash: VersionedHash;
+	readonly verifiedPhone: VerifiedFusionPhoneHashes | null;
+}
+export interface FusionRegistrationCompletion {
+	readonly newUserId: string;
+	readonly phoneProof: VerifiedFusionAuthProof;
+	readonly oauthProof: OAuthProof;
+	readonly verifiedWechatIdentity: VerifiedOAuthHashes;
+	readonly session: SessionIssueDraft;
+}
+export type CompleteFusionVerificationResult =
+	| { readonly kind: "SUCCESS"; readonly proof: VerifiedFusionAuthProof }
+	| { readonly kind: "INVALID_CREDENTIALS" };
 export interface RegistrationCompletion {
 	readonly newUserId: string;
 	readonly otpProof: OtpProof;
@@ -321,6 +364,30 @@ export abstract class AuthRepository {
 	abstract createOtpChallenge(
 		draft: OtpChallengeDraft,
 	): Promise<CreateOtpChallengeResult>;
+	abstract createFusionFlow(draft: FusionAuthFlowDraft): Promise<boolean>;
+	abstract findFusionProof(
+		flowId: string,
+		purpose: "LOGIN" | "REGISTER",
+		deviceHashCandidates: readonly string[],
+	): Promise<FusionAuthProof | null>;
+	abstract claimFusionVerifyToken(
+		proof: FusionAuthProof,
+		verifyTokenHashes: readonly VersionedHash[],
+		primaryVerifyTokenHash: VersionedHash,
+	): Promise<boolean>;
+	abstract findVerifiedFusionProof(
+		flowId: string,
+		deviceHashCandidates: readonly string[],
+	): Promise<VerifiedFusionAuthProof | null>;
+	abstract completeFusionVerification(
+		completion: FusionVerificationCompletion,
+	): Promise<CompleteFusionVerificationResult>;
+	abstract completeFusionLogin(
+		completion: FusionLoginCompletion,
+	): Promise<CompleteCredentialResult>;
+	abstract completeFusionRegistration(
+		completion: FusionRegistrationCompletion,
+	): Promise<CompleteCredentialResult>;
 	abstract finalizeOtpDelivery(
 		challengeId: string,
 		outcome: "SENT" | "FAILED",
@@ -413,6 +480,200 @@ export class PostgresAuthRepository extends AuthRepository {
 
 	isAvailable(): boolean {
 		return this.database.isEnabled();
+	}
+
+	async createFusionFlow(draft: FusionAuthFlowDraft): Promise<boolean> {
+		return this.database.withTransaction(async (transaction) => {
+			const result = await transaction.query(
+				`INSERT INTO public.fusion_auth_flows (
+				   id, purpose, registration_flow_reference_hash, request_ip_hash,
+				   device_hash, hash_key_version, created_at, expires_at, retain_until
+				 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+				 ON CONFLICT (id) DO NOTHING`,
+				[
+					draft.id,
+					draft.purpose,
+					draft.registrationFlowReferenceHash,
+					draft.requestIpHash,
+					draft.deviceHash,
+					draft.hashKeyVersion,
+					draft.createdAt,
+					draft.expiresAt,
+					draft.retainUntil,
+				],
+			);
+			return result.rowCount === 1;
+		});
+	}
+
+	async findFusionProof(
+		flowId: string,
+		purpose: "LOGIN" | "REGISTER",
+		deviceHashCandidates: readonly string[],
+	): Promise<FusionAuthProof | null> {
+		return this.database.withTransaction(async (transaction) => {
+			const result = await transaction.query<FusionProofRow>(
+				`SELECT id, purpose, registration_flow_reference_hash, device_hash,
+				   hash_key_version, expires_at, verified_phone_lookup_hash,
+				   verified_phone_lookup_key_version, verified_phone_dedup_hash,
+				   verified_phone_dedup_key_version, masked_phone, verify_token_hash,
+				   verify_token_hash_key_version, verified_at
+				 FROM public.fusion_auth_flows
+				 WHERE id = $1 AND purpose = $2 AND device_hash = ANY($3::varchar[])
+				   AND consumed_at IS NULL AND verified_at IS NULL
+				   AND attempts < 5 AND expires_at > clock_timestamp()
+				 LIMIT 1`,
+				[flowId, purpose, deviceHashCandidates],
+			);
+			return mapFusionProof(result.rows[0]);
+		});
+	}
+
+	async findVerifiedFusionProof(
+		flowId: string,
+		deviceHashCandidates: readonly string[],
+	): Promise<VerifiedFusionAuthProof | null> {
+		return this.database.withTransaction(async (transaction) => {
+			return selectVerifiedFusionProof(
+				transaction,
+				flowId,
+				deviceHashCandidates,
+			);
+		});
+	}
+
+	async claimFusionVerifyToken(
+		proof: FusionAuthProof,
+		verifyTokenHashes: readonly VersionedHash[],
+		primaryVerifyTokenHash: VersionedHash,
+	): Promise<boolean> {
+		return this.database.withTransaction(async (transaction) => {
+			const result = await transaction.query<BooleanRow>(
+				"SELECT public.claim_fusion_auth_verify_token($1, $2, $3, $4, $5, $6, $7, $8) AS changed",
+				[
+					proof.id,
+					proof.purpose,
+					proof.deviceHash,
+					proof.hashKeyVersion,
+					verifyTokenHashes.map((candidate) => candidate.value),
+					verifyTokenHashes.map((candidate) => candidate.keyVersion),
+					primaryVerifyTokenHash.value,
+					primaryVerifyTokenHash.keyVersion,
+				],
+			);
+			return result.rows[0]?.changed === true;
+		});
+	}
+
+	async completeFusionVerification(
+		completion: FusionVerificationCompletion,
+	): Promise<CompleteFusionVerificationResult> {
+		return this.database.withTransaction(async (transaction) => {
+			const changed = await recordFusionResult(
+				transaction,
+				completion.proof,
+				completion.verifyTokenHash,
+				completion.verifiedPhone,
+				false,
+			);
+			if (!changed || completion.verifiedPhone === null) {
+				return Object.freeze({ kind: "INVALID_CREDENTIALS" as const });
+			}
+			const proof = await selectVerifiedFusionProof(
+				transaction,
+				completion.proof.id,
+				[completion.proof.deviceHash],
+			);
+			return proof === null
+				? Object.freeze({ kind: "INVALID_CREDENTIALS" as const })
+				: Object.freeze({ kind: "SUCCESS" as const, proof });
+		});
+	}
+
+	async completeFusionLogin(
+		completion: FusionLoginCompletion,
+	): Promise<CompleteCredentialResult> {
+		return this.database.withTransaction(async (transaction) => {
+			const changed = await recordFusionResult(
+				transaction,
+				completion.proof,
+				completion.verifyTokenHash,
+				completion.verifiedPhone,
+				true,
+			);
+			if (
+				!changed ||
+				completion.verifiedPhone === null ||
+				completion.session === null
+			) {
+				return Object.freeze({ kind: "INVALID_CREDENTIALS" as const });
+			}
+			const userId = await findActiveIdentityUser(
+				transaction,
+				"PHONE",
+				completion.verifiedPhone.dedup.value,
+			);
+			if (userId === null) {
+				return Object.freeze({ kind: "INVALID_CREDENTIALS" as const });
+			}
+			await insertSession(transaction, userId, completion.session);
+			return Object.freeze({
+				kind: "SUCCESS" as const,
+				userId,
+				sessionId: completion.session.sessionId,
+			});
+		});
+	}
+
+	async completeFusionRegistration(
+		completion: FusionRegistrationCompletion,
+	): Promise<CompleteCredentialResult> {
+		return this.database.withTransaction(async (transaction) => {
+			const oauthConsumed = await consumeOAuth(
+				transaction,
+				completion.oauthProof,
+				completion.verifiedWechatIdentity,
+			);
+			if (!oauthConsumed) {
+				return Object.freeze({ kind: "INVALID_CREDENTIALS" as const });
+			}
+			const conflict = await transaction.query<UserRow>(
+				`SELECT binding.user_id FROM public.identity_bindings AS binding
+				 WHERE (binding.identity_type = 'PHONE' AND binding.dedup_hash = $1)
+				    OR (binding.identity_type = 'WECHAT' AND binding.dedup_hash = $2)
+				 LIMIT 1`,
+				[
+					completion.phoneProof.verifiedPhone.dedup.value,
+					completion.verifiedWechatIdentity.dedup.value,
+				],
+			);
+			if (conflict.rows[0] !== undefined) {
+				return Object.freeze({ kind: "IDENTITY_CONFLICT" as const });
+			}
+			const registered = await transaction.query<BooleanRow>(
+				"SELECT public.register_fusion_phone_wechat_account($1, $2, $3, $4, $5) AS changed",
+				[
+					completion.newUserId,
+					completion.phoneProof.id,
+					completion.oauthProof.id,
+					completion.phoneProof.registrationFlowReferenceHash,
+					completion.phoneProof.deviceHash,
+				],
+			);
+			if (registered.rows[0]?.changed !== true) {
+				return Object.freeze({ kind: "INVALID_CREDENTIALS" as const });
+			}
+			await insertSession(
+				transaction,
+				completion.newUserId,
+				completion.session,
+			);
+			return Object.freeze({
+				kind: "SUCCESS" as const,
+				userId: completion.newUserId,
+				sessionId: completion.session.sessionId,
+			});
+		});
 	}
 
 	async createOtpChallenge(
@@ -1534,6 +1795,57 @@ async function recordOtpAttempt(
 	return result.rows[0]?.changed === true;
 }
 
+async function recordFusionResult(
+	transaction: DatabaseTransaction,
+	proof: FusionAuthProof,
+	verifyTokenHash: VersionedHash,
+	verifiedPhone: VerifiedFusionPhoneHashes | null,
+	consumeOnSuccess: boolean,
+): Promise<boolean> {
+	const result = await transaction.query<BooleanRow>(
+		"SELECT public.record_fusion_auth_result($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) AS changed",
+		[
+			proof.id,
+			proof.purpose,
+			proof.deviceHash,
+			proof.hashKeyVersion,
+			verifyTokenHash.value,
+			verifyTokenHash.keyVersion,
+			verifiedPhone !== null,
+			consumeOnSuccess,
+			verifiedPhone?.lookup.value ?? null,
+			verifiedPhone?.lookup.keyVersion ?? null,
+			verifiedPhone?.dedup.value ?? null,
+			verifiedPhone?.dedup.keyVersion ?? null,
+			verifiedPhone?.maskedPhone ?? null,
+		],
+	);
+	return result.rows[0]?.changed === true;
+}
+
+async function selectVerifiedFusionProof(
+	transaction: DatabaseTransaction,
+	flowId: string,
+	deviceHashCandidates: readonly string[],
+): Promise<VerifiedFusionAuthProof | null> {
+	const result = await transaction.query<FusionProofRow>(
+		`SELECT id, purpose, registration_flow_reference_hash, device_hash,
+		   hash_key_version, expires_at, proof_expires_at,
+		   verified_phone_lookup_hash,
+		   verified_phone_lookup_key_version, verified_phone_dedup_hash,
+		   verified_phone_dedup_key_version, masked_phone, verify_token_hash,
+		   verify_token_hash_key_version, verified_at
+		 FROM public.fusion_auth_flows
+		 WHERE id = $1 AND purpose = 'REGISTER'
+		   AND device_hash = ANY($2::varchar[])
+		   AND consumed_at IS NULL AND verified_at IS NOT NULL
+		   AND proof_expires_at > clock_timestamp()
+		 LIMIT 1`,
+		[flowId, deviceHashCandidates],
+	);
+	return mapVerifiedFusionProof(result.rows[0]);
+}
+
 async function consumeOAuth(
 	transaction: DatabaseTransaction,
 	proof: OAuthProof,
@@ -1666,6 +1978,65 @@ function mapOtpProof(row: OtpProofRow | undefined): OtpProof | null {
 				deviceHash: row.device_hash,
 				hashKeyVersion: row.hash_key_version,
 			});
+}
+
+function mapFusionProof(row: FusionProofRow | undefined): FusionAuthProof | null {
+	return row === undefined
+		? null
+		: Object.freeze({
+				id: row.id,
+				purpose: row.purpose,
+				registrationFlowReferenceHash:
+					row.registration_flow_reference_hash,
+				deviceHash: row.device_hash,
+				hashKeyVersion: row.hash_key_version,
+				expiresAt: asDate(row.expires_at),
+			});
+}
+
+function mapVerifiedFusionProof(
+	row: FusionProofRow | undefined,
+): VerifiedFusionAuthProof | null {
+	if (
+		row === undefined ||
+		row.purpose !== "REGISTER" ||
+		row.registration_flow_reference_hash === null ||
+		row.verified_phone_lookup_hash === null ||
+		row.verified_phone_lookup_key_version === null ||
+		row.verified_phone_dedup_hash === null ||
+		row.verified_phone_dedup_key_version === null ||
+		row.masked_phone === null ||
+		row.verify_token_hash === null ||
+		row.verify_token_hash_key_version === null ||
+		row.verified_at === null ||
+		row.proof_expires_at === null
+	) {
+		return null;
+	}
+	return Object.freeze({
+		id: row.id,
+		purpose: row.purpose,
+		registrationFlowReferenceHash: row.registration_flow_reference_hash,
+		deviceHash: row.device_hash,
+		hashKeyVersion: row.hash_key_version,
+		expiresAt: asDate(row.proof_expires_at),
+		verifiedAt: asDate(row.verified_at),
+		verifiedPhone: Object.freeze({
+			lookup: Object.freeze({
+				value: row.verified_phone_lookup_hash,
+				keyVersion: row.verified_phone_lookup_key_version,
+			}),
+			dedup: Object.freeze({
+				value: row.verified_phone_dedup_hash,
+				keyVersion: row.verified_phone_dedup_key_version,
+			}),
+			maskedPhone: row.masked_phone,
+			verifyTokenHash: Object.freeze({
+				value: row.verify_token_hash,
+				keyVersion: row.verify_token_hash_key_version,
+			}),
+		}),
+	});
 }
 
 function mapOAuthProof(row: OAuthProofRow | undefined): OAuthProof | null {

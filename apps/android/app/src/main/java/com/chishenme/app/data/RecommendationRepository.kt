@@ -58,7 +58,7 @@ class RecommendationRepository @Inject constructor(
                         (!capabilities.dataExportEnabled || capabilities.accountsEnabled) &&
                         (!capabilities.registrationEnabled ||
                             capabilities.accountsEnabled &&
-                            capabilities.phoneEnabled &&
+                            (capabilities.phoneEnabled || capabilities.fusionEnabled) &&
                             capabilities.wechatEnabled) &&
                         (capabilities.accountsEnabled ||
                             listOf(
@@ -68,6 +68,7 @@ class RecommendationRepository @Inject constructor(
                                 capabilities.emailEnabled,
                                 capabilities.qqEnabled,
                                 capabilities.dataExportEnabled,
+                                capabilities.fusionEnabled,
                             ).none { it })
                 } != false &&
                 (config.dataRightsMode != com.chishenme.app.data.remote.DataRightsMode.LIVE_DISPLAY_ONLY ||

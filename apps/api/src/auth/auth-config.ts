@@ -22,6 +22,14 @@ export interface AuthRuntimeConfig {
 		readonly templateCode: string | null;
 		readonly timeoutMs: number;
 	};
+	readonly fusion: {
+		readonly enabled: boolean;
+		readonly schemeCode: string | null;
+		readonly packageName: string | null;
+		readonly packageSign: string | null;
+		readonly tokenTtlMs: number;
+		readonly timeoutMs: number;
+	};
 	readonly email: {
 		readonly enabled: boolean;
 		readonly host: string | null;
@@ -159,6 +167,59 @@ function readSmsTemplateCode(
 	return normalized;
 }
 
+function readFusionSchemeCode(
+	enabled: boolean,
+	value: string | undefined,
+): string | null {
+	const normalized = optionalWhenDisabled(
+		enabled,
+		value,
+		"ALIYUN_FUSION_SCHEME_CODE",
+		128,
+	);
+	if (normalized !== null && !/^[A-Za-z0-9_-]{1,128}$/u.test(normalized)) {
+		throw new Error("ALIYUN_FUSION_SCHEME_CODE 必须是有效的融合认证方案 Code");
+	}
+	return normalized;
+}
+
+function readAndroidPackageName(
+	enabled: boolean,
+	value: string | undefined,
+): string | null {
+	const normalized = optionalWhenDisabled(
+		enabled,
+		value,
+		"ALIYUN_FUSION_PACKAGE_NAME",
+		255,
+	);
+	if (
+		normalized !== null &&
+		!// Android application IDs are dot-separated Java identifiers. Keeping
+		// this server-pinned prevents a caller from minting tokens for another app.
+		/^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$/u.test(normalized)
+	) {
+		throw new Error("ALIYUN_FUSION_PACKAGE_NAME 必须是有效的 Android 包名");
+	}
+	return normalized;
+}
+
+function readAndroidPackageSign(
+	enabled: boolean,
+	value: string | undefined,
+): string | null {
+	const normalized = optionalWhenDisabled(
+		enabled,
+		value,
+		"ALIYUN_FUSION_PACKAGE_SIGN",
+		32,
+	);
+	if (normalized !== null && !/^[0-9a-fA-F]{32}$/u.test(normalized)) {
+		throw new Error("ALIYUN_FUSION_PACKAGE_SIGN 必须是 32 位十六进制包签名");
+	}
+	return normalized?.toLowerCase() ?? null;
+}
+
 function readEmailAddress(
 	enabled: boolean,
 	value: string | undefined,
@@ -247,7 +308,7 @@ function readAliyunCredentialAllowedProvider(
 	if (normalized.length === 0) {
 		if (production) {
 			throw new Error(
-				"生产短信通道必须用 ALIYUN_CREDENTIAL_ALLOWED_PROVIDER 钉死凭据来源",
+				"生产阿里云账号通道必须用 ALIYUN_CREDENTIAL_ALLOWED_PROVIDER 钉死凭据来源",
 			);
 		}
 		return null;
@@ -256,7 +317,7 @@ function readAliyunCredentialAllowedProvider(
 		throw new Error("ALIYUN_CREDENTIAL_ALLOWED_PROVIDER 不是受支持的凭据来源");
 	}
 	if (production && normalized === "default/env") {
-		throw new Error("生产短信通道禁止使用长期环境变量 AccessKey");
+		throw new Error("生产阿里云账号通道禁止使用长期环境变量 AccessKey");
 	}
 	return normalized;
 }
@@ -377,6 +438,8 @@ export function loadAuthRuntimeConfig(
 
 	const phoneEnabled =
 		enabled && readBoolean(env.PHONE_AUTH_ENABLED, "PHONE_AUTH_ENABLED");
+	const fusionEnabled =
+		enabled && readBoolean(env.FUSION_AUTH_ENABLED, "FUSION_AUTH_ENABLED");
 	const emailEnabled =
 		enabled && readBoolean(env.EMAIL_AUTH_ENABLED, "EMAIL_AUTH_ENABLED");
 	const wechatEnabled =
@@ -385,7 +448,7 @@ export function loadAuthRuntimeConfig(
 		enabled && readBoolean(env.QQ_AUTH_ENABLED, "QQ_AUTH_ENABLED");
 	const dataExportEnabled =
 		enabled && readBoolean(env.DATA_EXPORT_ENABLED, "DATA_EXPORT_ENABLED");
-	if (enabled && (!phoneEnabled || !wechatEnabled)) {
+	if (enabled && (!(phoneEnabled || fusionEnabled) || !wechatEnabled)) {
 		throw new Error("账号服务启用前必须同时就绪手机和微信注册通道");
 	}
 
@@ -396,7 +459,7 @@ export function loadAuthRuntimeConfig(
 		"AUTH_HASH_ACTIVE_VERSION",
 	);
 	const otpPepperRing = readKeyRing(
-		enabled,
+		phoneEnabled || emailEnabled,
 		env,
 		"AUTH_OTP_PEPPER_KEYS_JSON",
 		"AUTH_OTP_PEPPER_ACTIVE_VERSION",
@@ -446,7 +509,7 @@ export function loadAuthRuntimeConfig(
 			5_000,
 		),
 		aliyunCredentialAllowedProvider: readAliyunCredentialAllowedProvider(
-			phoneEnabled,
+			phoneEnabled || fusionEnabled,
 			options.production === true,
 			env.ALIYUN_CREDENTIAL_ALLOWED_PROVIDER,
 		),
@@ -511,6 +574,36 @@ export function loadAuthRuntimeConfig(
 				1_500,
 				"ALIYUN_SMS_TIMEOUT_MS",
 				1_000,
+				5_000,
+			),
+		}),
+		fusion: Object.freeze({
+			enabled: fusionEnabled,
+			schemeCode: readFusionSchemeCode(
+				fusionEnabled,
+				env.ALIYUN_FUSION_SCHEME_CODE,
+			),
+			packageName: readAndroidPackageName(
+				fusionEnabled,
+				env.ALIYUN_FUSION_PACKAGE_NAME,
+			),
+			packageSign: readAndroidPackageSign(
+				fusionEnabled,
+				env.ALIYUN_FUSION_PACKAGE_SIGN,
+			),
+			tokenTtlMs:
+				readInteger(
+					env.ALIYUN_FUSION_TOKEN_TTL_SECONDS,
+					900,
+					"ALIYUN_FUSION_TOKEN_TTL_SECONDS",
+					900,
+					43_200,
+				) * 1_000,
+			timeoutMs: readInteger(
+				env.ALIYUN_FUSION_TIMEOUT_MS,
+				2_000,
+				"ALIYUN_FUSION_TIMEOUT_MS",
+				500,
 				5_000,
 			),
 		}),

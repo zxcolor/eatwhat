@@ -9,6 +9,16 @@ import retrofit2.http.POST
 import retrofit2.http.Path
 
 interface AuthApi {
+    @POST("v1/auth/phone/fusion-token")
+    suspend fun requestFusionToken(
+        @Body request: FusionAuthTokenRequest,
+    ): FusionAuthTokenResponse
+
+    @POST("v1/auth/phone/fusion-verify")
+    suspend fun verifyFusionForRegistration(
+        @Body request: FusionRegistrationVerifyRequest,
+    ): FusionRegistrationPhoneProof
+
     @POST("v1/auth/phone/request-code")
     suspend fun requestPhoneCode(
         @Header("Authorization") authorization: String?,
@@ -30,6 +40,11 @@ interface AuthApi {
     @POST("v1/auth/register/phone-wechat")
     suspend fun registerPhoneWechat(
         @Body request: RegisterPhoneWechatRequest,
+    ): AuthTokenResponse
+
+    @POST("v1/auth/register/fusion-wechat")
+    suspend fun registerFusionWechat(
+        @Body request: RegisterFusionWechatRequest,
     ): AuthTokenResponse
 
     @POST("v1/auth/login")

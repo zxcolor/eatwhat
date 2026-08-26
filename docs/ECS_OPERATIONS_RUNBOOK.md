@@ -93,6 +93,91 @@ scripts/update-amap-secrets.sh --disable
 `AMAP_ENABLED=false`，新版 readiness 必须失败，激活脚本会自动恢复旧 API；不得为通过
 发布而绕过 readiness。
 
+## 3.5 融合认证上线与 hash key 轮换
+
+融合认证只在新候选 release 中启用，不直接改活动容器。`deployment.env` 的
+`ACCOUNTS_ENABLED`、`PHONE_AUTH_ENABLED`、`FUSION_AUTH_ENABLED`、
+`WECHAT_AUTH_ENABLED` 和 `ALIBABA_CLOUD_ECS_METADATA` 是非 Secret 发布坐标；
+认证 hash ring、微信 AppSecret、短信材料和融合方案标识只进入 root:root、`0600`
+的共享 `api.env`。不要手填或拼接这两个活动文件。只在 root 私有目录准备一份完整
+候选输入，再由脚本把发布坐标和 Secret 原子拆分到各自文件：
+
+```bash
+install -d -m 700 /root/private
+install -m 600 /dev/null /root/private/auth-candidate.env
+```
+
+Fusion-only 候选文件的字段集合固定如下；尖括号只表示需要在服务器本地填写，不能
+原样保留，也不能把文件发到聊天或提交 Git：
+
+```dotenv
+ACCOUNTS_ENABLED=true
+PHONE_AUTH_ENABLED=false
+FUSION_AUTH_ENABLED=true
+WECHAT_AUTH_ENABLED=true
+ALIBABA_CLOUD_ECS_METADATA=<ECS RAM 角色名>
+AUTH_HASH_ACTIVE_VERSION=hash.v1
+AUTH_HASH_KEYS_JSON={"hash.v1":"<32 到 128 字节随机值的标准 Base64>"}
+AUTH_IDENTITY_DEDUP_KEY_VERSION=hash.v1
+WECHAT_APP_ID=<wx 加 16 位十六进制 AppID>
+WECHAT_APP_SECRET=<微信 AppSecret>
+ALIYUN_FUSION_SCHEME_CODE=<融合认证方案 Code>
+ALIYUN_FUSION_PACKAGE_NAME=com.chishenme.app.alpha
+ALIYUN_FUSION_PACKAGE_SIGN=<固定 Alpha signer 的 32 位 MD5>
+```
+
+Fusion-only 不写 `AUTH_OTP_PEPPER_*` 或 `ALIYUN_SMS_*`；只有
+`PHONE_AUTH_ENABLED=true` 才把这四项加入候选文件。编辑完成后从待发布的候选
+release 执行：
+
+```bash
+cd /opt/chi-shen-me/releases/<候选 release>/deploy
+scripts/update-auth-secrets.sh --apply --config-file /root/private/auth-candidate.env
+```
+
+脚本要求 root:root、`0600` 的输入文件，复用全局 deployment mutation lock，在同一
+目录生成候选和回滚文件；它先验证当前 release，再原子替换共享 `api.env` 与候选
+`deployment.env`，最后通过固定 API 镜像里的生产
+`loadAuthRuntimeConfig` 重新预检。JSON、1 到 3 个 current/retiring key、版本格式、
+标准 Base64、32 到 128 字节长度、active/dedup 归属、微信 AppID 或任何精确字段集合
+不合格时都会恢复原文件。成功只表示配置可发布；看到
+`API_RECREATE_REQUIRED=true` 后仍必须用第 5 节候选激活脚本重建 API 和完成 smoke。
+
+首次开启前必须依次完成：
+
+1. 把最小权限 RAM 角色绑定到 ECS，并强制 IMDSv2；融合主链只授予
+   `dypns:GetFusionAuthToken`、`dypns:VerifyWithFusionAuthToken`，短信开启时才增加
+   `SendSms` 权限；
+2. 在控制台核对方案 Code、场景 `100001`、`com.chishenme.app.alpha` 与固定证书
+   MD5，确认全局降级路径不依赖宿主自动回填手机号；
+3. 备份并复核数据库，运行包含 `0010_fusion_phone_auth.sql` 的迁移；
+4. 在候选环境运行配置、失败关闭和重放 smoke，不把真实 token/手机号写入日志；
+5. 通过唯一候选激活脚本切换，再用 ARM64 + 中国大陆 SIM 真机完成闭环。
+
+融合防重放会对 `AUTH_HASH_KEYS_JSON` 中 current 与 retiring 的全部版本计算 HMAC。
+供应商 token/本地 flow 的最大窗口为 12 小时，因此旧 hash key 必须至少保留到该
+窗口排空。常规轮换先在候选输入中加入新 key、保留旧 key，再切 active；脚本会拒绝
+改变 `AUTH_IDENTITY_DEDUP_KEY_VERSION`，该值只能走单独的全量回填和冲突审计迁移。
+
+移除 retiring key 必须走显式排空：先用仍包含旧 key 的候选关闭 Fusion。当前只有
+Fusion 手机主链时执行 `scripts/update-auth-secrets.sh --disable`；如短信主链已就绪，
+也可用 `--apply` 提交 `FUSION_AUTH_ENABLED=false` 且保留旧 ring 的完整候选。脚本会把
+旧 ring 保存到 root-only `auth-key-drain.env` 并记录服务端 UTC epoch。激活关闭候选后
+等待至少 12 小时。随后再次更新或执行：
+
+```bash
+scripts/update-auth-secrets.sh --finalize-drain
+```
+
+该命令只有在当前 Fusion 开关仍为 false、排空时间不少于 43200 秒，并且真实
+PostgreSQL 的 `fusion_auth_flows` 中没有未消费且未过期 flow 时才报告
+`AUTH_KEY_DRAIN_READY=true`；表或数据库不可达一律失败关闭。root-only 排空快照会
+保留到下一次成功的 `--apply`，用于证明和比较即将移除的旧 key；候选预检成功后脚本
+才原子清除或推进它，避免短信主链仍开启时出现“先删排空证据、后续反而永远不能删
+旧 key”的死路。12 小时内如重新开放，候选必须仍包含快照里的每个旧 key 及相同
+材料。只有排空完成后才可提交不含旧 key 的候选并重新开放。所有开关变化都必须经
+候选激活和真实 smoke，不能手工重建容器或删除排空文件绕过门禁。
+
 ## 4. PostgreSQL 备份与验证
 
 迁移、release 切换或真实高德/登录开放前先运行：

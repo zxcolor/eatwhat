@@ -15,7 +15,7 @@ class QqOAuthTransportSerializationTest {
     fun `QQ login sends only backend state access token and device context`() {
         val encoded = json.encodeToString(
             AuthLoginRequest(
-                method = AuthIdentityType.QQ,
+                method = AuthLoginMethod.QQ,
                 oauthState = "s".repeat(43),
                 accessToken = "private-access-token-1234567890",
                 device = AuthDeviceContext(

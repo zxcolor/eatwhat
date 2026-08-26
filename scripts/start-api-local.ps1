@@ -73,6 +73,7 @@ $allowedKeys = [System.Collections.Generic.HashSet[string]]::new(
     'QWEN_MODEL',
     'QWEN_TIMEOUT_MS',
     'PHONE_AUTH_ENABLED',
+    'FUSION_AUTH_ENABLED',
     'EMAIL_AUTH_ENABLED',
     'WECHAT_AUTH_ENABLED',
     'QQ_AUTH_ENABLED',
@@ -95,6 +96,11 @@ $allowedKeys = [System.Collections.Generic.HashSet[string]]::new(
     'ALIYUN_SMS_SIGN_NAME',
     'ALIYUN_SMS_TEMPLATE_CODE',
     'ALIYUN_SMS_TIMEOUT_MS',
+    'ALIYUN_FUSION_SCHEME_CODE',
+    'ALIYUN_FUSION_PACKAGE_NAME',
+    'ALIYUN_FUSION_PACKAGE_SIGN',
+    'ALIYUN_FUSION_TOKEN_TTL_SECONDS',
+    'ALIYUN_FUSION_TIMEOUT_MS',
     'SMTP_HOST',
     'SMTP_PORT',
     'SMTP_SECURE',
@@ -200,9 +206,18 @@ function Test-SecretEnabledForRuntime {
             return $Entries.Contains('DATABASE_ENABLED') -and
                 $Entries['DATABASE_ENABLED'] -ceq 'true'
         }
-        { $_ -in @('AUTH_HASH_KEYS_JSON', 'AUTH_OTP_PEPPER_KEYS_JSON') } {
+        'AUTH_HASH_KEYS_JSON' {
             return $Entries.Contains('ACCOUNTS_ENABLED') -and
                 $Entries['ACCOUNTS_ENABLED'] -ceq 'true'
+        }
+        'AUTH_OTP_PEPPER_KEYS_JSON' {
+            $phoneEnabled = $Entries.Contains('PHONE_AUTH_ENABLED') -and
+                $Entries['PHONE_AUTH_ENABLED'] -ceq 'true'
+            $emailEnabled = $Entries.Contains('EMAIL_AUTH_ENABLED') -and
+                $Entries['EMAIL_AUTH_ENABLED'] -ceq 'true'
+            return $Entries.Contains('ACCOUNTS_ENABLED') -and
+                $Entries['ACCOUNTS_ENABLED'] -ceq 'true' -and
+                ($phoneEnabled -or $emailEnabled)
         }
         'WECHAT_APP_SECRET' {
             return $Entries.Contains('WECHAT_AUTH_ENABLED') -and
@@ -238,8 +253,10 @@ function New-RuntimeChildEnvironment {
     }
     $phoneAuthEnabled = $Entries.Contains('PHONE_AUTH_ENABLED') -and
         $Entries['PHONE_AUTH_ENABLED'] -ceq 'true'
+    $fusionAuthEnabled = $Entries.Contains('FUSION_AUTH_ENABLED') -and
+        $Entries['FUSION_AUTH_ENABLED'] -ceq 'true'
     foreach ($key in $approvedInheritedSecretKeys) {
-        if (-not $phoneAuthEnabled) {
+        if (-not ($phoneAuthEnabled -or $fusionAuthEnabled)) {
             continue
         }
         $inherited = [Environment]::GetEnvironmentVariable($key, 'Process')
@@ -358,27 +375,62 @@ try {
     if ($entries.Contains('ACCOUNTS_ENABLED') -and $entries['ACCOUNTS_ENABLED'] -eq 'true') {
         foreach ($requiredSwitch in @(
             'DATABASE_ENABLED',
-            'PHONE_AUTH_ENABLED',
             'WECHAT_AUTH_ENABLED'
         )) {
             if (-not $entries.Contains($requiredSwitch) -or $entries[$requiredSwitch] -ne 'true') {
                 throw "ACCOUNTS_ENABLED=true 时 $requiredSwitch 必须在同一私有文件中明确设为 true。"
             }
         }
+        $phoneAuthEnabled = $entries.Contains('PHONE_AUTH_ENABLED') -and
+            $entries['PHONE_AUTH_ENABLED'] -eq 'true'
+        $fusionAuthEnabled = $entries.Contains('FUSION_AUTH_ENABLED') -and
+            $entries['FUSION_AUTH_ENABLED'] -eq 'true'
+        if (-not ($phoneAuthEnabled -or $fusionAuthEnabled)) {
+            throw 'ACCOUNTS_ENABLED=true 时 PHONE_AUTH_ENABLED 与 FUSION_AUTH_ENABLED 至少一个必须为 true。'
+        }
         foreach ($requiredValue in @(
             'DATABASE_URL',
             'AUTH_HASH_ACTIVE_VERSION',
             'AUTH_HASH_KEYS_JSON',
-            'AUTH_OTP_PEPPER_ACTIVE_VERSION',
-            'AUTH_OTP_PEPPER_KEYS_JSON',
             'AUTH_IDENTITY_DEDUP_KEY_VERSION',
-            'ALIYUN_SMS_SIGN_NAME',
-            'ALIYUN_SMS_TEMPLATE_CODE',
             'WECHAT_APP_ID',
             'WECHAT_APP_SECRET'
         )) {
             if (-not (Test-ConfiguredValue -Entries $entries -Key $requiredValue)) {
                 throw "ACCOUNTS_ENABLED=true 时必须在私有文件或受控进程环境中填写 $requiredValue。"
+            }
+        }
+        $emailAuthEnabled = $entries.Contains('EMAIL_AUTH_ENABLED') -and
+            $entries['EMAIL_AUTH_ENABLED'] -eq 'true'
+        if ($phoneAuthEnabled -or $emailAuthEnabled) {
+            foreach ($requiredOtpValue in @(
+                'AUTH_OTP_PEPPER_ACTIVE_VERSION',
+                'AUTH_OTP_PEPPER_KEYS_JSON'
+            )) {
+                if (-not (Test-ConfiguredValue -Entries $entries -Key $requiredOtpValue)) {
+                    throw "手机号或邮箱验证码启用时必须在私有文件或受控进程环境中填写 $requiredOtpValue。"
+                }
+            }
+        }
+        if ($phoneAuthEnabled) {
+            foreach ($requiredPhoneValue in @(
+                'ALIYUN_SMS_SIGN_NAME',
+                'ALIYUN_SMS_TEMPLATE_CODE'
+            )) {
+                if (-not (Test-ConfiguredValue -Entries $entries -Key $requiredPhoneValue)) {
+                    throw "PHONE_AUTH_ENABLED=true 时必须在私有文件或受控进程环境中填写 $requiredPhoneValue。"
+                }
+            }
+        }
+        if ($fusionAuthEnabled) {
+            foreach ($requiredFusionValue in @(
+                'ALIYUN_FUSION_SCHEME_CODE',
+                'ALIYUN_FUSION_PACKAGE_NAME',
+                'ALIYUN_FUSION_PACKAGE_SIGN'
+            )) {
+                if (-not (Test-ConfiguredValue -Entries $entries -Key $requiredFusionValue)) {
+                    throw "FUSION_AUTH_ENABLED=true 时必须在私有文件中填写 $requiredFusionValue。"
+                }
             }
         }
     }

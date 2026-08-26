@@ -1,4 +1,8 @@
 import CredentialPackage from "@alicloud/credentials";
+import DypnsapiPackage, {
+	GetFusionAuthTokenRequest,
+	VerifyWithFusionAuthTokenRequest,
+} from "@alicloud/dypnsapi20170525";
 import DysmsapiPackage, { SendSmsRequest } from "@alicloud/dysmsapi20170525";
 import { $OpenApiUtil } from "@alicloud/openapi-core";
 import { RuntimeOptions } from "@darabonba/typescript";
@@ -9,10 +13,19 @@ import type {
 	AliyunSmsSendRequest,
 	AliyunSmsSendResponse,
 } from "./aliyun-sms-otp.provider.js";
+import type {
+	AliyunFusionClient,
+	AliyunFusionRuntimeOptions,
+	AliyunFusionTokenRequest,
+	AliyunFusionTokenResponse,
+	AliyunFusionVerifyRequest,
+	AliyunFusionVerifyResponse,
+} from "./fusion-auth.provider.js";
 
 const SMS_ENDPOINT = "dysmsapi.aliyuncs.com";
-const SAFE_CREDENTIAL_FAILURE = "账号阿里云短信凭据不可用";
-const SAFE_UPSTREAM_FAILURE = "阿里云短信请求失败";
+const FUSION_ENDPOINT = "dypnsapi.aliyuncs.com";
+const SAFE_CREDENTIAL_FAILURE = "账号阿里云认证凭据不可用";
+const SAFE_UPSTREAM_FAILURE = "阿里云认证请求失败";
 
 type OfficialCredential = InstanceType<typeof CredentialPackage.default>;
 
@@ -31,6 +44,8 @@ const CredentialConstructor =
 	);
 const SmsClientConstructor =
 	resolveCommonJsConstructor<typeof DysmsapiPackage.default>(DysmsapiPackage);
+const FusionClientConstructor =
+	resolveCommonJsConstructor<typeof DypnsapiPackage.default>(DypnsapiPackage);
 
 export interface AliyunCredentialModelLike {
 	readonly accessKeyId?: string;
@@ -48,6 +63,17 @@ interface OfficialSmsSdkClient {
 		request: SendSmsRequest,
 		runtime: RuntimeOptions,
 	): Promise<AliyunSmsSendResponse>;
+}
+
+interface OfficialFusionSdkClient {
+	getFusionAuthTokenWithOptions(
+		request: GetFusionAuthTokenRequest,
+		runtime: RuntimeOptions,
+	): Promise<AliyunFusionTokenResponse>;
+	verifyWithFusionAuthTokenWithOptions(
+		request: VerifyWithFusionAuthTokenRequest,
+		runtime: RuntimeOptions,
+	): Promise<AliyunFusionVerifyResponse>;
 }
 
 export type SafeAliyunFailureReason =
@@ -85,8 +111,33 @@ const OFFICIAL_DEPENDENCIES: AliyunOfficialClientDependencies = Object.freeze({
 		),
 });
 
+export interface AliyunFusionOfficialClientDependencies {
+	createFusionSdkClient(
+		credential: AliyunCredentialLike,
+		timeoutMs: number,
+	): OfficialFusionSdkClient;
+}
+
+const FUSION_OFFICIAL_DEPENDENCIES: AliyunFusionOfficialClientDependencies =
+	Object.freeze({
+		createFusionSdkClient: (
+			credential: AliyunCredentialLike,
+			timeoutMs: number,
+		) =>
+			new FusionClientConstructor(
+				new $OpenApiUtil.Config({
+					credential: credential as OfficialCredential,
+					endpoint: FUSION_ENDPOINT,
+					protocol: "HTTPS",
+					connectTimeout: timeoutMs,
+					readTimeout: timeoutMs,
+					maxIdleConns: 1,
+				}),
+			),
+	});
+
 function deliveryEnabled(config: AppConfig): boolean {
-	return config.auth.phone.enabled;
+	return config.auth.phone.enabled || config.auth.fusion.enabled;
 }
 
 function usableCredential(model: AliyunCredentialModelLike): boolean {
@@ -162,6 +213,22 @@ export function createOfficialAliyunSmsClient(
 	);
 }
 
+export function createOfficialAliyunFusionClient(
+	config: AppConfig,
+	credential: AliyunCredentialLike | undefined,
+	dependencies: AliyunFusionOfficialClientDependencies =
+		FUSION_OFFICIAL_DEPENDENCIES,
+): AliyunFusionClient | undefined {
+	if (!config.auth.fusion.enabled) return undefined;
+	if (credential === undefined) throw new Error(SAFE_CREDENTIAL_FAILURE);
+	return new OfficialAliyunFusionClient(
+		dependencies.createFusionSdkClient(
+			credential,
+			config.auth.fusion.timeoutMs,
+		),
+	);
+}
+
 class OfficialAliyunSmsClient implements AliyunSmsClient {
 	constructor(private readonly client: OfficialSmsSdkClient) {}
 
@@ -181,6 +248,38 @@ class OfficialAliyunSmsClient implements AliyunSmsClient {
 				new RuntimeOptions({ ...runtime }),
 			);
 			return response;
+		} catch (error) {
+			throw new SafeAliyunSdkError(classifySdkFailure(error));
+		}
+	}
+}
+
+class OfficialAliyunFusionClient implements AliyunFusionClient {
+	constructor(private readonly client: OfficialFusionSdkClient) {}
+
+	async getFusionAuthTokenWithOptions(
+		request: AliyunFusionTokenRequest,
+		runtime: AliyunFusionRuntimeOptions,
+	): Promise<AliyunFusionTokenResponse> {
+		try {
+			return await this.client.getFusionAuthTokenWithOptions(
+				new GetFusionAuthTokenRequest({ ...request }),
+				new RuntimeOptions({ ...runtime }),
+			);
+		} catch (error) {
+			throw new SafeAliyunSdkError(classifySdkFailure(error));
+		}
+	}
+
+	async verifyWithFusionAuthTokenWithOptions(
+		request: AliyunFusionVerifyRequest,
+		runtime: AliyunFusionRuntimeOptions,
+	): Promise<AliyunFusionVerifyResponse> {
+		try {
+			return await this.client.verifyWithFusionAuthTokenWithOptions(
+				new VerifyWithFusionAuthTokenRequest({ ...request }),
+				new RuntimeOptions({ ...runtime }),
+			);
 		} catch (error) {
 			throw new SafeAliyunSdkError(classifySdkFailure(error));
 		}
