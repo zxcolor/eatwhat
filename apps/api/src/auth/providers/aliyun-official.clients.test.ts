@@ -1,14 +1,21 @@
 import { SendSmsRequest } from "@alicloud/dysmsapi20170525";
+import {
+	GetFusionAuthTokenRequest,
+	VerifyWithFusionAuthTokenRequest,
+} from "@alicloud/dypnsapi20170525";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadAppConfig } from "../../config/app-config.js";
 import {
 	type AliyunCredentialLike,
+	type AliyunFusionOfficialClientDependencies,
 	type AliyunOfficialClientDependencies,
 	createAliyunCredential,
+	createOfficialAliyunFusionClient,
 	createOfficialAliyunSmsClient,
 	SafeAliyunSdkError,
 } from "./aliyun-official.clients.js";
 import type { AliyunSmsRuntimeOptions } from "./aliyun-sms-otp.provider.js";
+import type { AliyunFusionRuntimeOptions } from "./fusion-auth.provider.js";
 
 const hashKey = Buffer.alloc(32, 5).toString("base64");
 const otpPepper = Buffer.alloc(32, 6).toString("base64");
@@ -30,6 +37,19 @@ function config(overrides: NodeJS.ProcessEnv = {}) {
 		ALIYUN_SMS_TEMPLATE_CODE: "SMS_123456",
 		WECHAT_APP_ID: "wx0123456789abcdef",
 		WECHAT_APP_SECRET: "wechat-secret",
+		...overrides,
+	});
+}
+
+function fusionConfig(overrides: NodeJS.ProcessEnv = {}) {
+	return config({
+		PHONE_AUTH_ENABLED: "false",
+		ALIYUN_SMS_SIGN_NAME: "",
+		ALIYUN_SMS_TEMPLATE_CODE: "",
+		FUSION_AUTH_ENABLED: "true",
+		ALIYUN_FUSION_SCHEME_CODE: "100001",
+		ALIYUN_FUSION_PACKAGE_NAME: "com.chishenme.app",
+		ALIYUN_FUSION_PACKAGE_SIGN: "a".repeat(32),
 		...overrides,
 	});
 }
@@ -59,6 +79,15 @@ function dependencies(input?: {
 }
 
 const smsRuntime: AliyunSmsRuntimeOptions = Object.freeze({
+	autoretry: false,
+	maxAttempts: 1,
+	connectTimeout: 1_500,
+	readTimeout: 1_500,
+	keepAlive: false,
+	maxIdleConns: 1,
+});
+
+const fusionRuntime: AliyunFusionRuntimeOptions = Object.freeze({
 	autoretry: false,
 	maxAttempts: 1,
 	connectTimeout: 1_500,
@@ -100,6 +129,69 @@ describe("official Alibaba Cloud SMS client", () => {
 		expect(createOfficialAliyunSmsClient(config(), credential)).toBeDefined();
 	});
 
+	it("reuses the credential chain and official Dypns request models for fusion", async () => {
+		const credential: AliyunCredentialLike = {
+			getCredential: vi.fn().mockResolvedValue({
+				accessKeyId: "temporary-id",
+				accessKeySecret: "temporary-secret",
+				type: "ecs_ram_role",
+				providerName: "default/ecs_ram_role",
+			}),
+		};
+		const getFusionAuthTokenWithOptions = vi.fn().mockResolvedValue({
+			body: { code: "OK", success: true, model: "FusionAuthToken_1234567890" },
+		});
+		const verifyWithFusionAuthTokenWithOptions = vi.fn().mockResolvedValue({
+			body: {
+				code: "OK",
+				success: true,
+				model: { verifyResult: "PASS", phoneNumber: "13800138000" },
+			},
+		});
+		const deps: AliyunFusionOfficialClientDependencies = {
+			createFusionSdkClient: vi.fn(() => ({
+				getFusionAuthTokenWithOptions,
+				verifyWithFusionAuthTokenWithOptions,
+			})),
+		};
+		const client = createOfficialAliyunFusionClient(
+			fusionConfig(),
+			credential,
+			deps,
+		);
+		await client?.getFusionAuthTokenWithOptions(
+			{
+				durationSeconds: 900,
+				packageName: "com.chishenme.app",
+				packageSign: "a".repeat(32),
+				platform: "Android",
+				schemeCode: "100001",
+			},
+			fusionRuntime,
+		);
+		await client?.verifyWithFusionAuthTokenWithOptions(
+			{ verifyToken: "FusionVerifyToken_1234567890" },
+			fusionRuntime,
+		);
+
+		const [tokenRequest, tokenRuntime] =
+			getFusionAuthTokenWithOptions.mock.calls[0] ?? [];
+		expect(tokenRequest).toBeInstanceOf(GetFusionAuthTokenRequest);
+		expect(tokenRequest).toMatchObject({
+			packageName: "com.chishenme.app",
+			packageSign: "a".repeat(32),
+			schemeCode: "100001",
+		});
+		expect(tokenRuntime).toMatchObject(fusionRuntime);
+		const [verifyRequest, verifyRuntime] =
+			verifyWithFusionAuthTokenWithOptions.mock.calls[0] ?? [];
+		expect(verifyRequest).toBeInstanceOf(VerifyWithFusionAuthTokenRequest);
+		expect(verifyRequest).toMatchObject({
+			verifyToken: "FusionVerifyToken_1234567890",
+		});
+		expect(verifyRuntime).toMatchObject(fusionRuntime);
+	});
+
 	it("fails startup on missing credentials without retaining upstream details", async () => {
 		const marker = "AK-and-profile-path-must-never-leak";
 		const deps = dependencies({
@@ -110,7 +202,7 @@ describe("official Alibaba Cloud SMS client", () => {
 		const failure = await captureFailure(
 			createAliyunCredential(config(), deps),
 		);
-		expect(failure.message).toBe("账号阿里云短信凭据不可用");
+		expect(failure.message).toBe("账号阿里云认证凭据不可用");
 		expect(failure.message).not.toContain(marker);
 		expect(failure).not.toHaveProperty("cause");
 	});
@@ -125,7 +217,7 @@ describe("official Alibaba Cloud SMS client", () => {
 			deps,
 		);
 		const assertion = expect(pending).rejects.toThrow(
-			"账号阿里云短信凭据不可用",
+			"账号阿里云认证凭据不可用",
 		);
 		await vi.advanceTimersByTimeAsync(500);
 		await assertion;
@@ -181,7 +273,7 @@ describe("official Alibaba Cloud SMS client", () => {
 				}),
 				deps,
 			),
-		).rejects.toThrow("账号阿里云短信凭据不可用");
+		).rejects.toThrow("账号阿里云认证凭据不可用");
 	});
 
 	it.each([
@@ -214,7 +306,7 @@ describe("official Alibaba Cloud SMS client", () => {
 			);
 			expect(failure).toBeInstanceOf(SafeAliyunSdkError);
 			expect(failure).toMatchObject({ reason });
-			expect(failure.message).toBe("阿里云短信请求失败");
+			expect(failure.message).toBe("阿里云认证请求失败");
 			expect(JSON.stringify(failure)).not.toContain("13800138000");
 			expect(JSON.stringify(failure)).not.toContain("001204");
 			expect(JSON.stringify(failure)).not.toContain("user@example.com");

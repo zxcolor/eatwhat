@@ -64,6 +64,40 @@ export interface RegistrationFlowProof {
 	readonly hashKeyVersion: string;
 }
 
+export interface FusionAuthFlowDraft {
+	readonly id: string;
+	readonly purpose: "LOGIN" | "REGISTER";
+	readonly registrationFlowReferenceHash: string | null;
+	readonly requestIpHash: string;
+	readonly deviceHash: string;
+	readonly hashKeyVersion: string;
+	readonly createdAt: Date;
+	readonly expiresAt: Date;
+	readonly retainUntil: Date;
+}
+
+export interface FusionAuthProof {
+	readonly id: string;
+	readonly purpose: "LOGIN" | "REGISTER";
+	readonly registrationFlowReferenceHash: string | null;
+	readonly deviceHash: string;
+	readonly hashKeyVersion: string;
+	readonly expiresAt: Date;
+}
+
+export interface VerifiedFusionAuthProof extends FusionAuthProof {
+	readonly registrationFlowReferenceHash: string;
+	readonly verifiedPhone: VerifiedFusionPhoneHashes;
+	readonly verifiedAt: Date;
+}
+
+export interface VerifiedFusionPhoneHashes {
+	readonly lookup: VersionedHash;
+	readonly dedup: VersionedHash;
+	readonly maskedPhone: string;
+	readonly verifyTokenHash: VersionedHash;
+}
+
 export interface OAuthStateDraft {
 	readonly id: string;
 	readonly provider: "WECHAT" | "QQ";

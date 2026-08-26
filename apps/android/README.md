@@ -47,7 +47,7 @@ gradle wrapper --gradle-version 8.13
 | --- | --- | --- | --- |
 | Debug | `com.chishenme.app.debug` | 默认 `https://api.unfinished-era.com/`；只允许受控公网 HTTPS | 日常开发诊断，可与 Alpha 并存；可调试，不得公开发布 |
 | Fixture | `com.chishenme.app.debug` | 固定 `http://127.0.0.1:3001/` | 只供确定性 instrumentation；会替换设备上的 Debug，禁止分发 |
-| Alpha | `com.chishenme.app.alpha` | 与 Debug 复用当前云端 API | 邀请制、R8/资源压缩、不可调试；仍使用 Debug signer，不能当 Release |
+| Alpha | `com.chishenme.app.alpha` | 与 Debug 复用当前云端 API | 邀请制、R8/资源压缩、不可调试；使用固定的长期 Alpha signer，仍不能当 Release |
 
 普通 Debug 与 Alpha 只是不同的 Android 客户端包装，不是两套服务端环境。它们共用同一服务端配置、数据库状态、IP 限流、高德配额和未来启用后的账号数据；当前不新建第二套 API 容器、端口、域名或数据库。若要隔离破坏性迁移、测试账号或不同微信/QQ AppID，必须另建具备独立域名、Secret、数据库角色/卷和配额的 staging，不能信任客户端自报环境来选择服务端 Secret。
 
@@ -189,7 +189,24 @@ CHISHENME_ALPHA_API_BASE_URL=https://api.unfinished-era.com/
 CHISHENME_API_BASE_URL=https://api.your-company.example/
 ```
 
-Debug/Alpha 使用 HTTP、localhost、回环/私网/保留地址或保留域名时构建会失败；Alpha 仍要求显式提供地址。完整验证还会检查同一云端地址确实进入 Debug 与 Alpha DEX，并检查 Fixture DEX 只使用固定回环地址；这不证明 DNS、TLS 或公网 API 可达。Release 另需通过进程环境提供 `CHISHENME_RELEASE_STORE_FILE`、`CHISHENME_RELEASE_STORE_PASSWORD`、`CHISHENME_RELEASE_KEY_ALIAS`、`CHISHENME_RELEASE_KEY_PASSWORD`。缺少任一项时构建会主动失败，避免产生指向占位 API 或未签名的包。
+Debug/Alpha 使用 HTTP、localhost、回环/私网/保留地址或保留域名时构建会失败；Alpha 仍要求显式提供地址。完整验证还会检查同一云端地址确实进入 Debug 与 Alpha DEX，并检查 Fixture DEX 只使用固定回环地址；这不证明 DNS、TLS 或公网 API 可达。
+
+Alpha 的私钥和密码只保存在仓库外。Gradle 默认读取
+`%LOCALAPPDATA%\ChiShenMe\signing\alpha-signing.properties`，也可在当前进程同时提供
+`CHISHENME_ALPHA_STORE_FILE`、`CHISHENME_ALPHA_STORE_PASSWORD`、
+`CHISHENME_ALPHA_KEY_ALIAS`、`CHISHENME_ALPHA_KEY_PASSWORD` 四项环境变量；四项必须完整，
+且环境变量优先于本机属性文件。缺失配置、错误 alias、过期证书或证书摘要不匹配都会在
+构建前失败，不会回退到 Debug signer。公开身份固定为包名
+`com.chishenme.app.alpha`、证书 MD5
+`7c64a4f134a3ebe121c1fb055c09a70c`、SHA-256
+`31f21374f2f5d40697efb3c50e14d4e8d228991f6acbcde262e37c72ae4c0289`。
+Debug/Fixture/FixtureTest 继续共用测试证书，Alpha 必须使用上述不同的固定证书。
+
+Release 另需通过进程环境提供 `CHISHENME_RELEASE_STORE_FILE`、
+`CHISHENME_RELEASE_STORE_PASSWORD`、`CHISHENME_RELEASE_KEY_ALIAS`、
+`CHISHENME_RELEASE_KEY_PASSWORD`。Release 与 Alpha 是不同包名和不同签名生命周期，
+不得复用或把 Alpha signer 当作正式发布签名。缺少任一项时构建会主动失败，避免产生
+指向占位 API 或未签名的包。
 
 微信 AppID 是公开应用标识，不是 Secret；按具体开放平台应用登记的包名与签名，通过 Gradle 属性配置：
 

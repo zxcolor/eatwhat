@@ -15,6 +15,8 @@ coverage/
 .idea/
 .gradle/
 local.properties
+apps/android/.local/
+apps/android/.kotlin/
 **/build/
 *.apk
 *.aab
@@ -25,4 +27,7 @@ local.properties
 *.key
 *.p12
 *.pfx
+*.cer
+*.der
 secrets.properties
+alpha-signing.properties

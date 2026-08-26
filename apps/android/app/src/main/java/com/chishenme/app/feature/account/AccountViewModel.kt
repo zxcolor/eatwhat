@@ -3,6 +3,10 @@ package com.chishenme.app.feature.account
 import android.app.Activity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.chishenme.app.auth.fusion.FusionAuthEvent
+import com.chishenme.app.auth.fusion.FusionAuthManager
+import com.chishenme.app.auth.fusion.FusionAuthStartResult
+import com.chishenme.app.auth.fusion.toFusionAuthHost
 import com.chishenme.app.auth.qq.QqOAuthEvent
 import com.chishenme.app.auth.qq.QqOAuthFailure
 import com.chishenme.app.auth.qq.QqLoginHost
@@ -26,16 +30,20 @@ import com.chishenme.app.data.remote.AuthCodeChallenge
 import com.chishenme.app.data.remote.AuthIdentityBinding
 import com.chishenme.app.data.remote.AuthIdentityType
 import com.chishenme.app.data.remote.AuthSessionSummary
+import com.chishenme.app.data.remote.FusionAuthPurpose
+import com.chishenme.app.data.remote.FusionRegistrationPhoneProof
 import com.chishenme.app.data.remote.OAuthPurpose
 import com.chishenme.app.data.remote.OtpPurpose
 import com.chishenme.app.feature.config.RemoteFeatureConfigState
 import com.chishenme.app.feature.config.RuntimeAppVersionGate
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.time.Instant
+import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -66,6 +74,7 @@ data class AccountUiState(
     val includeBehaviorHistory: Boolean = true,
     val wechatClientConfigured: Boolean = false,
     val qqClientConfigured: Boolean = false,
+    val fusionClientConfigured: Boolean = false,
     val localSessionMaterialPresent: Boolean = false,
 )
 
@@ -76,11 +85,13 @@ class AccountViewModel @Inject constructor(
     private val wechatOAuth: WechatOAuthManager,
     private val qqOAuth: QqOAuthManager,
     private val runtimeAppVersionGate: RuntimeAppVersionGate,
+    private val fusionAuth: FusionAuthManager? = null,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(
         AccountUiState(
             wechatClientConfigured = wechatOAuth.clientConfigured,
             qqClientConfigured = qqOAuth.clientConfigured,
+            fusionClientConfigured = fusionAuth?.clientAvailable == true,
         ),
     )
     val state: StateFlow<AccountUiState> = mutableState.asStateFlow()
@@ -88,6 +99,10 @@ class AccountViewModel @Inject constructor(
     private var pendingQqAction: PendingQqAction? = null
     private var stagedWechatEvent: WechatOAuthEvent? = null
     private var stagedQqEvent: QqOAuthEvent? = null
+    private var stagedFusionEvent: FusionAuthEvent? = null
+    private var pendingFusionRegistrationProof: PendingFusionPhoneProof? = null
+    private var pendingFusionRegistrationSessionId: String? = null
+    private var fusionSceneTimeoutJob: Job? = null
     private var remoteActionJob: Job? = null
     private var logoutJob: Job? = null
     private var dataRightsJob: Job? = null
@@ -103,6 +118,7 @@ class AccountViewModel @Inject constructor(
     private var activeRuntimeLease: RuntimeAppVersionGate.RemoteAccessLease? = null
     private var exportJob: Job? = null
     private var exportAccessGeneration = 0L
+    private var externalAuthorizationGeneration = 0L
 
     init {
         viewModelScope.launch {
@@ -110,6 +126,11 @@ class AccountViewModel @Inject constructor(
         }
         viewModelScope.launch {
             qqOAuth.events.collect(::handleQqEvent)
+        }
+        fusionAuth?.let { manager ->
+            viewModelScope.launch {
+                manager.events.collect(::handleFusionEvent)
+            }
         }
         viewModelScope.launch {
             runtimeAppVersionGate.state.collect { gate ->
@@ -175,6 +196,20 @@ class AccountViewModel @Inject constructor(
      * lease; the process-wide gate owns configuration generation allocation.
      */
     fun suspendRemoteAccessForForegroundRefresh() {
+        // Opening the vendor-owned Fusion scene stops the account Activity even
+        // though the provider callback still has to be verified through this
+        // ViewModel before the scene can continue. Keep only that already-issued,
+        // still-current lease alive; a new config generation, privacy revocation,
+        // page exit, or any other ON_STOP path retains the normal fail-closed flow.
+        val fusionGeneration = fusionAuth?.activeConfigurationGeneration
+        if (
+            fusionGeneration != null &&
+            fusionGeneration == latestConfigGeneration &&
+            configPhase == AccountConfigPhase.READY &&
+            activeRuntimeLease?.let(runtimeAppVersionGate::isRemoteAccessCurrent) == true
+        ) {
+            return
+        }
         val observedGeneration = runtimeAppVersionGate.currentState.observedConfigurationGeneration ?: 0L
         val generation = maxOf(latestConfigGeneration, observedGeneration)
         enterConfigLoading(generation)
@@ -188,6 +223,7 @@ class AccountViewModel @Inject constructor(
             return
         }
         latestConfigGeneration = generation
+        fusionAuth?.cancelForConfigurationChange(generation)
         configPhase = AccountConfigPhase.LOADING
         activeCapabilities = null
         activeRuntimeLease = null
@@ -197,6 +233,7 @@ class AccountViewModel @Inject constructor(
 
     private fun enterConfigReady(generation: Long, capabilities: AuthCapabilities?) {
         if (generation < latestConfigGeneration) return
+        fusionAuth?.cancelForConfigurationChange(generation)
         val runtimeLease = runtimeAppVersionGate.acquireRemoteAccessLease(generation)
         if (runtimeLease == null) {
             enterConfigLoading(generation)
@@ -239,7 +276,11 @@ class AccountViewModel @Inject constructor(
         discardAuthorizationsDisabledByLatestConfig()
         val resumedAuthorization = resumeStagedAuthorization()
         if (resumedAuthorization) return
-        if (pendingWechatAction != null || pendingQqAction != null) {
+        if (
+            pendingWechatAction != null ||
+            pendingQqAction != null ||
+            fusionAuthHasPendingWork()
+        ) {
             mutableState.update { it.copy(busy = true) }
             return
         }
@@ -549,6 +590,28 @@ class AccountViewModel @Inject constructor(
     }
 
     fun startWechatLogin() = beginWechatAuthorization(OAuthPurpose.LOGIN)
+
+    fun startFusionLogin(activity: Activity) = beginFusionAuthorization(
+        activity = activity,
+        purpose = FusionAuthPurpose.LOGIN,
+    )
+
+    fun startFusionRegistration(activity: Activity) = beginFusionAuthorization(
+        activity = activity,
+        purpose = FusionAuthPurpose.REGISTER,
+    )
+
+    fun reportFusionPermissionDenied() {
+        mutableState.update {
+            it.copy(message = "需要电话状态权限才能由运营商完成本机号码验证")
+        }
+    }
+
+    /** Page disposal must invalidate both an active SDK scene and a staged phone proof. */
+    fun cancelFusionForPageExit() {
+        rejectFusionEvent()
+        if (pendingWechatAction?.fusionPhoneProof != null) rejectWechatEvent()
+    }
 
     fun startQqLogin(activity: Activity) = beginQqAuthorization(activity, OAuthPurpose.LOGIN)
 
@@ -883,30 +946,116 @@ class AccountViewModel @Inject constructor(
         }
     }
 
+    private fun beginFusionAuthorization(
+        activity: Activity,
+        purpose: FusionAuthPurpose,
+    ) {
+        val manager = fusionAuth ?: return
+        if (!fusionPurposeIsReady(purpose) || manager.hasActiveSession) return
+        launchRemoteAction { generation ->
+            updateRemoteState(generation) { it.copy(busy = true, message = null) }
+            when (val token = repository.requestFusionToken(purpose)) {
+                is AuthOutcome.Failure -> updateRemoteState(generation) {
+                    it.copy(busy = false, message = token.message)
+                }
+                is AuthOutcome.Success -> {
+                    if (!remoteAccessIsCurrent(generation) || !fusionPurposeIsReady(purpose)) {
+                        updateRemoteState(generation) { it.copy(busy = false) }
+                        return@launchRemoteAction
+                    }
+                    when (
+                        val start = manager.start(
+                            host = activity.toFusionAuthHost(),
+                            configurationGeneration = latestConfigGeneration,
+                            purpose = purpose,
+                            serverEnabled = activeCapabilities?.fusionEnabled == true,
+                            token = token.value,
+                        )
+                    ) {
+                        is FusionAuthStartResult.Started ->
+                            scheduleFusionSceneTimeout(start.sessionId)
+                        is FusionAuthStartResult.Rejected -> updateRemoteState(generation) {
+                            it.copy(busy = false, message = start.userMessage())
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private fun beginWechatAuthorization(
         purpose: OAuthPurpose,
         phoneChallengeId: String? = null,
         phoneOtpCode: String? = null,
-    ) {
-        if (!wechatPurposeIsReady(purpose) || pendingWechatAction != null) return
-        launchRemoteAction { generation ->
+        fusionPhoneProof: PendingFusionPhoneProof? = null,
+        allowBusy: Boolean = false,
+    ): Boolean {
+        if (
+            !wechatPurposeIsReady(
+                purpose,
+                fusionRegistration = fusionPhoneProof != null,
+            ) || pendingWechatAction != null
+        ) {
+            fusionPhoneProof?.discard()
+            return false
+        }
+        val registrationFactorsAreValid = when (purpose) {
+            OAuthPurpose.REGISTER -> {
+                val hasSmsProof = phoneChallengeId != null && phoneOtpCode != null
+                val hasFusionProof = fusionPhoneProof != null
+                hasSmsProof.xor(hasFusionProof) &&
+                    (hasFusionProof || phoneChallengeId != null && phoneOtpCode != null)
+            }
+            OAuthPurpose.LOGIN, OAuthPurpose.BIND ->
+                phoneChallengeId == null && phoneOtpCode == null && fusionPhoneProof == null
+        }
+        if (!registrationFactorsAreValid) {
+            fusionPhoneProof?.discard()
+            return false
+        }
+        val launched = launchRemoteAction(allowBusy = allowBusy) { generation ->
             updateRemoteState(generation) { it.copy(busy = true, message = null) }
-            when (
-                val stateOutcome = repository.createOAuthState(
+            val fusionProofId = fusionPhoneProof?.idForOAuthState(
+                configurationGeneration = latestConfigGeneration,
+                authorizationGeneration = externalAuthorizationGeneration,
+            )
+            if (fusionPhoneProof != null && fusionProofId == null) {
+                fusionPhoneProof.discard()
+                updateRemoteState(generation) {
+                    it.copy(busy = false, message = "手机号验证证明已失效，请重新验证")
+                }
+                return@launchRemoteAction
+            }
+            val stateOutcome = if (fusionProofId != null) {
+                repository.createWechatRegistrationStateForFusion(fusionProofId)
+            } else {
+                repository.createOAuthState(
                     provider = AuthIdentityType.WECHAT,
                     purpose = purpose,
                     phoneChallengeId = phoneChallengeId,
                 )
-            ) {
-                is AuthOutcome.Failure -> updateRemoteState(generation) {
-                    it.copy(busy = false, message = stateOutcome.message)
+            }
+            when (stateOutcome) {
+                is AuthOutcome.Failure -> {
+                    fusionPhoneProof?.discard()
+                    updateRemoteState(generation) {
+                        it.copy(busy = false, message = stateOutcome.message)
+                    }
                 }
                 is AuthOutcome.Success -> {
-                    if (!remoteAccessIsCurrent(generation) || !wechatPurposeIsReady(purpose)) {
+                    if (
+                        !remoteAccessIsCurrent(generation) ||
+                        !wechatPurposeIsReady(
+                            purpose,
+                            fusionRegistration = fusionPhoneProof != null,
+                        )
+                    ) {
+                        fusionPhoneProof?.discard()
                         return@launchRemoteAction
                     }
                     val expiresAt = runCatching { Instant.parse(stateOutcome.value.expiresAt) }.getOrNull()
                     if (expiresAt == null) {
+                        fusionPhoneProof?.discard()
                         updateRemoteState(generation) {
                             it.copy(busy = false, message = "微信授权状态未通过安全校验")
                         }
@@ -916,6 +1065,7 @@ class AccountViewModel @Inject constructor(
                         purpose = purpose,
                         phoneChallengeId = phoneChallengeId,
                         phoneOtpCode = phoneOtpCode,
+                        fusionPhoneProof = fusionPhoneProof,
                     )
                     pendingWechatAction = action
                     when (
@@ -926,19 +1076,43 @@ class AccountViewModel @Inject constructor(
                                 expiresAt = expiresAt,
                             )
                         } catch (error: CancellationException) {
-                            if (pendingWechatAction === action) pendingWechatAction = null
+                            if (pendingWechatAction === action) {
+                                pendingWechatAction = null
+                                action.discardFusionProof()
+                            }
                             throw error
                         }
                     ) {
                         WechatOAuthStartResult.Started -> Unit
                         is WechatOAuthStartResult.Failed -> {
                             pendingWechatAction = null
+                            action.discardFusionProof()
                             updateRemoteState(generation) {
                                 it.copy(busy = false, message = start.reason.userMessage())
                             }
                         }
                     }
                 }
+            }
+        }
+        if (!launched) fusionPhoneProof?.discard()
+        return launched
+    }
+
+    private fun scheduleFusionSceneTimeout(sessionId: String) {
+        fusionSceneTimeoutJob?.cancel()
+        fusionSceneTimeoutJob = viewModelScope.launch {
+            delay(FUSION_SCENE_TIMEOUT_MILLIS)
+            val manager = fusionAuth
+            val isCurrent = manager?.hasActiveSession == true &&
+                manager.activeSessionId == sessionId
+            if (!isCurrent) return@launch
+            pendingFusionRegistrationProof?.discard()
+            pendingFusionRegistrationProof = null
+            pendingFusionRegistrationSessionId = null
+            manager.cancel()
+            mutableState.update {
+                it.copy(busy = false, message = "手机号一键验证已超时，请重新发起")
             }
         }
     }
@@ -1061,6 +1235,41 @@ class AccountViewModel @Inject constructor(
         }
     }
 
+    private fun handleFusionEvent(event: FusionAuthEvent) {
+        if (event is FusionAuthEvent.PrivacyRevoked) {
+            clearExternalAuthorization()
+            return
+        }
+        if (event.configurationGeneration != latestConfigGeneration) {
+            rejectFusionEvent(event)
+            return
+        }
+        if (!runtimeAppVersionGate.currentState.remoteFeaturesAllowed) {
+            if (runtimeAppVersionGate.currentState.status ==
+                RuntimeAppVersionGate.Status.UPDATE_REQUIRED
+            ) {
+                rejectFusionEvent(event)
+            } else {
+                stageFusionEvent(event)
+            }
+            return
+        }
+        when (configPhase) {
+            AccountConfigPhase.LOADING -> stageFusionEvent(event)
+            AccountConfigPhase.READY -> {
+                val purpose = (event as? FusionAuthEvent.ProofReady)?.purpose
+                if (purpose == null || fusionPurposeIsReady(purpose)) {
+                    consumeFusionEvent(event)
+                } else {
+                    rejectFusionEvent(event)
+                }
+            }
+            AccountConfigPhase.UNAVAILABLE,
+            AccountConfigPhase.INCOMPATIBLE,
+            -> rejectFusionEvent(event)
+        }
+    }
+
     private fun stageWechatEvent(event: WechatOAuthEvent) {
         if (stagedWechatEvent == null) {
             stagedWechatEvent = event
@@ -1079,6 +1288,16 @@ class AccountViewModel @Inject constructor(
         mutableState.update { it.copy(busy = false) }
     }
 
+    private fun stageFusionEvent(event: FusionAuthEvent) {
+        if (stagedFusionEvent == null) {
+            stagedFusionEvent = event
+        } else if (event is FusionAuthEvent.ProofReady) {
+            event.verifyToken.discard()
+            fusionAuth?.completeProof(event.proofId, false)
+        }
+        mutableState.update { it.copy(busy = false) }
+    }
+
     private fun resumeStagedAuthorization(): Boolean {
         stagedWechatEvent?.let { event ->
             stagedWechatEvent = null
@@ -1090,13 +1309,131 @@ class AccountViewModel @Inject constructor(
             handleQqEvent(event)
             return true
         }
+        stagedFusionEvent?.let { event ->
+            stagedFusionEvent = null
+            handleFusionEvent(event)
+            return true
+        }
         return false
+    }
+
+    private fun consumeFusionEvent(event: FusionAuthEvent) {
+        when (event) {
+            FusionAuthEvent.PrivacyRevoked -> clearExternalAuthorization()
+            is FusionAuthEvent.SceneCompleted -> {
+                fusionSceneTimeoutJob?.cancel()
+                fusionSceneTimeoutJob = null
+                if (event.purpose != FusionAuthPurpose.REGISTER) return
+                val proof = pendingFusionRegistrationProof
+                    .takeIf { pendingFusionRegistrationSessionId == event.sessionId }
+                pendingFusionRegistrationProof = null
+                pendingFusionRegistrationSessionId = null
+                if (proof == null) {
+                    mutableState.update {
+                        it.copy(busy = false, message = "手机号注册流程已失效，请重新开始")
+                    }
+                    return
+                }
+                if (
+                    !beginWechatAuthorization(
+                        purpose = OAuthPurpose.REGISTER,
+                        fusionPhoneProof = proof,
+                        allowBusy = true,
+                    )
+                ) {
+                    proof.discard()
+                    mutableState.update {
+                        it.copy(busy = false, message = "暂时无法继续微信授权，请重新开始注册")
+                    }
+                }
+            }
+            is FusionAuthEvent.Failed -> {
+                fusionSceneTimeoutJob?.cancel()
+                fusionSceneTimeoutJob = null
+                pendingFusionRegistrationProof?.discard()
+                pendingFusionRegistrationProof = null
+                pendingFusionRegistrationSessionId = null
+                mutableState.update {
+                    it.copy(busy = false, message = "手机号一键验证未完成，请重试")
+                }
+            }
+            is FusionAuthEvent.ProofReady -> {
+                if (!fusionPurposeIsReady(event.purpose)) {
+                    rejectFusionEvent(event)
+                    return
+                }
+                val launched = launchRemoteAction(allowBusy = true) { generation ->
+                    updateRemoteState(generation) { it.copy(busy = true, message = null) }
+                    val verifyToken = event.verifyToken.consume()
+                    if (verifyToken == null) {
+                        fusionAuth?.completeProof(event.proofId, false)
+                        updateRemoteState(generation) {
+                            it.copy(busy = false, message = "手机号一键验证结果已使用，请重新验证")
+                        }
+                        return@launchRemoteAction
+                    }
+                    when (event.purpose) {
+                        FusionAuthPurpose.LOGIN -> {
+                            val outcome = repository.loginWithFusion(event.flowId, verifyToken)
+                            fusionAuth?.completeProof(
+                                proofId = event.proofId,
+                                success = outcome is AuthOutcome.Success,
+                            )
+                            when (outcome) {
+                                is AuthOutcome.Success -> signedIn(outcome.value, generation)
+                                is AuthOutcome.Failure -> updateRemoteState(generation) {
+                                    it.copy(busy = false, message = outcome.message)
+                                }
+                            }
+                        }
+                        FusionAuthPurpose.REGISTER -> {
+                            when (
+                                val outcome = repository.verifyFusionForRegistration(
+                                    event.flowId,
+                                    verifyToken,
+                                )
+                            ) {
+                                is AuthOutcome.Failure -> {
+                                    fusionAuth?.completeProof(event.proofId, false)
+                                    updateRemoteState(generation) {
+                                        it.copy(busy = false, message = outcome.message)
+                                    }
+                                }
+                                is AuthOutcome.Success -> {
+                                    val phoneProof = PendingFusionPhoneProof.from(
+                                        response = outcome.value,
+                                        configurationGeneration = latestConfigGeneration,
+                                        authorizationGeneration = externalAuthorizationGeneration,
+                                    )
+                                    if (phoneProof == null) {
+                                        fusionAuth?.completeProof(event.proofId, false)
+                                        updateRemoteState(generation) {
+                                            it.copy(
+                                                busy = false,
+                                                message = "手机号验证证明未通过安全校验",
+                                            )
+                                        }
+                                        return@launchRemoteAction
+                                    }
+                                    // The phone provider scene is closed before WeChat is opened.
+                                    pendingFusionRegistrationProof?.discard()
+                                    pendingFusionRegistrationProof = phoneProof
+                                    pendingFusionRegistrationSessionId = event.sessionId
+                                    fusionAuth?.completeProof(event.proofId, true)
+                                }
+                            }
+                        }
+                    }
+                }
+                if (!launched) rejectFusionEvent(event)
+            }
+        }
     }
 
     private fun consumeWechatEvent(event: WechatOAuthEvent) {
         when (event) {
             is WechatOAuthEvent.Failed -> {
-                pendingWechatAction = null
+                pendingWechatAction.also { pendingWechatAction = null }?.discardFusionProof()
                 mutableState.update {
                     it.copy(busy = false, message = event.reason.userMessage())
                 }
@@ -1106,7 +1443,10 @@ class AccountViewModel @Inject constructor(
                 if (
                     action == null ||
                     action.purpose != event.purpose ||
-                    !wechatPurposeIsReady(event.purpose)
+                    !wechatPurposeIsReady(
+                        event.purpose,
+                        fusionRegistration = action?.fusionPhoneProof != null,
+                    )
                 ) {
                     event.discardProof()
                     mutableState.update {
@@ -1133,6 +1473,44 @@ class AccountViewModel @Inject constructor(
                             }
                         }
                         OAuthPurpose.REGISTER -> {
+                            val fusionPhoneProof = action.fusionPhoneProof
+                            if (fusionPhoneProof != null) {
+                                val phoneProofId = fusionPhoneProof.consume(
+                                    configurationGeneration = latestConfigGeneration,
+                                    authorizationGeneration = externalAuthorizationGeneration,
+                                )
+                                if (phoneProofId == null) {
+                                    event.discardProof()
+                                    updateRemoteState(generation) {
+                                        it.copy(
+                                            busy = false,
+                                            message = "手机号验证证明已失效，请重新开始注册",
+                                        )
+                                    }
+                                    return@launchRemoteAction
+                                }
+                                val outcome = event.consumeProof { state, authorizationCode ->
+                                    cancelExportJob()
+                                    repository.registerFusionWechat(
+                                        phoneProofId = phoneProofId,
+                                        oauthState = state,
+                                        authorizationCode = authorizationCode,
+                                    )
+                                }
+                                when (outcome) {
+                                    is AuthOutcome.Success -> signedIn(outcome.value, generation)
+                                    is AuthOutcome.Failure -> updateRemoteState(generation) {
+                                        it.copy(busy = false, message = outcome.message)
+                                    }
+                                    null -> updateRemoteState(generation) {
+                                        it.copy(
+                                            busy = false,
+                                            message = "微信授权流程已使用，请重新发起",
+                                        )
+                                    }
+                                }
+                                return@launchRemoteAction
+                            }
                             val challengeId = action.phoneChallengeId
                             val otpCode = action.phoneOtpCode
                             if (challengeId == null || otpCode == null) {
@@ -1250,7 +1628,7 @@ class AccountViewModel @Inject constructor(
     private fun rejectWechatEvent(event: WechatOAuthEvent? = null) {
         if (event is WechatOAuthEvent.Authorized) event.discardProof()
         (stagedWechatEvent as? WechatOAuthEvent.Authorized)?.discardProof()
-        pendingWechatAction = null
+        pendingWechatAction.also { pendingWechatAction = null }?.discardFusionProof()
         stagedWechatEvent = null
         wechatOAuth.cancelAuthorization()
         mutableState.update { it.copy(busy = false) }
@@ -1265,20 +1643,53 @@ class AccountViewModel @Inject constructor(
         mutableState.update { it.copy(busy = false) }
     }
 
+    private fun rejectFusionEvent(event: FusionAuthEvent? = null) {
+        fusionSceneTimeoutJob?.cancel()
+        fusionSceneTimeoutJob = null
+        pendingFusionRegistrationProof?.discard()
+        pendingFusionRegistrationProof = null
+        pendingFusionRegistrationSessionId = null
+        if (event is FusionAuthEvent.ProofReady) {
+            event.verifyToken.discard()
+            fusionAuth?.completeProof(event.proofId, false)
+        }
+        (stagedFusionEvent as? FusionAuthEvent.ProofReady)?.let { staged ->
+            staged.verifyToken.discard()
+            fusionAuth?.completeProof(staged.proofId, false)
+        }
+        stagedFusionEvent = null
+        fusionAuth?.cancel()
+        mutableState.update { it.copy(busy = false) }
+    }
+
     private fun clearExternalAuthorization() {
+        externalAuthorizationGeneration += 1
         rejectWechatEvent()
         rejectQqEvent()
+        rejectFusionEvent()
     }
 
     private fun discardAuthorizationsDisabledByLatestConfig() {
         val wechatPurpose = pendingWechatAction?.purpose
         if (
             !wechatCapabilityIsReady() ||
-            wechatPurpose != null && !wechatPurposeIsReady(wechatPurpose)
+            wechatPurpose != null && !wechatPurposeIsReady(
+                wechatPurpose,
+                fusionRegistration = pendingWechatAction?.fusionPhoneProof != null,
+            )
         ) {
             rejectWechatEvent()
         }
         if (!qqCapabilityIsReady()) rejectQqEvent()
+        val fusionPurpose =
+            (stagedFusionEvent as? FusionAuthEvent.ProofReady)?.purpose ?:
+                fusionAuth?.activePurpose
+        if (
+            fusionAuthHasPendingWork() &&
+            (fusionPurpose == null || !fusionPurposeIsReady(fusionPurpose))
+        ) {
+            rejectFusionEvent()
+        }
     }
 
     private fun authenticatedMutation(
@@ -1307,12 +1718,19 @@ class AccountViewModel @Inject constructor(
     override fun onCleared() {
         // Challenges and messages are deliberately memory-only and disappear
         // with this navigation-scoped ViewModel.
-        pendingWechatAction = null
+        pendingWechatAction.also { pendingWechatAction = null }?.discardFusionProof()
         pendingQqAction = null
         (stagedWechatEvent as? WechatOAuthEvent.Authorized)?.discardProof()
         stagedWechatEvent = null
         (stagedQqEvent as? QqOAuthEvent.Authorized)?.discardProof()
         stagedQqEvent = null
+        (stagedFusionEvent as? FusionAuthEvent.ProofReady)?.verifyToken?.discard()
+        stagedFusionEvent = null
+        pendingFusionRegistrationProof?.discard()
+        pendingFusionRegistrationProof = null
+        pendingFusionRegistrationSessionId = null
+        fusionSceneTimeoutJob?.cancel()
+        fusionSceneTimeoutJob = null
         remoteAccessGeneration += 1
         remoteActionJob?.cancel()
         remoteActionJob = null
@@ -1324,10 +1742,12 @@ class AccountViewModel @Inject constructor(
         exportJob = null
         wechatOAuth.cancelAuthorization()
         qqOAuth.cancelAuthorization()
+        fusionAuth?.cancel()
         mutableState.value = AccountUiState(
             status = AccountStatus.GUEST,
             wechatClientConfigured = wechatOAuth.clientConfigured,
             qqClientConfigured = qqOAuth.clientConfigured,
+            fusionClientConfigured = fusionAuth?.clientAvailable == true,
         )
         super.onCleared()
     }
@@ -1434,16 +1854,42 @@ class AccountViewModel @Inject constructor(
     private fun wechatCapabilityIsReady(): Boolean =
         accountsAccessIsReady() && activeCapabilities?.wechatEnabled == true
 
-    private fun wechatPurposeIsReady(purpose: OAuthPurpose): Boolean {
+    private fun wechatPurposeIsReady(
+        purpose: OAuthPurpose,
+        fusionRegistration: Boolean = false,
+    ): Boolean {
         val capabilities = activeCapabilities ?: return false
         if (!wechatCapabilityIsReady()) return false
         return when (purpose) {
             OAuthPurpose.LOGIN -> true
             OAuthPurpose.BIND -> false
             OAuthPurpose.REGISTER ->
-                capabilities.registrationEnabled && capabilities.phoneEnabled
+                capabilities.registrationEnabled &&
+                    ((fusionRegistration && capabilities.fusionEnabled) || capabilities.phoneEnabled)
         }
     }
+
+    private fun fusionPurposeIsReady(purpose: FusionAuthPurpose): Boolean {
+        val capabilities = activeCapabilities ?: return false
+        if (
+            !accountsAccessIsReady() ||
+            mutableState.value.status != AccountStatus.GUEST ||
+            capabilities.fusionEnabled != true ||
+            fusionAuth?.clientAvailable != true
+        ) {
+            return false
+        }
+        return when (purpose) {
+            FusionAuthPurpose.LOGIN -> true
+            FusionAuthPurpose.REGISTER ->
+                capabilities.registrationEnabled &&
+                    capabilities.wechatEnabled &&
+                    mutableState.value.wechatClientConfigured
+        }
+    }
+
+    private fun fusionAuthHasPendingWork(): Boolean =
+        fusionAuth?.hasActiveSession == true || stagedFusionEvent != null
 
     private fun qqCapabilityIsReady(): Boolean =
         accountsAccessIsReady() && activeCapabilities?.qqEnabled == true
@@ -1452,8 +1898,70 @@ class AccountViewModel @Inject constructor(
         val purpose: OAuthPurpose,
         val phoneChallengeId: String?,
         val phoneOtpCode: String?,
+        val fusionPhoneProof: PendingFusionPhoneProof? = null,
     ) {
+        fun discardFusionProof() = fusionPhoneProof?.discard()
+
         override fun toString(): String = "PendingWechatAction(purpose=$purpose)"
+    }
+
+    private class PendingFusionPhoneProof private constructor(
+        proofId: String,
+        private val expiresAt: Instant,
+        private val configurationGeneration: Long,
+        private val authorizationGeneration: Long,
+    ) {
+        private val proofId = AtomicReference(proofId)
+
+        fun idForOAuthState(
+            configurationGeneration: Long,
+            authorizationGeneration: Long,
+        ): String? = proofId.get()?.takeIf {
+            isCurrent(configurationGeneration, authorizationGeneration)
+        }
+
+        fun consume(
+            configurationGeneration: Long,
+            authorizationGeneration: Long,
+        ): String? {
+            if (!isCurrent(configurationGeneration, authorizationGeneration)) {
+                discard()
+                return null
+            }
+            return proofId.getAndSet(null)
+        }
+
+        fun discard() {
+            proofId.set(null)
+        }
+
+        private fun isCurrent(
+            configurationGeneration: Long,
+            authorizationGeneration: Long,
+        ): Boolean =
+            this.configurationGeneration == configurationGeneration &&
+                this.authorizationGeneration == authorizationGeneration &&
+                expiresAt.isAfter(Instant.now())
+
+        override fun toString(): String = "PendingFusionPhoneProof(REDACTED)"
+
+        companion object {
+            fun from(
+                response: FusionRegistrationPhoneProof,
+                configurationGeneration: Long,
+                authorizationGeneration: Long,
+            ): PendingFusionPhoneProof? {
+                val expiresAt = runCatching { Instant.parse(response.expiresAt) }.getOrNull()
+                    ?: return null
+                if (!expiresAt.isAfter(Instant.now())) return null
+                return PendingFusionPhoneProof(
+                    proofId = response.proofId,
+                    expiresAt = expiresAt,
+                    configurationGeneration = configurationGeneration,
+                    authorizationGeneration = authorizationGeneration,
+                )
+            }
+        }
     }
 
     private class PendingQqAction(val purpose: OAuthPurpose) {
@@ -1498,8 +2006,21 @@ class AccountViewModel @Inject constructor(
         -> "暂时无法完成 QQ 授权，请稍后重试"
     }
 
+    private fun FusionAuthStartResult.Rejected.userMessage(): String = when (this) {
+        FusionAuthStartResult.Rejected.PRIVACY_REQUIRED ->
+            "请先同意隐私政策后再使用手机号一键验证"
+        FusionAuthStartResult.Rejected.SERVER_DISABLED,
+        FusionAuthStartResult.Rejected.CLIENT_UNAVAILABLE,
+        -> "当前安装包暂未开放手机号一键验证"
+        FusionAuthStartResult.Rejected.INVALID_TOKEN -> "手机号验证凭证已失效，请重试"
+        FusionAuthStartResult.Rejected.HOST_UNAVAILABLE -> "当前页面暂时无法启动手机号验证，请重试"
+        FusionAuthStartResult.Rejected.BUSY -> "已有手机号验证正在进行，请稍候"
+        FusionAuthStartResult.Rejected.SDK_FAILURE -> "暂时无法启动手机号一键验证，请稍后重试"
+    }
+
 	private companion object {
 		val OTP_CODE_PATTERN = Regex("^\\d{6}$")
+		const val FUSION_SCENE_TIMEOUT_MILLIS = 90_000L
 	}
 
     private enum class AccountConfigPhase { LOADING, READY, UNAVAILABLE, INCOMPATIBLE }

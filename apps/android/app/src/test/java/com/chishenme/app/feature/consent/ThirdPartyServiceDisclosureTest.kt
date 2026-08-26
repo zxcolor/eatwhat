@@ -1,6 +1,5 @@
 package com.chishenme.app.feature.consent
 
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -18,7 +17,29 @@ class ThirdPartyServiceDisclosureTest {
         assertTrue(disclosure.contains("自有后端"))
         assertTrue(disclosure.contains("阿里云隐私政策"))
         assertTrue(disclosure.contains("必须补充实际 SMTP 服务商主体和隐私政策"))
-        assertFalse(disclosure.contains("阿里云 Android SDK"))
+        assertTrue(disclosure.contains("阿里云融合认证 Android SDK"))
+    }
+
+    @Test
+    fun `discloses delayed Fusion and Umeng risk SDK collection and server retention`() {
+        val disclosure = THIRD_PARTY_SERVICE_DISCLOSURE
+
+        assertTrue(disclosure.contains("主动点击一键登录或一键注册"))
+        assertTrue(disclosure.contains("READ_PHONE_STATE"))
+        assertTrue(disclosure.contains("CHANGE_WIFI_STATE"))
+        assertTrue(disclosure.contains("ACCESS_WIFI_STATE"))
+        assertTrue(disclosure.contains("CHANGE_NETWORK_STATE"))
+        assertTrue(disclosure.contains("RECEIVE_USER_PRESENT"))
+        assertTrue(disclosure.contains("AD_ID"))
+        assertTrue(disclosure.contains("友盟登录安全 SDK"))
+        assertTrue(disclosure.contains("IMEI、MAC、Android ID"))
+        assertTrue(disclosure.contains("Advertising ID（广告标识符）"))
+        assertTrue(disclosure.contains("不用于广告投放、广告画像"))
+        assertTrue(disclosure.contains("ICCID、SIM IMSI"))
+        assertTrue(disclosure.contains("完整手机号仅作瞬时校验"))
+        assertTrue(disclosure.contains("不可逆手机号哈希、掩码及最长 24 小时"))
+        assertTrue(disclosure.contains("手机号单因子不能创建账号"))
+        assertTrue(disclosure.contains("撤回隐私同意、取消、页面销毁、应用进入后台或配置变化"))
     }
 
     @Test

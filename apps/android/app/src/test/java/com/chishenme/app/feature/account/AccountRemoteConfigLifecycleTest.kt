@@ -2,6 +2,12 @@ package com.chishenme.app.feature.account
 
 import android.app.Activity
 import android.content.Intent
+import com.chishenme.app.auth.fusion.FusionAuthHost
+import com.chishenme.app.auth.fusion.FusionAuthManager
+import com.chishenme.app.auth.fusion.FusionAuthProofCompletion
+import com.chishenme.app.auth.fusion.FusionAuthSdk
+import com.chishenme.app.auth.fusion.FusionAuthSdkFactory
+import com.chishenme.app.auth.fusion.FusionAuthSdkListener
 import com.chishenme.app.auth.qq.QqConsentGate
 import com.chishenme.app.auth.qq.QqLoginHost
 import com.chishenme.app.auth.qq.QqOAuthCoordinator
@@ -31,10 +37,13 @@ import com.chishenme.app.data.remote.AuthSessionSummary
 import com.chishenme.app.data.remote.DataRightsMode
 import com.chishenme.app.data.remote.DeleteAccountResponse
 import com.chishenme.app.data.remote.FeatureConfig
+import com.chishenme.app.data.remote.FusionAuthPurpose
+import com.chishenme.app.data.remote.FusionAuthTokenResponse
 import com.chishenme.app.data.remote.OAuthPurpose
 import com.chishenme.app.data.remote.OAuthStateResponse
 import com.chishenme.app.data.remote.OtpPurpose
 import com.chishenme.app.feature.config.RemoteFeatureConfigState
+import com.chishenme.app.feature.consent.PrivacyAuthorizationGate
 import java.time.Instant
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.resume
@@ -57,6 +66,98 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class AccountRemoteConfigLifecycleTest {
+    @Test
+    fun `host stop for active fusion preserves trusted lease and consumes proof`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val auth = ConfigLifecycleAuthActions()
+            val fusionFactory = ConfigLifecycleFusionFactory()
+            val fusionManager = FusionAuthManager(
+                factory = fusionFactory,
+                privacyAuthorizationGate = ConfigLifecyclePrivacyGate,
+            )
+            val fixture = fixture(auth, fusionManager)
+            fixture.start(
+                ready(
+                    1,
+                    capabilities(phone = false, fusion = true),
+                ),
+            )
+            runCurrent()
+
+            fusionManager.start(
+                host = ConfigLifecycleFusionHost,
+                configurationGeneration = 1,
+                purpose = FusionAuthPurpose.LOGIN,
+                serverEnabled = true,
+                token = FusionAuthTokenResponse(
+                    flowId = "2af305ae-82a1-4f87-86b7-1c97c4a8683f",
+                    schemeCode = "scheme-100001",
+                    authToken = "a",
+                    expiresAt = Instant.now().plusSeconds(600).toString(),
+                ),
+            )
+
+            fixture.viewModel.suspendRemoteAccessForForegroundRefresh()
+            val completion = ConfigLifecycleFusionCompletion()
+            fusionFactory.sdk.listener!!.onProof("v", completion)
+            runCurrent()
+
+            assertEquals(1, auth.fusionLoginCalls)
+            assertEquals(listOf(true), completion.results)
+            assertEquals(AccountStatus.SIGNED_IN, fixture.viewModel.state.value.status)
+            assertTrue(fusionManager.hasActiveSession)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `page exit cancels active fusion discards proof and rejects late callback`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val auth = ConfigLifecycleAuthActions()
+            val fusionFactory = ConfigLifecycleFusionFactory()
+            val fusionManager = FusionAuthManager(
+                factory = fusionFactory,
+                privacyAuthorizationGate = ConfigLifecyclePrivacyGate,
+            )
+            val fixture = fixture(auth, fusionManager)
+            fixture.start(ready(1, capabilities(phone = false, fusion = true)))
+            runCurrent()
+            fusionManager.start(
+                host = ConfigLifecycleFusionHost,
+                configurationGeneration = 1,
+                purpose = FusionAuthPurpose.LOGIN,
+                serverEnabled = true,
+                token = FusionAuthTokenResponse(
+                    flowId = "2af305ae-82a1-4f87-86b7-1c97c4a8683f",
+                    schemeCode = "scheme-100001",
+                    authToken = "a",
+                    expiresAt = Instant.now().plusSeconds(600).toString(),
+                ),
+            )
+
+            val firstCompletion = ConfigLifecycleFusionCompletion()
+            val listener = fusionFactory.sdk.listener!!
+            listener.onProof("v", firstCompletion)
+            fixture.viewModel.cancelFusionForPageExit()
+            runCurrent()
+
+            assertEquals(listOf(false), firstCompletion.results)
+            assertFalse(fusionManager.hasActiveSession)
+            assertEquals(0, auth.fusionLoginCalls)
+
+            val lateCompletion = ConfigLifecycleFusionCompletion()
+            listener.onProof("l", lateCompletion)
+            runCurrent()
+            assertEquals(listOf(false), lateCompletion.results)
+            assertEquals(0, auth.fusionLoginCalls)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
     @Test
     fun `configuration recreation can reapply the same ready generation after local suspension`() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
@@ -208,7 +309,10 @@ class AccountRemoteConfigLifecycleTest {
         }
     }
 
-    private fun fixture(auth: ConfigLifecycleAuthActions): ConfigLifecycleFixture {
+    private fun fixture(
+        auth: ConfigLifecycleAuthActions,
+        fusionAuth: FusionAuthManager? = null,
+    ): ConfigLifecycleFixture {
         val runtimeGate = com.chishenme.app.feature.config.RuntimeAppVersionGate("0.1.0")
         val wechatFactory = ConfigLifecycleWechatFactory()
         val wechatManager = WechatOAuthManager(
@@ -229,6 +333,7 @@ class AccountRemoteConfigLifecycleTest {
                 wechatOAuth = wechatManager,
                 qqOAuth = qqManager,
                 runtimeAppVersionGate = runtimeGate,
+                fusionAuth = fusionAuth,
             ),
             wechatManager = wechatManager,
             qqManager = qqManager,
@@ -256,16 +361,19 @@ class AccountRemoteConfigLifecycleTest {
 
     private fun capabilities(
         accounts: Boolean = true,
+        phone: Boolean = accounts,
         wechat: Boolean = false,
         qq: Boolean = false,
+        fusion: Boolean = false,
     ) = AuthCapabilities(
         accountsEnabled = accounts,
         registrationEnabled = false,
-        phoneEnabled = accounts,
+        phoneEnabled = accounts && phone,
         wechatEnabled = accounts && wechat,
         emailEnabled = accounts,
         qqEnabled = accounts && qq,
         dataExportEnabled = false,
+        fusionEnabled = accounts && fusion,
     )
 
     companion object {
@@ -317,6 +425,7 @@ private class ConfigLifecycleAuthActions : AccountAuthActions {
     var oauthStateCalls = 0
     var wechatLoginCalls = 0
     var qqLoginCalls = 0
+    var fusionLoginCalls = 0
     var holdNextRestore = false
     private var restoreContinuation: Continuation<AuthOutcome<LocalAuthSession?>>? = null
 
@@ -373,6 +482,14 @@ private class ConfigLifecycleAuthActions : AccountAuthActions {
         qqAccessToken: String,
     ): AuthOutcome<LocalAuthSession> {
         qqLoginCalls += 1
+        return AuthOutcome.Success(testSession())
+    }
+
+    override suspend fun loginWithFusion(
+        flowId: String,
+        verifyToken: String,
+    ): AuthOutcome<LocalAuthSession> {
+        fusionLoginCalls += 1
         return AuthOutcome.Success(testSession())
     }
 
@@ -478,6 +595,56 @@ private class ConfigLifecycleQqFactory : QqSdkSessionFactory {
 private class ConfigLifecycleQqHost : QqLoginHost {
     override val isAvailable: Boolean = true
     override fun launch(session: QqSdkSession): Boolean = true
+}
+
+private object ConfigLifecyclePrivacyGate : PrivacyAuthorizationGate {
+    override suspend fun isAccepted(): Boolean = true
+
+    override fun revoke() = Unit
+
+    override fun allowAfterDurableAcceptance(): Boolean = true
+}
+
+private class ConfigLifecycleFusionFactory : FusionAuthSdkFactory {
+    override val available: Boolean = true
+    val sdk = ConfigLifecycleFusionSdk()
+
+    override fun create(): FusionAuthSdk = sdk
+}
+
+private class ConfigLifecycleFusionSdk : FusionAuthSdk {
+    var listener: FusionAuthSdkListener? = null
+
+    override fun start(
+        activity: Activity,
+        schemeCode: String,
+        authToken: String,
+        listener: FusionAuthSdkListener,
+    ): Boolean = error("ConfigLifecycleFusionHost bypasses Activity")
+
+    override fun cancel() = Unit
+}
+
+private object ConfigLifecycleFusionHost : FusionAuthHost {
+    override val isAvailable: Boolean = true
+
+    override fun launch(
+        sdk: FusionAuthSdk,
+        schemeCode: String,
+        authToken: String,
+        listener: FusionAuthSdkListener,
+    ): Boolean {
+        (sdk as ConfigLifecycleFusionSdk).listener = listener
+        return true
+    }
+}
+
+private class ConfigLifecycleFusionCompletion : FusionAuthProofCompletion {
+    val results = mutableListOf<Boolean>()
+
+    override fun complete(success: Boolean) {
+        results += success
+    }
 }
 
 private fun testSession() = LocalAuthSession(

@@ -12,6 +12,12 @@ enum class OtpPurpose { REGISTER, LOGIN, BIND }
 enum class OAuthPurpose { REGISTER, LOGIN, BIND }
 
 @Serializable
+enum class FusionAuthPurpose { LOGIN, REGISTER }
+
+@Serializable
+enum class AuthLoginMethod { PHONE, EMAIL, PHONE_FUSION, WECHAT, QQ }
+
+@Serializable
 data class AuthDeviceContext(
     val installationId: String,
     val label: String,
@@ -43,11 +49,50 @@ data class AuthCodeChallenge(
 )
 
 @Serializable
+data class FusionAuthTokenRequest(
+    val purpose: FusionAuthPurpose,
+    val installationId: String,
+)
+
+@Serializable
+data class FusionAuthTokenResponse(
+    val flowId: String,
+    val schemeCode: String,
+    val authToken: String,
+    val expiresAt: String,
+) {
+    override fun toString(): String =
+        "FusionAuthTokenResponse(flowId=$flowId, schemeCode=$schemeCode, " +
+            "authToken=REDACTED, expiresAt=$expiresAt)"
+}
+
+@Serializable
+data class FusionRegistrationVerifyRequest(
+    val flowId: String,
+    val verifyToken: String,
+    val installationId: String,
+) {
+    override fun toString(): String =
+        "FusionRegistrationVerifyRequest(flowId=$flowId, verifyToken=REDACTED, " +
+            "installationId=$installationId)"
+}
+
+@Serializable
+data class FusionRegistrationPhoneProof(
+    val proofId: String,
+    val expiresAt: String,
+) {
+    override fun toString(): String =
+        "FusionRegistrationPhoneProof(proofId=REDACTED, expiresAt=$expiresAt)"
+}
+
+@Serializable
 data class OAuthStateRequest(
     val provider: AuthIdentityType,
     val purpose: OAuthPurpose,
     val installationId: String,
     val phoneChallengeId: String? = null,
+    val phoneProofId: String? = null,
 )
 
 @Serializable
@@ -67,6 +112,19 @@ data class RegisterPhoneWechatRequest(
     val device: AuthDeviceContext,
 )
 
+@Serializable
+data class RegisterFusionWechatRequest(
+    val phoneProofId: String,
+    val wechatOAuthState: String,
+    val wechatAuthorizationCode: String,
+    val device: AuthDeviceContext,
+) {
+    override fun toString(): String =
+        "RegisterFusionWechatRequest(phoneProofId=REDACTED, " +
+            "wechatOAuthState=REDACTED, wechatAuthorizationCode=REDACTED, " +
+            "device=$device)"
+}
+
 /**
  * The server contract is a discriminated union. Nullable properties are omitted
  * by the shared Json configuration, and repository factory methods below the
@@ -74,14 +132,25 @@ data class RegisterPhoneWechatRequest(
  */
 @Serializable
 data class AuthLoginRequest(
-    val method: AuthIdentityType,
+    val method: AuthLoginMethod,
     val device: AuthDeviceContext,
     val challengeId: String? = null,
     val otpCode: String? = null,
+    val flowId: String? = null,
+    val verifyToken: String? = null,
     val oauthState: String? = null,
     val authorizationCode: String? = null,
     val accessToken: String? = null,
-)
+) {
+    override fun toString(): String =
+        "AuthLoginRequest(method=$method, device=$device, challengeId=$challengeId, " +
+            "otpCode=${otpCode.redacted()}, flowId=$flowId, " +
+            "verifyToken=${verifyToken.redacted()}, oauthState=${oauthState.redacted()}, " +
+            "authorizationCode=${authorizationCode.redacted()}, " +
+            "accessToken=${accessToken.redacted()})"
+
+    private fun String?.redacted(): String? = if (this == null) null else "REDACTED"
+}
 
 @Serializable
 data class AuthTokenResponse(
@@ -191,4 +260,9 @@ data class AuthCapabilities(
      * public feature configuration.
      */
     val dataExportEnabled: Boolean = false,
+    /**
+     * Absent on an older service response means the provider is disabled. The
+     * client also requires an Alpha build that contains the pinned local AAR.
+     */
+    val fusionEnabled: Boolean = false,
 )

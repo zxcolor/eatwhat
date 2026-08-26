@@ -99,6 +99,10 @@ $script:RequiredMappings = @(
         BundleRelative = 'scripts/update-amap-secrets.sh'
     },
     [pscustomobject]@{
+        SourceRelative = 'infra/ecs/scripts/update-auth-secrets.sh'
+        BundleRelative = 'scripts/update-auth-secrets.sh'
+    },
+    [pscustomobject]@{
         SourceRelative = 'infra/ecs/scripts/verify-database-backup.sh'
         BundleRelative = 'scripts/verify-database-backup.sh'
     },
@@ -414,6 +418,15 @@ function Test-SafePlaceholderValue {
         $trimmed -match '^(?:[./\\]|[A-Za-z]:[\\/])[A-Za-z0-9_./\\:-]+$') {
         return $true
     }
+    if ($Name -ceq 'ALIYUN_CREDENTIAL_ALLOWED_PROVIDER' -and
+        $trimmed -in @('default/ecs_ram_role', 'default/oidc_role_arn')) {
+        return $true
+    }
+    if ($Name -ceq 'ALIYUN_FUSION_TOKEN_TTL_SECONDS' -and
+        $trimmed -match '^(?:[0-9]{3,5})$') {
+        $ttl = [int]$trimmed
+        return $ttl -ge 900 -and $ttl -le 43200
+    }
 
     return $false
 }
@@ -710,6 +723,12 @@ function Assert-EcsOperationalGates {
     $amap = [System.IO.File]::ReadAllText(
         (Join-Path -Path $BundleRoot -ChildPath 'scripts/update-amap-secrets.sh')
     )
+    $auth = [System.IO.File]::ReadAllText(
+        (Join-Path -Path $BundleRoot -ChildPath 'scripts/update-auth-secrets.sh')
+    )
+    $preflight = [System.IO.File]::ReadAllText(
+        (Join-Path -Path $BundleRoot -ChildPath 'scripts/preflight-deployment.sh')
+    )
     $releaseActivation = [System.IO.File]::ReadAllText(
         (Join-Path -Path $BundleRoot -ChildPath 'scripts/activate-candidate-release.sh')
     )
@@ -737,6 +756,39 @@ function Assert-EcsOperationalGates {
         -not $amap.Contains('mutation_lock="$lock_directory/mutation.lock"') -or
         -not $amap.Contains('flock -n 8')) {
         throw 'AMap secret updater is missing its whitelist, recreate or rollback gate.'
+    }
+    foreach ($required in @(
+        'update-auth-secrets.sh --apply --config-file FILE',
+        'readonly FUSION_DRAIN_SECONDS=43200',
+        'drain_state="$secrets_dir/auth-key-drain.env"',
+        'mutation_lock="$lock_directory/mutation.lock"',
+        'flock -n 8',
+        'updated authentication configuration failed preflight and was rolled back',
+        'AUTH_IDENTITY_DEDUP_KEY_VERSION changes require a dedicated audited migration',
+        'SELECT count(*) FROM public.fusion_auth_flows WHERE consumed_at IS NULL AND expires_at > clock_timestamp()',
+        'active FusionAuth flows still block key removal',
+        'authentication keys must drain for at least 12 hours before removal',
+        'AUTH_KEY_DRAIN_STATE_RETAINED=true',
+        "drain_action='replace-candidate'",
+        'build_drain_candidate "$api_candidate" "$drain_timestamp"',
+        'API_RECREATE_REQUIRED=true'
+    )) {
+        if (-not $auth.Contains($required)) {
+            throw "Authentication secret updater is missing a safety gate: $required"
+        }
+    }
+    foreach ($required in @(
+        '--network none --read-only',
+        '--env-file "$secrets_dir/api.env"',
+        'loadAuthRuntimeConfig(process.env',
+        'production: true',
+        'AUTH_CONFIG_VALIDATION=OK',
+        '/app/dist/auth/auth-config.js',
+        'API image rejected authentication configuration'
+    )) {
+        if (-not $preflight.Contains($required)) {
+            throw "Deployment preflight is missing runtime-equivalent authentication validation: $required"
+        }
     }
     foreach ($required in @(
         "lock_directory='/run/lock/chi-shen-me'",

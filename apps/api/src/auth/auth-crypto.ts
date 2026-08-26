@@ -150,12 +150,14 @@ export function hashSensitiveRateLimitValue(
 		| "ip"
 		| "idempotency"
 		| "oauth-state"
-		| "flow-reference",
+		| "flow-reference"
+		| "fusion-verify-token",
 	value: string,
 	keyRing: AuthSecretKeyRing,
 	keyVersion = keyRing.activeVersion,
 ): VersionedHash {
-	if (value.length < 1 || value.length > 2_048) {
+	const maximumLength = domain === "fusion-verify-token" ? 4_096 : 2_048;
+	if (value.length < 1 || value.length > maximumLength) {
 		throw new Error("认证限流值格式无效");
 	}
 	return hmacValue(keyRing, keyVersion, `rate-limit:${domain}`, value);

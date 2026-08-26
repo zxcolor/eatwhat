@@ -137,7 +137,7 @@ describe("database role grant deployment gate", () => {
 		const maintenanceGrants = grants.filter((grant) =>
 			grant.includes('TO :"maintenance_role"'),
 		);
-		expect(maintenanceGrants).toHaveLength(11);
+		expect(maintenanceGrants).toHaveLength(13);
 		expect(maintenanceGrants.join("\n")).not.toMatch(
 			/otp_challenges|auth_refresh_credentials|auth_access_tokens|DELETE|INSERT|UPDATE/u,
 		);
@@ -146,6 +146,12 @@ describe("database role grant deployment gate", () => {
 		);
 		expect(maintenanceGrants.join("\n")).toContain("preview_retention_cleanup");
 		expect(maintenanceGrants.join("\n")).toContain("execute_retention_cleanup");
+		expect(maintenanceGrants.join("\n")).toContain(
+			"preview_fusion_auth_retention_cleanup",
+		);
+		expect(maintenanceGrants.join("\n")).toContain(
+			"execute_fusion_auth_retention_cleanup",
+		);
 		expect(maintenanceGrants.join("\n")).toContain("complete_account_deletion");
 		expect(maintenanceGrants.join("\n")).toContain(
 			"preview_admin_security_retention_cleanup",
@@ -212,6 +218,7 @@ describe("database role grant deployment gate", () => {
 			"GRANT EXECUTE ON FUNCTION public.append_admin_audit_event",
 		);
 		expect(sql).toContain("GRANT SELECT, INSERT ON\n  public.otp_challenges");
+		expect(sql).toContain("public.fusion_auth_flows");
 		expect(sql).toContain(
 			"GRANT UPDATE (revoked_at) ON public.auth_access_tokens",
 		);
@@ -224,6 +231,9 @@ describe("database role grant deployment gate", () => {
 			"rotate_auth_refresh_credential",
 			"mark_auth_refresh_replay",
 			"consume_oauth_state",
+			"claim_fusion_auth_verify_token",
+			"record_fusion_auth_result",
+			"register_fusion_phone_wechat_account",
 			"persistence_insert_favorite",
 			"persistence_record_history",
 			"persistence_insert_private_feedback",

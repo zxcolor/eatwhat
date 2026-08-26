@@ -26,6 +26,9 @@ function config(input?: {
 	history?: boolean;
 	privateFeedback?: boolean;
 	dataExport?: boolean;
+	phone?: boolean;
+	fusion?: boolean;
+	wechat?: boolean;
 }): AppConfig {
 	const base = loadAppConfig({ NODE_ENV: "test" });
 	const accountsEnabled = input?.accounts ?? true;
@@ -37,6 +40,18 @@ function config(input?: {
 			...base.auth,
 			enabled: accountsEnabled,
 			dataExportEnabled,
+			phone: Object.freeze({
+				...base.auth.phone,
+				enabled: input?.phone ?? false,
+			}),
+			fusion: Object.freeze({
+				...base.auth.fusion,
+				enabled: input?.fusion ?? false,
+			}),
+			wechat: Object.freeze({
+				...base.auth.wechat,
+				enabled: input?.wechat ?? false,
+			}),
 		}),
 		dataExportArtifacts: Object.freeze({
 			...base.dataExportArtifacts,
@@ -174,6 +189,27 @@ describe("FeatureConfigService persistence capabilities", () => {
 		);
 		await expect(notReady.getPublicConfig()).resolves.toMatchObject({
 			authCapabilities: { dataExportEnabled: false },
+		});
+	});
+
+	it("keeps SMS and fusion capabilities separate while either can support WeChat registration", async () => {
+		const service = new FeatureConfigService(
+			config({ accounts: true, phone: false, fusion: true, wechat: true }),
+			placeProvider,
+			locationSearchProvider,
+			placeSearchProvider,
+			policy(),
+			supportFeedback(),
+		);
+
+		await expect(service.getPublicConfig()).resolves.toMatchObject({
+			authCapabilities: {
+				accountsEnabled: true,
+				registrationEnabled: true,
+				phoneEnabled: false,
+				fusionEnabled: true,
+				wechatEnabled: true,
+			},
 		});
 	});
 

@@ -7,11 +7,13 @@ import type {
 import type { SqlResult } from "../database/migration-runner.js";
 import { PostgresAuthRepository } from "./auth.repository.js";
 import type {
+	FusionAuthProof,
 	OAuthProof,
 	OAuthStateDraft,
 	OtpChallengeDraft,
 	OtpProof,
 	SessionIssueDraft,
+	VerifiedFusionAuthProof,
 } from "./auth-workflow.types.js";
 
 interface StoredOAuthState {
@@ -299,6 +301,30 @@ const registrationOAuthProof: OAuthProof = {
 	hashKeyVersion: "v1",
 };
 
+const fusionLoginProof: FusionAuthProof = {
+	id: "55555555-5555-4555-8555-555555555555",
+	purpose: "LOGIN",
+	registrationFlowReferenceHash: null,
+	deviceHash: registrationOtpProof.deviceHash,
+	hashKeyVersion: "v1",
+	expiresAt: new Date("2026-08-21T04:10:00.000Z"),
+};
+
+const verifiedFusionProof: VerifiedFusionAuthProof = {
+	...fusionLoginProof,
+	id: "44444444-4444-4444-8444-444444444444",
+	purpose: "REGISTER",
+	registrationFlowReferenceHash: "f".repeat(64),
+	expiresAt: new Date("2026-08-21T04:05:00.000Z"),
+	verifiedAt: new Date("2026-08-21T04:00:00.000Z"),
+	verifiedPhone: {
+		lookup: { value: "6".repeat(64), keyVersion: "v1" },
+		dedup: { value: "7".repeat(64), keyVersion: "v1" },
+		maskedPhone: "+86138****8000",
+		verifyTokenHash: { value: "8".repeat(64), keyVersion: "v1" },
+	},
+};
+
 const sessionDraft: SessionIssueDraft = {
 	sessionId: "77777777-7777-4777-8777-777777777777",
 	refreshCredentialId: "88888888-8888-4888-8888-888888888888",
@@ -485,6 +511,103 @@ describe("PostgresAuthRepository transaction workflows", () => {
 		expect(database.calls).toHaveLength(1);
 	});
 
+	it("atomically submits every fusion replay-key candidate with the stable primary hash", async () => {
+		let parameters: readonly unknown[] = [];
+		const database = new ScriptedDatabase((text, values) => {
+			expect(text).toContain("claim_fusion_auth_verify_token");
+			parameters = values;
+			return result({ changed: true });
+		});
+		const candidates = [
+			{ value: "8".repeat(64), keyVersion: "v1" },
+			{ value: "9".repeat(64), keyVersion: "stable-v1" },
+		];
+		const primary = candidates[1];
+		if (primary === undefined) throw new Error("test primary hash unavailable");
+		const claimed = await new PostgresAuthRepository(
+			database as unknown as DatabasePool,
+		).claimFusionVerifyToken(fusionLoginProof, candidates, primary);
+
+		expect(claimed).toBe(true);
+		expect(parameters).toEqual([
+			fusionLoginProof.id,
+			"LOGIN",
+			fusionLoginProof.deviceHash,
+			fusionLoginProof.hashKeyVersion,
+			["8".repeat(64), "9".repeat(64)],
+			["v1", "stable-v1"],
+			"9".repeat(64),
+			"stable-v1",
+		]);
+	});
+
+	it("uses proof_expires_at as the only REGISTER fusion proof deadline", async () => {
+		const proofExpiresAt = new Date("2026-08-21T04:05:00.000Z");
+		const database = new ScriptedDatabase((text) => {
+			expect(text).toContain("proof_expires_at > clock_timestamp()");
+			return result({
+				id: verifiedFusionProof.id,
+				purpose: "REGISTER",
+				registration_flow_reference_hash:
+					verifiedFusionProof.registrationFlowReferenceHash,
+				device_hash: verifiedFusionProof.deviceHash,
+				hash_key_version: "v1",
+				expires_at: new Date("2026-08-21T04:10:00.000Z"),
+				proof_expires_at: proofExpiresAt,
+				verified_phone_lookup_hash: "6".repeat(64),
+				verified_phone_lookup_key_version: "v1",
+				verified_phone_dedup_hash: "7".repeat(64),
+				verified_phone_dedup_key_version: "v1",
+				masked_phone: "+86138****8000",
+				verify_token_hash: "8".repeat(64),
+				verify_token_hash_key_version: "v1",
+				verified_at: new Date("2026-08-21T04:00:00.000Z"),
+			});
+		});
+		const proof = await new PostgresAuthRepository(
+			database as unknown as DatabasePool,
+		).findVerifiedFusionProof(verifiedFusionProof.id, [
+			verifiedFusionProof.deviceHash,
+		]);
+		expect(proof?.expiresAt).toEqual(proofExpiresAt);
+	});
+
+	it("consumes a fusion login attempt before resolving the bound phone and issuing a session", async () => {
+		const database = new ScriptedDatabase((text) => {
+			if (text.includes("record_fusion_auth_result")) {
+				return result({ changed: true });
+			}
+			if (text.includes("SELECT binding.user_id")) {
+				return result({ user_id: authenticatedContext.userId });
+			}
+			if (text.includes("INSERT INTO public.auth_")) return empty(1);
+			throw new Error("unexpected fusion login SQL");
+		});
+		const outcome = await new PostgresAuthRepository(
+			database as unknown as DatabasePool,
+		).completeFusionLogin({
+			proof: fusionLoginProof,
+			verifyTokenHash: verifiedFusionProof.verifiedPhone.verifyTokenHash,
+			verifiedPhone: verifiedFusionProof.verifiedPhone,
+			session: sessionDraft,
+		});
+		expect(outcome).toMatchObject({
+			kind: "SUCCESS",
+			userId: authenticatedContext.userId,
+		});
+		const consume = database.calls.findIndex((sql) =>
+			sql.includes("record_fusion_auth_result"),
+		);
+		const identity = database.calls.findIndex((sql) =>
+			sql.includes("SELECT binding.user_id"),
+		);
+		const session = database.calls.findIndex((sql) =>
+			sql.includes("INSERT INTO public.auth_session_families"),
+		);
+		expect(consume).toBeLessThan(identity);
+		expect(identity).toBeLessThan(session);
+	});
+
 	it("inserts the replacement refresh before rotate and access issuance", async () => {
 		const activeRow = {
 			credential_id: "11111111-1111-4111-8111-111111111111",
@@ -642,6 +765,44 @@ describe("PostgresAuthRepository transaction workflows", () => {
 			"INSERT INTO public.auth_session_families",
 			"INSERT INTO public.auth_refresh_credentials",
 			"INSERT INTO public.auth_access_tokens",
+		];
+		const indexes = orderedFragments.map((fragment) =>
+			database.calls.findIndex((sql) => sql.includes(fragment)),
+		);
+		expect(indexes.every((index) => index >= 0)).toBe(true);
+		expect(indexes).toEqual([...indexes].sort((left, right) => left - right));
+	});
+
+	it("atomically claims a verified fusion proof and consumed WeChat state for registration", async () => {
+		const database = new ScriptedDatabase((text) => {
+			if (text.includes("consume_oauth_state")) {
+				return result({ changed: true });
+			}
+			if (text.includes("SELECT binding.user_id")) return empty();
+			if (text.includes("register_fusion_phone_wechat_account")) {
+				return result({ changed: true });
+			}
+			if (text.includes("INSERT INTO public.auth_")) return empty(1);
+			throw new Error("unexpected fusion registration SQL");
+		});
+		const outcome = await new PostgresAuthRepository(
+			database as unknown as DatabasePool,
+		).completeFusionRegistration({
+			newUserId: authenticatedContext.userId,
+			phoneProof: verifiedFusionProof,
+			oauthProof: registrationOAuthProof,
+			verifiedWechatIdentity,
+			session: sessionDraft,
+		});
+		expect(outcome).toMatchObject({
+			kind: "SUCCESS",
+			userId: authenticatedContext.userId,
+		});
+		const orderedFragments = [
+			"consume_oauth_state",
+			"SELECT binding.user_id",
+			"register_fusion_phone_wechat_account",
+			"INSERT INTO public.auth_session_families",
 		];
 		const indexes = orderedFragments.map((fragment) =>
 			database.calls.findIndex((sql) => sql.includes(fragment)),

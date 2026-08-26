@@ -42,6 +42,57 @@ describe("account startup configuration", () => {
 		).toThrow("账号服务启用前必须同时就绪手机和微信注册通道");
 	});
 
+	it("allows fusion plus WeChat registration without SMS and pins every Android field", () => {
+		const hashKey = Buffer.alloc(32, 7).toString("base64");
+		const base = {
+			FUSION_AUTH_ENABLED: "true",
+			WECHAT_AUTH_ENABLED: "true",
+			AUTH_HASH_ACTIVE_VERSION: "v1",
+			AUTH_HASH_KEYS_JSON: JSON.stringify({ v1: hashKey }),
+			AUTH_IDENTITY_DEDUP_KEY_VERSION: "v1",
+			WECHAT_APP_ID: "wx0123456789abcdef",
+			WECHAT_APP_SECRET: "wechat-secret",
+		};
+		const options = { accountsEnabled: true, databaseEnabled: true } as const;
+
+		expect(() => loadAuthRuntimeConfig(base, options)).toThrow(
+			"ALIYUN_FUSION_SCHEME_CODE",
+		);
+		expect(() =>
+			loadAuthRuntimeConfig(
+				{ ...base, ALIYUN_FUSION_SCHEME_CODE: "100001" },
+				options,
+			),
+		).toThrow("ALIYUN_FUSION_PACKAGE_NAME");
+		expect(() =>
+			loadAuthRuntimeConfig(
+				{
+					...base,
+					ALIYUN_FUSION_SCHEME_CODE: "100001",
+					ALIYUN_FUSION_PACKAGE_NAME: "com.chishenme.app",
+				},
+				options,
+			),
+		).toThrow("ALIYUN_FUSION_PACKAGE_SIGN");
+		const config = loadAuthRuntimeConfig(
+			{
+				...base,
+				ALIYUN_FUSION_SCHEME_CODE: "scheme_100001",
+				ALIYUN_FUSION_PACKAGE_NAME: "com.chishenme.app",
+				ALIYUN_FUSION_PACKAGE_SIGN: "A".repeat(32),
+			},
+			options,
+		);
+		expect(config.phone.enabled).toBe(false);
+		expect(config.otpPepperRing).toBeNull();
+		expect(config.fusion).toMatchObject({
+			enabled: true,
+			schemeCode: "scheme_100001",
+			packageName: "com.chishenme.app",
+			packageSign: "a".repeat(32),
+		});
+	});
+
 	it("fails startup on missing provider configuration without echoing secret values", () => {
 		const marker = "must-never-be-echoed";
 		const hashKey = Buffer.alloc(32, 7).toString("base64");
@@ -207,14 +258,14 @@ describe("account startup configuration", () => {
 		} as const;
 
 		expect(() => loadAuthRuntimeConfig(base, production)).toThrow(
-			"生产短信通道必须用 ALIYUN_CREDENTIAL_ALLOWED_PROVIDER 钉死凭据来源",
+			"生产阿里云账号通道必须用 ALIYUN_CREDENTIAL_ALLOWED_PROVIDER 钉死凭据来源",
 		);
 		expect(() =>
 			loadAuthRuntimeConfig(
 				{ ...base, ALIYUN_CREDENTIAL_ALLOWED_PROVIDER: "default/env" },
 				production,
 			),
-		).toThrow("生产短信通道禁止使用长期环境变量 AccessKey");
+		).toThrow("生产阿里云账号通道禁止使用长期环境变量 AccessKey");
 		expect(
 			loadAuthRuntimeConfig(
 				{

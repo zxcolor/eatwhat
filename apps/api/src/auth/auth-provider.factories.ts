@@ -15,14 +15,22 @@ import {
 } from "./providers/smtp-email-otp.provider.js";
 import { UnavailableOtpDeliveryProvider } from "./providers/unavailable-otp.provider.js";
 import { OfficialWechatIdentityProvider } from "./providers/wechat-identity.provider.js";
+import {
+	AliyunFusionAuthProvider,
+	type AliyunFusionClient,
+	type FusionAuthProvider,
+	FusionAuthUnavailableError,
+} from "./providers/fusion-auth.provider.js";
 
 export const ALIYUN_SMS_CLIENT = Symbol("ALIYUN_SMS_CLIENT");
+export const ALIYUN_FUSION_CLIENT = Symbol("ALIYUN_FUSION_CLIENT");
 export const ALIYUN_CREDENTIAL = Symbol("ALIYUN_CREDENTIAL");
 export const SMTP_CLIENT = Symbol("SMTP_CLIENT");
 export const PHONE_OTP_PROVIDER = Symbol("PHONE_OTP_PROVIDER");
 export const EMAIL_OTP_PROVIDER = Symbol("EMAIL_OTP_PROVIDER");
 export const WECHAT_IDENTITY_PROVIDER = Symbol("WECHAT_IDENTITY_PROVIDER");
 export const QQ_IDENTITY_PROVIDER = Symbol("QQ_IDENTITY_PROVIDER");
+export const FUSION_AUTH_PROVIDER = Symbol("FUSION_AUTH_PROVIDER");
 
 export function createPhoneOtpProvider(
 	config: AppConfig,
@@ -48,6 +56,26 @@ export function createEmailOtpProvider(
 		throw new Error("账号邮件供应商客户端未配置");
 	}
 	return new SmtpEmailOtpDeliveryProvider(config.auth.email, client);
+}
+
+export function createFusionAuthProvider(
+	config: AppConfig,
+	client: AliyunFusionClient | undefined,
+): FusionAuthProvider {
+	if (!config.auth.fusion.enabled) {
+		return Object.freeze({
+			issueToken: async () => {
+				throw new FusionAuthUnavailableError("DISABLED");
+			},
+			verifyToken: async () => {
+				throw new FusionAuthUnavailableError("DISABLED");
+			},
+		});
+	}
+	if (client === undefined) {
+		throw new Error("账号融合认证供应商客户端未配置");
+	}
+	return new AliyunFusionAuthProvider(config.auth.fusion, client);
 }
 
 export function createWechatIdentityProvider(

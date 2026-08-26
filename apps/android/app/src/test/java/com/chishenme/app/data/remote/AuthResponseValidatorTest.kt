@@ -27,6 +27,26 @@ class AuthResponseValidatorTest {
     }
 
     @Test
+    fun `fusion token accepts documented one character boundary and rejects unsafe bounds`() {
+        val valid = FusionAuthTokenResponse(
+            flowId = "11111111-1111-4111-8111-111111111111",
+            schemeCode = "scheme",
+            authToken = "x",
+            expiresAt = now.plusSeconds(300).toString(),
+        )
+
+        assertTrue(AuthResponseValidator.validFusionToken(valid, now))
+        assertFalse(AuthResponseValidator.validFusionToken(valid.copy(authToken = ""), now))
+        assertFalse(
+            AuthResponseValidator.validFusionToken(
+                valid.copy(authToken = "x".repeat(4_097)),
+                now,
+            ),
+        )
+        assertFalse(AuthResponseValidator.validFusionToken(valid.copy(authToken = "x\n"), now))
+    }
+
+    @Test
     fun `challenge enforces expected channel mask and bounded time`() {
         val challenge = AuthCodeChallenge(
             challengeId = "11111111-1111-4111-8111-111111111111",

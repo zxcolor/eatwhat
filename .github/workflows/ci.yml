@@ -143,6 +143,74 @@ jobs:
           fi
           export PGUSER=postgres PGPASSWORD=ci-bootstrap-password
           test "$(psql -X -At -c "SELECT has_table_privilege('api_runtime','public.users','SELECT')")" = "t"
+      - name: Prove fusion VerifyToken replay claims are serial and concurrent safe
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: "5432"
+          PGDATABASE: chi_shen_me_ci
+          PGUSER: api_runtime
+          PGPASSWORD: ci-runtime-password
+        run: |
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          INSERT INTO public.fusion_auth_flows (
+            id, purpose, request_ip_hash, device_hash, hash_key_version,
+            created_at, expires_at, retain_until
+          ) VALUES
+            ('14100000-0000-4000-8000-000000000001', 'LOGIN', repeat('1',64), repeat('2',64), 'flow-v1', now(), now()+interval '5 minutes', now()+interval '24 hours'),
+            ('14100000-0000-4000-8000-000000000002', 'LOGIN', repeat('3',64), repeat('4',64), 'flow-v2', now(), now()+interval '5 minutes', now()+interval '24 hours');
+          SELECT public.claim_fusion_auth_verify_token(
+            '14100000-0000-4000-8000-000000000001', 'LOGIN', repeat('2',64),
+            'flow-v1', ARRAY[repeat('a',64),repeat('b',64)]::varchar[],
+            ARRAY['replay-v1','replay-v2']::varchar[], repeat('a',64), 'replay-v1'
+          ) AS first_claim \gset
+          SELECT public.claim_fusion_auth_verify_token(
+            '14100000-0000-4000-8000-000000000002', 'LOGIN', repeat('4',64),
+            'flow-v2', ARRAY[repeat('a',64),repeat('b',64)]::varchar[],
+            ARRAY['replay-v1','replay-v2']::varchar[], repeat('b',64), 'replay-v2'
+          ) AS replay_claim \gset
+          \if :first_claim
+          \else
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'first fusion token claim failed'; END $ci_fail$;
+          \endif
+          \if :replay_claim
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'serial fusion token replay succeeded'; END $ci_fail$;
+          \endif
+          SELECT count(*) = 1 AS replay_consumed
+          FROM public.fusion_auth_flows
+          WHERE id = '14100000-0000-4000-8000-000000000002'
+            AND consumed_at IS NOT NULL AND attempts = 1
+          \gset
+          \if :replay_consumed
+          \else
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'serial replay flow was not consumed'; END $ci_fail$;
+          \endif
+          SELECT public.claim_fusion_auth_verify_token(
+            '14100000-0000-4000-8000-000000000002', 'LOGIN', repeat('4',64),
+            'flow-v2', ARRAY[repeat('d',64),repeat('e',64)]::varchar[],
+            ARRAY['replay-v1','replay-v2']::varchar[], repeat('d',64), 'replay-v1'
+          ) AS retry_claim \gset
+          \if :retry_claim
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'consumed replay flow was retried'; END $ci_fail$;
+          \endif
+
+          INSERT INTO public.fusion_auth_flows (
+            id, purpose, request_ip_hash, device_hash, hash_key_version,
+            created_at, expires_at, retain_until
+          ) VALUES
+            ('14200000-0000-4000-8000-000000000001', 'LOGIN', repeat('5',64), repeat('6',64), 'flow-v1', now(), now()+interval '5 minutes', now()+interval '24 hours'),
+            ('14200000-0000-4000-8000-000000000002', 'LOGIN', repeat('7',64), repeat('8',64), 'flow-v2', now(), now()+interval '5 minutes', now()+interval '24 hours');
+          SQL
+          psql -X -At -v ON_ERROR_STOP=1 -c "SELECT public.claim_fusion_auth_verify_token('14200000-0000-4000-8000-000000000001','LOGIN',repeat('6',64),'flow-v1',ARRAY[repeat('c',64),repeat('d',64)]::varchar[],ARRAY['replay-v1','replay-v2']::varchar[],repeat('c',64),'replay-v1')" >/tmp/fusion-claim-a &
+          claim_a=$!
+          psql -X -At -v ON_ERROR_STOP=1 -c "SELECT public.claim_fusion_auth_verify_token('14200000-0000-4000-8000-000000000002','LOGIN',repeat('8',64),'flow-v2',ARRAY[repeat('c',64),repeat('d',64)]::varchar[],ARRAY['replay-v1','replay-v2']::varchar[],repeat('d',64),'replay-v2')" >/tmp/fusion-claim-b &
+          claim_b=$!
+          wait "$claim_a"
+          wait "$claim_b"
+          test "$(cat /tmp/fusion-claim-a /tmp/fusion-claim-b | grep -c '^t$')" = "1"
+          test "$(cat /tmp/fusion-claim-a /tmp/fusion-claim-b | grep -c '^f$')" = "1"
+          export PGUSER=postgres PGPASSWORD=ci-bootstrap-password
+          test "$(psql -X -At -c "SELECT count(*) FROM public.fusion_auth_verify_token_claims WHERE flow_id IN ('14200000-0000-4000-8000-000000000001','14200000-0000-4000-8000-000000000002')")" = "2"
+          test "$(psql -X -At -c "SELECT count(*) FROM public.fusion_auth_flows WHERE id IN ('14200000-0000-4000-8000-000000000001','14200000-0000-4000-8000-000000000002') AND consumed_at IS NOT NULL AND attempts=1")" = "1"
       - name: Exercise fenced data export delivery and least-privilege ACLs
         env:
           PGHOST: 127.0.0.1
@@ -1509,9 +1577,58 @@ jobs:
           "$sdkmanager" "platforms;android-36" "build-tools;36.0.0"
       - run: chmod +x gradlew
       - name: Verify cloud Debug
-        run: ./gradlew testDebugUnitTest lintDebug assembleDebug --stacktrace
+        run: >-
+          ./gradlew testDebugUnitTest lintDebug assembleDebug
+          verifyNoFusionVariantConfiguration verifyNoFusionDebugManifest
+          verifyNoFusionDebugPackage
+          --stacktrace
+      - name: Verify no-op Release manifest
+        run: >-
+          ./gradlew verifyNoFusionReleaseManifest
+          -PCHISHENME_API_BASE_URL=https://api.unfinished-era.com/
+          --stacktrace
       - name: Assemble isolated Fixture test artifacts
-        run: ./gradlew assembleFixture assembleFixtureAndroidTest --stacktrace
+        run: >-
+          ./gradlew assembleFixture assembleFixtureAndroidTest
+          verifyNoFusionFixtureManifest verifyNoFusionFixturePackage
+          --stacktrace
+      - name: Verify Fusion Alpha cannot silently omit pinned SDKs
+        shell: bash
+        run: |
+          log_file="$(mktemp)"
+          trap 'rm -f "$log_file"' EXIT
+          set +e
+          ./gradlew verifyFusionAlphaPackage \
+            -PCHISHENME_ALPHA_API_BASE_URL=https://api.unfinished-era.com/ \
+            -PCHISHENME_REQUIRE_FUSION_SDK=true \
+            --no-daemon >"$log_file" 2>&1
+          status=$?
+          set -e
+          cat "$log_file"
+          if [[ $status -eq 0 ]]; then
+            echo "Fusion Alpha unexpectedly built without locally prepared pinned AARs" >&2
+            exit 1
+          fi
+          grep -Fq '[FUSION_SDK_MISSING]' "$log_file"
+      - name: Verify unsigned Alpha fails closed
+        shell: bash
+        run: |
+          test ! -e app/build/outputs/apk/alpha/app-alpha.apk
+          log_file="$(mktemp)"
+          trap 'rm -f "$log_file"' EXIT
+          set +e
+          ./gradlew assembleAlpha \
+            -PCHISHENME_ALPHA_API_BASE_URL=https://api.unfinished-era.com/ \
+            --no-daemon >"$log_file" 2>&1
+          status=$?
+          set -e
+          cat "$log_file"
+          if [[ $status -eq 0 ]]; then
+            echo "Alpha assembly unexpectedly accepted missing fixed signing material" >&2
+            exit 1
+          fi
+          grep -Fq '[ALPHA_SIGNING_MISSING]' "$log_file"
+          test ! -e app/build/outputs/apk/alpha/app-alpha.apk
       - name: Verify unsigned release fails closed
         shell: bash
         run: |

@@ -177,6 +177,66 @@ class RecommendationRepositoryTest {
     }
 
     @Test
+    fun `feature config accepts fusion-only phone proof for registration`() = runTest {
+        val capabilities = AuthCapabilities(
+            accountsEnabled = true,
+            registrationEnabled = true,
+            phoneEnabled = false,
+            wechatEnabled = true,
+            emailEnabled = false,
+            qqEnabled = false,
+            dataExportEnabled = false,
+            fusionEnabled = true,
+        )
+        val config = validFeatureConfig().copy(
+            accountsEnabled = true,
+            authCapabilities = capabilities,
+        )
+        val repository = RecommendationRepository(
+            object : RecommendationApi {
+                override suspend fun featureConfig(): FeatureConfig = config
+
+                override suspend fun recommend(context: RecommendationContext): RecommendationResponse =
+                    error("unused")
+
+                override suspend fun recordEvent(event: RecommendationEvent): Response<Unit> =
+                    error("unused")
+            },
+        )
+
+        assertEquals(FeatureConfigOutcome.Success(config), repository.featureConfig())
+    }
+
+    @Test
+    fun `feature config rejects fusion when accounts are disabled`() = runTest {
+        val config = validFeatureConfig().copy(
+            accountsEnabled = false,
+            authCapabilities = AuthCapabilities(
+                accountsEnabled = false,
+                registrationEnabled = false,
+                phoneEnabled = false,
+                wechatEnabled = false,
+                emailEnabled = false,
+                qqEnabled = false,
+                fusionEnabled = true,
+            ),
+        )
+        val repository = RecommendationRepository(
+            object : RecommendationApi {
+                override suspend fun featureConfig(): FeatureConfig = config
+
+                override suspend fun recommend(context: RecommendationContext): RecommendationResponse =
+                    error("unused")
+
+                override suspend fun recordEvent(event: RecommendationEvent): Response<Unit> =
+                    error("unused")
+            },
+        )
+
+        assertEquals(FeatureConfigOutcome.Unavailable, repository.featureConfig())
+    }
+
+    @Test
     fun `recommend recognizes a wrapped API contract mismatch`() = runTest {
         val repository = RecommendationRepository(
             api = object : RecommendationApi {

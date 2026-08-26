@@ -243,7 +243,8 @@ GRANT SELECT, INSERT ON
   public.otp_challenges,
   public.auth_refresh_credentials,
   public.auth_access_tokens,
-  public.oauth_states
+  public.oauth_states,
+  public.fusion_auth_flows
 TO :"runtime_role";
 GRANT SELECT, INSERT ON public.auth_session_families TO :"runtime_role";
 GRANT UPDATE (status, last_seen_at, last_ip_hash, compromised_at, revoked_at)
@@ -323,6 +324,16 @@ GRANT EXECUTE ON FUNCTION public.consume_oauth_state(
   varchar, varchar, varchar, varchar
 ) TO :"runtime_role";
 GRANT EXECUTE ON FUNCTION public.register_phone_wechat_account(
+  uuid, uuid, uuid, varchar, varchar
+) TO :"runtime_role";
+GRANT EXECUTE ON FUNCTION public.claim_fusion_auth_verify_token(
+  uuid, varchar, varchar, varchar, varchar[], varchar[], varchar, varchar
+) TO :"runtime_role";
+GRANT EXECUTE ON FUNCTION public.record_fusion_auth_result(
+  uuid, varchar, varchar, varchar, varchar, varchar, boolean, boolean,
+  varchar, varchar, varchar, varchar, varchar
+) TO :"runtime_role";
+GRANT EXECUTE ON FUNCTION public.register_fusion_phone_wechat_account(
   uuid, uuid, uuid, varchar, varchar
 ) TO :"runtime_role";
 GRANT EXECUTE ON FUNCTION public.begin_account_deletion(
@@ -451,6 +462,10 @@ GRANT EXECUTE ON FUNCTION public.execute_retention_cleanup()
 GRANT EXECUTE ON FUNCTION public.preview_persistence_retention_cleanup()
   TO :"maintenance_role";
 GRANT EXECUTE ON FUNCTION public.execute_persistence_retention_cleanup()
+  TO :"maintenance_role";
+GRANT EXECUTE ON FUNCTION public.preview_fusion_auth_retention_cleanup()
+  TO :"maintenance_role";
+GRANT EXECUTE ON FUNCTION public.execute_fusion_auth_retention_cleanup()
   TO :"maintenance_role";
 GRANT EXECUTE ON FUNCTION public.complete_account_deletion(uuid, uuid)
   TO :"maintenance_role";

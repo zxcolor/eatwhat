@@ -16,6 +16,23 @@ $AlphaApiBaseUrl = $AlphaApiBaseUrl.Trim()
 $workspaceRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location $workspaceRoot
 
+$alphaCertificateMetadataPath = Join-Path $workspaceRoot `
+    'apps\android\alpha-signing-certificate.properties'
+if (-not (Test-Path -LiteralPath $alphaCertificateMetadataPath -PathType Leaf)) {
+    throw "Alpha 固定签名证书元数据缺失：$alphaCertificateMetadataPath"
+}
+$alphaCertificateMetadata = ConvertFrom-StringData (
+    [System.IO.File]::ReadAllText($alphaCertificateMetadataPath)
+)
+$expectedAlphaApplicationId = [string]$alphaCertificateMetadata.applicationId
+$expectedAlphaCertificateMd5 = ([string]$alphaCertificateMetadata.md5).ToLowerInvariant()
+$expectedAlphaCertificateSha256 = ([string]$alphaCertificateMetadata.sha256).ToLowerInvariant()
+if ($expectedAlphaApplicationId -ne 'com.chishenme.app.alpha' -or
+    $expectedAlphaCertificateMd5 -notmatch '^[0-9a-f]{32}$' -or
+    $expectedAlphaCertificateSha256 -notmatch '^[0-9a-f]{64}$') {
+    throw 'Alpha 固定签名证书元数据无效。'
+}
+
 Write-Host '== PowerShell scripts: Windows PowerShell compatibility =='
 foreach ($scriptFile in Get-ChildItem -LiteralPath (Join-Path $workspaceRoot 'scripts') -Filter '*.ps1') {
     $scriptBytes = [System.IO.File]::ReadAllBytes($scriptFile.FullName)
@@ -35,6 +52,58 @@ foreach ($scriptFile in Get-ChildItem -LiteralPath (Join-Path $workspaceRoot 'sc
     ) | Out-Null
     if ($parseErrors.Count -gt 0) {
         throw "$($scriptFile.Name) 无法解析：$($parseErrors[0].Message)"
+    }
+}
+
+Write-Host '== Fusion SDK preparation: multi-artifact rollback =='
+& (Join-Path $PSScriptRoot 'prepare-fusion-auth-sdk.ps1') -RunTransactionSelfTest
+
+Write-Host '== ECS shell scripts: LF and Bash syntax =='
+$bashCandidates = New-Object System.Collections.Generic.List[string]
+foreach ($commandName in @('bash', 'sh')) {
+    $shellCommand = Get-Command $commandName -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($shellCommand -and -not $bashCandidates.Contains($shellCommand.Source)) {
+        $bashCandidates.Add($shellCommand.Source)
+    }
+}
+$gitCommand = Get-Command git -CommandType Application -ErrorAction SilentlyContinue |
+    Select-Object -First 1
+if ($gitCommand) {
+    $gitRoot = Split-Path -Parent (Split-Path -Parent $gitCommand.Source)
+    foreach ($relativeShell in @('usr\bin\bash.exe', 'usr\bin\sh.exe', 'bin\bash.exe')) {
+        $candidateShell = Join-Path $gitRoot $relativeShell
+        if ((Test-Path -LiteralPath $candidateShell -PathType Leaf) -and
+            -not $bashCandidates.Contains($candidateShell)) {
+            $bashCandidates.Add($candidateShell)
+        }
+    }
+}
+$bashExecutable = $null
+foreach ($candidateShell in $bashCandidates) {
+    $shellVersion = @(& $candidateShell --version 2>&1)
+    if ($LASTEXITCODE -eq 0 -and ($shellVersion -join "`n") -match 'GNU bash') {
+        $bashExecutable = $candidateShell
+        break
+    }
+}
+if (-not $bashExecutable) {
+    throw '完整验证需要 Bash 解析 ECS 运维脚本；未找到 GNU Bash。'
+}
+$ecsScriptDirectory = Join-Path $workspaceRoot 'infra\ecs\scripts'
+foreach ($scriptFile in Get-ChildItem -LiteralPath $ecsScriptDirectory -Filter '*.sh') {
+    $scriptBytes = [System.IO.File]::ReadAllBytes($scriptFile.FullName)
+    if ($scriptBytes -contains 0x0D) {
+        throw "$($scriptFile.Name) 必须使用 LF，不能提交 CRLF。"
+    }
+    $firstScriptLine = [System.IO.File]::ReadLines($scriptFile.FullName) |
+        Select-Object -First 1
+    if ($firstScriptLine -cne '#!/usr/bin/env bash') {
+        throw "$($scriptFile.Name) 缺少固定 Bash shebang。"
+    }
+    & $bashExecutable -n -- $scriptFile.FullName
+    if ($LASTEXITCODE -ne 0) {
+        throw "$($scriptFile.Name) 未通过 bash -n，退出码：$LASTEXITCODE"
     }
 }
 
@@ -76,6 +145,84 @@ try {
 } finally {
     $env:CHISHENME_PARENT_SECRET_DECOY = $previousDecoySecret
     $env:AMAP_WEB_SERVICE_KEY = $previousExternalAmapKey
+}
+
+Write-Host '== Local API launcher: Fusion-only without OTP secrets =='
+$launcherFixtureTempBase = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
+$launcherFixturePath = Join-Path $launcherFixtureTempBase (
+    'chishenme-fusion-only-' + [Guid]::NewGuid().ToString('N') + '.env'
+)
+$fixtureHashKey = [Convert]::ToBase64String([byte[]](1..32))
+try {
+    [System.IO.File]::WriteAllLines(
+        $launcherFixturePath,
+        @(
+            'NODE_ENV=development',
+            'DATABASE_ENABLED=true',
+            'DATABASE_URL=postgresql://fixture:fixture@localhost:5432/fixture',
+            'ACCOUNTS_ENABLED=true',
+            'PHONE_AUTH_ENABLED=false',
+            'FUSION_AUTH_ENABLED=true',
+            'EMAIL_AUTH_ENABLED=false',
+            'WECHAT_AUTH_ENABLED=true',
+            'QQ_AUTH_ENABLED=false',
+            'AUTH_HASH_ACTIVE_VERSION=hash.v1',
+            ('AUTH_HASH_KEYS_JSON={"hash.v1":"' + $fixtureHashKey + '"}'),
+            'AUTH_IDENTITY_DEDUP_KEY_VERSION=hash.v1',
+            'AUTH_OTP_PEPPER_ACTIVE_VERSION=',
+            'AUTH_OTP_PEPPER_KEYS_JSON=',
+            'ALIYUN_CREDENTIAL_ALLOWED_PROVIDER=default/env',
+            'ALIYUN_FUSION_SCHEME_CODE=scheme_100001',
+            'ALIYUN_FUSION_PACKAGE_NAME=com.chishenme.app.alpha',
+            'ALIYUN_FUSION_PACKAGE_SIGN=0123456789abcdef0123456789abcdef',
+            'WECHAT_APP_ID=wx0123456789abcdef',
+            'WECHAT_APP_SECRET=fixture-only-not-a-real-secret'
+        ),
+        [System.Text.UTF8Encoding]::new($false)
+    )
+    & (Join-Path $PSScriptRoot 'start-api-local.ps1') `
+        -EnvFile $launcherFixturePath `
+        -ValidateOnly
+
+    $fusionFixtureEntries = [ordered]@{}
+    $fixtureLineNumber = 0
+    foreach ($fixtureLine in [System.IO.File]::ReadLines($launcherFixturePath)) {
+        $fixtureLineNumber += 1
+        $fixtureEntry = ConvertFrom-PrivateEnvLine `
+            -Line $fixtureLine `
+            -LineNumber $fixtureLineNumber
+        if ($null -ne $fixtureEntry) {
+            $fusionFixtureEntries[$fixtureEntry.Key] = $fixtureEntry.Value
+        }
+    }
+    $fusionRuntimeFixture = New-RuntimeChildEnvironment -Entries $fusionFixtureEntries
+    if ($fusionRuntimeFixture['PHONE_AUTH_ENABLED'] -cne 'false' -or
+        $fusionRuntimeFixture['FUSION_AUTH_ENABLED'] -cne 'true') {
+        throw 'Fusion-only 启动器夹具没有保持 Phone=false、Fusion=true。'
+    }
+    if ($fusionRuntimeFixture.Contains('AUTH_OTP_PEPPER_KEYS_JSON') -or
+        ($fusionRuntimeFixture.Contains('AUTH_OTP_PEPPER_ACTIVE_VERSION') -and
+            -not [string]::IsNullOrEmpty(
+                [string]$fusionRuntimeFixture['AUTH_OTP_PEPPER_ACTIVE_VERSION']
+            ))) {
+        throw 'Fusion-only 启动器向运行进程注入了不需要的 OTP 密钥或有效版本。'
+    }
+    if (-not $fusionRuntimeFixture.Contains('AUTH_HASH_KEYS_JSON') -or
+        -not $fusionRuntimeFixture.Contains('WECHAT_APP_SECRET')) {
+        throw 'Fusion-only 启动器遗漏了账号或微信必需 Secret。'
+    }
+} finally {
+    $resolvedLauncherFixturePath = [System.IO.Path]::GetFullPath($launcherFixturePath)
+    if (-not $resolvedLauncherFixturePath.StartsWith(
+        $launcherFixtureTempBase,
+        [System.StringComparison]::OrdinalIgnoreCase
+    ) -or [System.IO.Path]::GetFileName($resolvedLauncherFixturePath) -notlike
+        'chishenme-fusion-only-*.env') {
+        throw 'Fusion-only 启动器夹具临时文件越界，拒绝清理。'
+    }
+    if ([System.IO.File]::Exists($resolvedLauncherFixturePath)) {
+        [System.IO.File]::Delete($resolvedLauncherFixturePath)
+    }
 }
 
 Write-Host '== Credentials: repository and Android secret boundary =='
@@ -221,6 +368,45 @@ if ($LASTEXITCODE -ne 0) {
     throw "Node 生产构建失败，pnpm 退出码：$LASTEXITCODE"
 }
 
+Write-Host '== ECS preflight: production auth-config fixture =='
+$authConfigFixture = @'
+const { loadAuthRuntimeConfig } = await import("./apps/api/dist/auth/auth-config.js");
+const hashKey = Buffer.alloc(32, 7).toString("base64");
+const valid = {
+  PHONE_AUTH_ENABLED: "false",
+  FUSION_AUTH_ENABLED: "true",
+  WECHAT_AUTH_ENABLED: "true",
+  AUTH_HASH_ACTIVE_VERSION: "hash.v1",
+  AUTH_HASH_KEYS_JSON: JSON.stringify({ "hash.v1": hashKey }),
+  AUTH_IDENTITY_DEDUP_KEY_VERSION: "hash.v1",
+  ALIYUN_CREDENTIAL_ALLOWED_PROVIDER: "default/ecs_ram_role",
+  ALIYUN_FUSION_SCHEME_CODE: "scheme_100001",
+  ALIYUN_FUSION_PACKAGE_NAME: "com.chishenme.app.alpha",
+  ALIYUN_FUSION_PACKAGE_SIGN: "0123456789abcdef0123456789abcdef",
+  WECHAT_APP_ID: "wx0123456789abcdef",
+  WECHAT_APP_SECRET: "fixture-only-not-a-real-secret",
+};
+const options = { accountsEnabled: true, databaseEnabled: true, production: true };
+const config = loadAuthRuntimeConfig(valid, options);
+if (!config.fusion.enabled || config.phone.enabled || config.otpPepperRing !== null) process.exit(21);
+for (const invalid of [
+  { ...valid, AUTH_HASH_ACTIVE_VERSION: "bad/version" },
+  { ...valid, AUTH_HASH_KEYS_JSON: JSON.stringify({ "hash.v1": "***" }) },
+  { ...valid, AUTH_HASH_KEYS_JSON: JSON.stringify({ a: hashKey, b: hashKey, c: hashKey, d: hashKey }) },
+  { ...valid, AUTH_IDENTITY_DEDUP_KEY_VERSION: "missing" },
+  { ...valid, WECHAT_APP_ID: "wx123" },
+]) {
+  let rejected = false;
+  try { loadAuthRuntimeConfig(invalid, options); } catch { rejected = true; }
+  if (!rejected) process.exit(22);
+}
+process.stdout.write("AUTH_CONFIG_FIXTURE=OK\n");
+'@
+node --input-type=module --eval $authConfigFixture
+if ($LASTEXITCODE -ne 0) {
+    throw "ECS 生产认证配置夹具失败，Node 退出码：$LASTEXITCODE"
+}
+
 Write-Host '== ECS: immutable deployment bundle and operational gates =='
 $ecsBundleTempBase = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
 $ecsBundleTemp = Join-Path $ecsBundleTempBase (
@@ -341,16 +527,30 @@ try {
     # same explicitly approved public HTTPS endpoint used for Alpha, so a full
     # verification can never silently fall back to a workstation API.
     & $wrapper -p $androidProject clean testDebugUnitTest lintDebug assembleDebug `
+        verifyNoFusionVariantConfiguration verifyNoFusionDebugManifest `
+        verifyNoFusionDebugPackage `
         "-PCHISHENME_DEBUG_API_BASE_URL=$AlphaApiBaseUrl" `
         --stacktrace --no-daemon --no-build-cache --rerun-tasks
     if ($LASTEXITCODE -ne 0) {
         throw "Android 云端 Debug 验证失败，Gradle 退出码：$LASTEXITCODE"
     }
 
+    # Release signing remains mandatory for every package/build task. The
+    # dedicated Manifest-only task is deliberately isolated so Gradle can merge
+    # the no-op Release Manifest without a keystore, while an invocation that
+    # combines it with assemble/bundle still fails closed.
+    & $wrapper -p $androidProject verifyNoFusionReleaseManifest `
+        "-PCHISHENME_API_BASE_URL=$AlphaApiBaseUrl" `
+        --stacktrace --no-daemon --no-build-cache --rerun-tasks
+    if ($LASTEXITCODE -ne 0) {
+        throw "Android Release no-op Manifest 门禁失败，Gradle 退出码：$LASTEXITCODE"
+    }
+
     # Instrumentation owns a separate fixture variant with a fixed loopback
     # endpoint. Keep both fixture artifacts in their own Gradle invocation so
     # neither can reuse or overwrite the cloud Debug task graph.
     & $wrapper -p $androidProject assembleFixture assembleFixtureAndroidTest `
+        verifyNoFusionFixtureManifest verifyNoFusionFixturePackage `
         --stacktrace --no-daemon --no-build-cache --rerun-tasks
     if ($LASTEXITCODE -ne 0) {
         throw "Android 隔离 Fixture 验证失败，Gradle 退出码：$LASTEXITCODE"
@@ -359,7 +559,8 @@ try {
     # Keep Alpha KAPT/R8 separate from Debug lint. Running both task graphs in
     # one Gradle invocation lets Alpha regenerate temporary KAPT stubs while
     # lintDebugUnitTest is reading them, which is a known Windows lint race.
-    & $wrapper -p $androidProject assembleAlpha `
+    & $wrapper -p $androidProject assembleAlpha verifyNoFusionAlphaManifest `
+        verifyNoFusionAlphaPackage `
         "-PCHISHENME_ALPHA_API_BASE_URL=$AlphaApiBaseUrl" `
         --stacktrace --no-daemon --no-build-cache --rerun-tasks
     if ($LASTEXITCODE -ne 0) {
@@ -676,7 +877,8 @@ try {
         throw "内部 Alpha APK 的 DEX 性能预算异常：$($alphaDexFiles.Count)"
     }
 
-    $certificateDigests = @{}
+    $certificateMd5Digests = @{}
+    $certificateSha256Digests = @{}
     foreach ($label in $apkPaths.Keys) {
         $path = $apkPaths[$label]
         $signature = @(& $apkSigner verify --verbose --print-certs $path 2>&1)
@@ -689,24 +891,49 @@ try {
         if (-not ($signature | Select-String -Pattern '^Number of signers: 1$' -Quiet)) {
             throw "$label APK 必须恰好有一个 signer。"
         }
-        $certificateLines = @(
+        $certificateMd5Lines = @(
+            $signature |
+                Select-String -Pattern '^Signer #1 certificate MD5 digest: ([0-9a-fA-F]{32})$'
+        )
+        if ($certificateMd5Lines.Count -ne 1) {
+            throw "$label APK 的 signer MD5 证书摘要数量异常：$($certificateMd5Lines.Count)"
+        }
+        $certificateMd5Digests[$label] =
+            $certificateMd5Lines[0].Matches[0].Groups[1].Value.ToLowerInvariant()
+
+        $certificateSha256Lines = @(
             $signature |
                 Select-String -Pattern '^Signer #1 certificate SHA-256 digest: ([0-9a-fA-F]{64})$'
         )
-        if ($certificateLines.Count -ne 1) {
-            throw "$label APK 的 signer 证书摘要数量异常：$($certificateLines.Count)"
+        if ($certificateSha256Lines.Count -ne 1) {
+            throw "$label APK 的 signer SHA-256 证书摘要数量异常：$($certificateSha256Lines.Count)"
         }
-        $certificateDigests[$label] =
-            $certificateLines[0].Matches[0].Groups[1].Value.ToLowerInvariant()
+        $certificateSha256Digests[$label] =
+            $certificateSha256Lines[0].Matches[0].Groups[1].Value.ToLowerInvariant()
 
         & $zipAlign -c -P 16 4 $path
         if ($LASTEXITCODE -ne 0) {
             throw "$label APK 未通过 16 KB zipalign 校验。"
         }
     }
-    if (@($certificateDigests.Values | Select-Object -Unique).Count -ne 1) {
-        throw 'Debug、Fixture、FixtureTest、Alpha APK 的签名证书不一致。'
+    $debugFamilySha256 = @(
+        'Debug', 'Fixture', 'FixtureTest' |
+            ForEach-Object { $certificateSha256Digests[$_] } |
+            Select-Object -Unique
+    )
+    if ($debugFamilySha256.Count -ne 1) {
+        throw 'Debug、Fixture 与 FixtureTest APK 必须保持同一测试签名证书。'
     }
+    if ($certificateSha256Digests.Alpha -eq $debugFamilySha256[0]) {
+        throw 'Alpha APK 不得继续回退到 Debug signer。'
+    }
+    if ($certificateMd5Digests.Alpha -ne $expectedAlphaCertificateMd5 -or
+        $certificateSha256Digests.Alpha -ne $expectedAlphaCertificateSha256) {
+        throw 'Alpha APK signer 与仓库固定的长期 Alpha 证书不一致。'
+    }
+
+    Write-Host "Alpha 阿里云包签名 MD5：$($certificateMd5Digests.Alpha)"
+    Write-Host "Alpha signer SHA-256：$($certificateSha256Digests.Alpha)"
 
     foreach ($label in $apkPaths.Keys) {
         $artifact = Get-Item -LiteralPath $apkPaths[$label]

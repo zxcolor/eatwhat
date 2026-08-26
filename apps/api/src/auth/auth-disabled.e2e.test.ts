@@ -40,9 +40,12 @@ describe("disabled account HTTP boundary", () => {
 
 	it.each([
 		["POST", "/v1/auth/phone/request-code"],
+		["POST", "/v1/auth/phone/fusion-token"],
+		["POST", "/v1/auth/phone/fusion-verify"],
 		["POST", "/v1/auth/email/request-code"],
 		["POST", "/v1/auth/oauth/state"],
 		["POST", "/v1/auth/register/phone-wechat"],
+		["POST", "/v1/auth/register/fusion-wechat"],
 		["POST", "/v1/auth/login"],
 		["POST", "/v1/auth/refresh"],
 		["POST", "/v1/auth/logout"],
@@ -99,6 +102,7 @@ describe("disabled account HTTP boundary", () => {
 				accountsEnabled: false,
 				registrationEnabled: false,
 				phoneEnabled: false,
+				fusionEnabled: false,
 				wechatEnabled: false,
 				emailEnabled: false,
 				qqEnabled: false,
