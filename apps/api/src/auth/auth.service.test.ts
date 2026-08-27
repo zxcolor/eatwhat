@@ -187,6 +187,36 @@ function fusionEnabledConfig() {
 	});
 }
 
+function fusionLoginOnlyConfig() {
+	const flowHashKey = Buffer.alloc(32, 11).toString("base64");
+	const stableDedupKey = Buffer.alloc(32, 14).toString("base64");
+	return enabledConfig({
+		PHONE_AUTH_ENABLED: "false",
+		EMAIL_AUTH_ENABLED: "false",
+		WECHAT_AUTH_ENABLED: "false",
+		QQ_AUTH_ENABLED: "false",
+		FUSION_AUTH_ENABLED: "true",
+		AUTH_HASH_KEYS_JSON: JSON.stringify({
+			v1: flowHashKey,
+			"stable-dedup-v1": stableDedupKey,
+		}),
+		AUTH_IDENTITY_DEDUP_KEY_VERSION: "stable-dedup-v1",
+		ALIYUN_FUSION_SCHEME_CODE: "100001",
+		ALIYUN_FUSION_PACKAGE_NAME: "com.chishenme.app",
+		ALIYUN_FUSION_PACKAGE_SIGN: "a".repeat(32),
+	});
+}
+
+function phoneLoginOnlyConfig() {
+	return enabledConfig({
+		PHONE_AUTH_ENABLED: "true",
+		FUSION_AUTH_ENABLED: "false",
+		EMAIL_AUTH_ENABLED: "false",
+		WECHAT_AUTH_ENABLED: "false",
+		QQ_AUTH_ENABLED: "false",
+	});
+}
+
 function fusionService(
 	repository: AuthRepository,
 	fusion: FusionAuthProvider,
@@ -200,6 +230,23 @@ function fusionService(
 		new UnavailableExportArtifactReader(),
 		fusion,
 		fusionEnabledConfig(),
+	);
+}
+
+function fusionLoginOnlyService(
+	repository: AuthRepository,
+	fusion: FusionAuthProvider,
+	providers = identityProviders(),
+	phone: OtpDeliveryProvider = phoneProvider(),
+) {
+	return service(
+		repository,
+		phone,
+		providers,
+		emailProvider,
+		new UnavailableExportArtifactReader(),
+		fusion,
+		fusionLoginOnlyConfig(),
 	);
 }
 
@@ -230,13 +277,21 @@ function authenticatedRepository(
 }
 
 describe("AuthService core workflows", () => {
-	it("issues a server-pinned fusion token for LOGIN or REGISTER without persisting it", async () => {
+	it("keeps Fusion LOGIN and REGISTER verification flows available when registration is closed", async () => {
 		const drafts: unknown[] = [];
+		const completeRegistration = vi.fn(async () => {
+			throw new Error("verification must not create an account");
+		});
+		const completeFusionRegistration = vi.fn(async () => {
+			throw new Error("verification must not create an account");
+		});
 		const repository = fakeRepository({
 			createFusionFlow: async (draft) => {
 				drafts.push(draft);
 				return true;
 			},
+			completeRegistration,
+			completeFusionRegistration,
 		});
 		const issueToken = vi.fn(async () => ({
 			authToken: "FusionAuthToken_1234567890",
@@ -245,7 +300,7 @@ describe("AuthService core workflows", () => {
 			issueToken,
 			verifyToken: vi.fn(),
 		};
-		const app = fusionService(repository, fusion).service;
+		const app = fusionLoginOnlyService(repository, fusion).service;
 
 		for (const purpose of ["LOGIN", "REGISTER"] as const) {
 			const response = await app.requestFusionToken(
@@ -266,9 +321,11 @@ describe("AuthService core workflows", () => {
 		expect(persisted).not.toContain("FusionAuthToken_1234567890");
 		expect(persisted).not.toContain(installationId);
 		expect(persisted).not.toContain("203.0.113.7");
+		expect(completeRegistration).not.toHaveBeenCalled();
+		expect(completeFusionRegistration).not.toHaveBeenCalled();
 	});
 
-	it("verifies a REGISTER flow into a short-lived masked proof", async () => {
+	it("verifies a REGISTER flow into a proof without creating an account while registration is closed", async () => {
 		const proofExpiresAt = new Date(Date.now() + 4 * 60_000);
 		const pending = {
 			id: challengeId,
@@ -292,15 +349,23 @@ describe("AuthService core workflows", () => {
 				},
 			};
 		});
+		const completeRegistration = vi.fn(async () => {
+			throw new Error("verification must not create an account");
+		});
+		const completeFusionRegistration = vi.fn(async () => {
+			throw new Error("verification must not create an account");
+		});
 		const repository = fakeRepository({
 			findFusionProof: async () => pending,
 			claimFusionVerifyToken: async () => true,
 			completeFusionVerification,
+			completeRegistration,
+			completeFusionRegistration,
 		});
 		const verifyToken = vi.fn(async () => ({
 			e164PhoneNumber: "+8613800138000",
 		}));
-		const response = await fusionService(repository, {
+		const response = await fusionLoginOnlyService(repository, {
 			issueToken: vi.fn(),
 			verifyToken,
 		}).service.verifyFusionPhone({
@@ -326,6 +391,174 @@ describe("AuthService core workflows", () => {
 				}),
 			}),
 		);
+		expect(completeRegistration).not.toHaveBeenCalled();
+		expect(completeFusionRegistration).not.toHaveBeenCalled();
+	});
+
+	it("rejects registration creation paths before repository or provider side effects in Fusion-only mode", async () => {
+		const unexpectedRepositoryCall = vi.fn(async () => {
+			throw new Error("registration gate must run before repository access");
+		});
+		const phoneSend = vi.fn(async () => {
+			throw new Error("disabled phone channel must not call its provider");
+		});
+		const repository = fakeRepository({
+			createOtpChallenge: unexpectedRepositoryCall,
+			authenticateAccess: unexpectedRepositoryCall,
+			findOtpProof: unexpectedRepositoryCall,
+			findRegistrationFlow: unexpectedRepositoryCall,
+			findVerifiedFusionProof: unexpectedRepositoryCall,
+			findOAuthProof: unexpectedRepositoryCall,
+			createOAuthState: unexpectedRepositoryCall,
+			completeRegistration: unexpectedRepositoryCall,
+			completeFusionRegistration: unexpectedRepositoryCall,
+		});
+		const providers = identityProviders();
+		const app = fusionLoginOnlyService(
+			repository,
+			fusionProvider,
+			providers,
+			phoneProvider(phoneSend),
+		).service;
+
+		for (const purpose of ["LOGIN", "REGISTER"] as const) {
+			await expect(
+				app.requestPhoneCode(
+					{
+						phoneNumber: "+8613800138000",
+						purpose,
+						installationId,
+					},
+					null,
+					"203.0.113.19",
+				),
+			).rejects.toMatchObject({ status: 503 });
+		}
+
+		const phoneLoginOnlyApp = service(
+			repository,
+			phoneProvider(phoneSend),
+			providers,
+			emailProvider,
+			new UnavailableExportArtifactReader(),
+			fusionProvider,
+			phoneLoginOnlyConfig(),
+		).service;
+		await expect(
+			phoneLoginOnlyApp.requestPhoneCode(
+				{
+					phoneNumber: "+8613800138000",
+					purpose: "REGISTER",
+					installationId,
+				},
+				null,
+				"203.0.113.19",
+			),
+		).rejects.toMatchObject({ status: 503 });
+
+		for (const disabledLogin of [
+			{
+				method: "PHONE" as const,
+				challengeId,
+				otpCode: "123456",
+				device,
+			},
+			{
+				method: "EMAIL" as const,
+				challengeId,
+				otpCode: "123456",
+				device,
+			},
+			{
+				method: "WECHAT" as const,
+				oauthState,
+				authorizationCode: "WechatCode123456",
+				device,
+			},
+			{
+				method: "QQ" as const,
+				oauthState,
+				accessToken: "QqAccessToken1234567890",
+				device,
+			},
+		]) {
+			await expect(
+				app.login(disabledLogin, "203.0.113.19"),
+			).rejects.toMatchObject({ status: 503 });
+		}
+
+		await expect(
+			app.createOAuthState(
+				{ provider: "QQ", purpose: "BIND", installationId },
+				`Bearer ${"A".repeat(43)}`,
+				"203.0.113.19",
+			),
+		).rejects.toMatchObject({ status: 503 });
+		for (const disabledBinding of [
+			{ type: "EMAIL" as const, challengeId, otpCode: "123456" },
+			{
+				type: "QQ" as const,
+				oauthState,
+				accessToken: "QqAccessToken1234567890",
+			},
+		]) {
+			await expect(
+				app.bindIdentity("A".repeat(43), disabledBinding),
+			).rejects.toMatchObject({ status: 503 });
+		}
+
+		await expect(
+			app.createOAuthState(
+				{
+					provider: "WECHAT",
+					purpose: "REGISTER",
+					installationId,
+					phoneProofId: challengeId,
+				},
+				null,
+				"203.0.113.19",
+			),
+		).rejects.toMatchObject({ status: 503 });
+		await expect(
+			app.createOAuthState(
+				{
+					provider: "WECHAT",
+					purpose: "REGISTER",
+					installationId,
+					phoneChallengeId: challengeId,
+				},
+				null,
+				"203.0.113.19",
+			),
+		).rejects.toMatchObject({ status: 503 });
+		await expect(
+			app.register(
+				{
+					phoneChallengeId: challengeId,
+					phoneOtpCode: "123456",
+					wechatOAuthState: oauthState,
+					wechatAuthorizationCode: "WechatCode123456",
+					device,
+				},
+				"203.0.113.19",
+			),
+		).rejects.toMatchObject({ status: 503 });
+		await expect(
+			app.registerWithFusion(
+				{
+					phoneProofId: challengeId,
+					wechatOAuthState: oauthState,
+					wechatAuthorizationCode: "WechatCode123456",
+					device,
+				},
+				"203.0.113.19",
+			),
+		).rejects.toMatchObject({ status: 503 });
+
+		expect(unexpectedRepositoryCall).not.toHaveBeenCalled();
+		expect(phoneSend).not.toHaveBeenCalled();
+		expect(providers.wechat.verify).not.toHaveBeenCalled();
+		expect(providers.qq.verify).not.toHaveBeenCalled();
 	});
 
 	it("logs in an existing bound phone with a one-time fusion proof", async () => {

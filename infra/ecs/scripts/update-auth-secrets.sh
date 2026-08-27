@@ -198,11 +198,12 @@ if [[ "$mode" == '--apply' ]]; then
   target_ram_role="$(read_env_value "$config_file" ALIBABA_CLOUD_ECS_METADATA)"
 
   [[ "$target_accounts_enabled" == 'true' ]] || die '--apply requires ACCOUNTS_ENABLED=true; use --disable to close accounts'
-  [[ "$target_wechat_auth_enabled" == 'true' ]] || die 'accounts require WeChat authentication'
   [[ "$target_phone_auth_enabled" == 'true' || "$target_phone_auth_enabled" == 'false' ]] ||
     die 'PHONE_AUTH_ENABLED must be true or false'
   [[ "$target_fusion_auth_enabled" == 'true' || "$target_fusion_auth_enabled" == 'false' ]] ||
     die 'FUSION_AUTH_ENABLED must be true or false'
+  [[ "$target_wechat_auth_enabled" == 'true' || "$target_wechat_auth_enabled" == 'false' ]] ||
+    die 'WECHAT_AUTH_ENABLED must be true or false'
   [[ "$target_phone_auth_enabled" == 'true' || "$target_fusion_auth_enabled" == 'true' ]] ||
     die 'accounts require SMS phone auth or FusionAuth'
   [[ "$target_ram_role" =~ ^[A-Za-z0-9._-]{1,64}$ && "$target_ram_role" != 'replace-with-ram-role-name' ]] ||
@@ -210,8 +211,10 @@ if [[ "$mode" == '--apply' ]]; then
 
   input_names+=(
     AUTH_HASH_ACTIVE_VERSION AUTH_HASH_KEYS_JSON AUTH_IDENTITY_DEDUP_KEY_VERSION
-    WECHAT_APP_ID WECHAT_APP_SECRET
   )
+  if [[ "$target_wechat_auth_enabled" == 'true' ]]; then
+    input_names+=(WECHAT_APP_ID WECHAT_APP_SECRET)
+  fi
   if [[ "$target_phone_auth_enabled" == 'true' ]]; then
     input_names+=(
       AUTH_OTP_PEPPER_ACTIVE_VERSION AUTH_OTP_PEPPER_KEYS_JSON

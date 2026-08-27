@@ -5,6 +5,7 @@ const KEY_VERSION_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/u;
 
 export interface AuthRuntimeConfig {
 	readonly enabled: boolean;
+	readonly registrationEnabled: boolean;
 	readonly dataExportEnabled: boolean;
 	readonly aliyunCredentialTimeoutMs: number;
 	readonly aliyunCredentialAllowedProvider: string | null;
@@ -448,8 +449,10 @@ export function loadAuthRuntimeConfig(
 		enabled && readBoolean(env.QQ_AUTH_ENABLED, "QQ_AUTH_ENABLED");
 	const dataExportEnabled =
 		enabled && readBoolean(env.DATA_EXPORT_ENABLED, "DATA_EXPORT_ENABLED");
-	if (enabled && (!(phoneEnabled || fusionEnabled) || !wechatEnabled)) {
-		throw new Error("账号服务启用前必须同时就绪手机和微信注册通道");
+	const registrationEnabled =
+		enabled && (phoneEnabled || fusionEnabled) && wechatEnabled;
+	if (enabled && !(phoneEnabled || fusionEnabled)) {
+		throw new Error("账号服务启用前必须至少就绪一个手机通道");
 	}
 
 	const hashKeyRing = readKeyRing(
@@ -500,6 +503,7 @@ export function loadAuthRuntimeConfig(
 
 	return Object.freeze({
 		enabled,
+		registrationEnabled,
 		dataExportEnabled,
 		aliyunCredentialTimeoutMs: readInteger(
 			env.ALIYUN_CREDENTIAL_TIMEOUT_MS,

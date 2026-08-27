@@ -729,6 +729,9 @@ function Assert-EcsOperationalGates {
     $preflight = [System.IO.File]::ReadAllText(
         (Join-Path -Path $BundleRoot -ChildPath 'scripts/preflight-deployment.sh')
     )
+    $permissionHardener = [System.IO.File]::ReadAllText(
+        (Join-Path -Path $BundleRoot -ChildPath 'scripts/harden-release-permissions.sh')
+    )
     $releaseActivation = [System.IO.File]::ReadAllText(
         (Join-Path -Path $BundleRoot -ChildPath 'scripts/activate-candidate-release.sh')
     )
@@ -765,6 +768,10 @@ function Assert-EcsOperationalGates {
         'flock -n 8',
         'updated authentication configuration failed preflight and was rolled back',
         'AUTH_IDENTITY_DEDUP_KEY_VERSION changes require a dedicated audited migration',
+        'accounts require SMS phone auth or FusionAuth',
+        '[[ "$target_wechat_auth_enabled" == ''true'' || "$target_wechat_auth_enabled" == ''false'' ]]',
+        'if [[ "$target_wechat_auth_enabled" == ''true'' ]]; then',
+        'input_names+=(WECHAT_APP_ID WECHAT_APP_SECRET)',
         'SELECT count(*) FROM public.fusion_auth_flows WHERE consumed_at IS NULL AND expires_at > clock_timestamp()',
         'active FusionAuth flows still block key removal',
         'authentication keys must drain for at least 12 hours before removal',
@@ -782,6 +789,10 @@ function Assert-EcsOperationalGates {
         '--env-file "$secrets_dir/api.env"',
         'loadAuthRuntimeConfig(process.env',
         'production: true',
+        'accounts require SMS phone auth or FusionAuth',
+        'if [[ "$wechat_auth_enabled" == ''true'' ]]; then',
+        'api_env_names+=(WECHAT_APP_ID WECHAT_APP_SECRET)',
+        'config.registrationEnabled !== registrationEnabled',
         'AUTH_CONFIG_VALIDATION=OK',
         '/app/dist/auth/auth-config.js',
         'API image rejected authentication configuration'
@@ -789,6 +800,26 @@ function Assert-EcsOperationalGates {
         if (-not $preflight.Contains($required)) {
             throw "Deployment preflight is missing runtime-equivalent authentication validation: $required"
         }
+    }
+    if (-not $permissionHardener.Contains('"$bundle_root/postgres/pg_hba.conf") chmod 644 "$path" ;;') -or
+        -not $preflight.Contains('"$bundle_root/postgres/pg_hba.conf") assert_regular_file "$path" 644 ;;')) {
+        throw 'PostgreSQL pg_hba.conf must remain root-owned and container-readable after release hardening.'
+    }
+    $authWechatFieldAppend = 'input_names\+=\(WECHAT_APP_ID WECHAT_APP_SECRET\)'
+    $authWechatConditional = '(?s)if \[\[ "\$target_wechat_auth_enabled" == ''true'' \]\]; then\s+' +
+        $authWechatFieldAppend + '\s+fi'
+    $preflightWechatFieldAppend = 'api_env_names\+=\(WECHAT_APP_ID WECHAT_APP_SECRET\)'
+    $preflightWechatConditional = '(?s)if \[\[ "\$wechat_auth_enabled" == ''true'' \]\]; then\s+' +
+        $preflightWechatFieldAppend + '\s+fi'
+    if ($auth -notmatch $authWechatConditional -or
+        [regex]::Matches($auth, $authWechatFieldAppend).Count -ne 1 -or
+        $preflight -notmatch $preflightWechatConditional -or
+        [regex]::Matches($preflight, $preflightWechatFieldAppend).Count -ne 1) {
+        throw 'WeChat credentials must be required exactly once and only inside the enabled-channel condition.'
+    }
+    if ($auth.Contains('accounts require WeChat authentication') -or
+        $preflight.Contains('accounts require WeChat authentication')) {
+        throw 'Fusion-only accounts must not depend on the WeChat authentication channel.'
     }
     foreach ($required in @(
         "lock_directory='/run/lock/chi-shen-me'",

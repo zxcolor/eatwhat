@@ -147,7 +147,7 @@ try {
     $env:AMAP_WEB_SERVICE_KEY = $previousExternalAmapKey
 }
 
-Write-Host '== Local API launcher: Fusion-only without OTP secrets =='
+Write-Host '== Local API launcher: Fusion-only without OTP or WeChat secrets =='
 $launcherFixtureTempBase = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
 $launcherFixturePath = Join-Path $launcherFixtureTempBase (
     'chishenme-fusion-only-' + [Guid]::NewGuid().ToString('N') + '.env'
@@ -164,7 +164,7 @@ try {
             'PHONE_AUTH_ENABLED=false',
             'FUSION_AUTH_ENABLED=true',
             'EMAIL_AUTH_ENABLED=false',
-            'WECHAT_AUTH_ENABLED=true',
+            'WECHAT_AUTH_ENABLED=false',
             'QQ_AUTH_ENABLED=false',
             'AUTH_HASH_ACTIVE_VERSION=hash.v1',
             ('AUTH_HASH_KEYS_JSON={"hash.v1":"' + $fixtureHashKey + '"}'),
@@ -174,9 +174,7 @@ try {
             'ALIYUN_CREDENTIAL_ALLOWED_PROVIDER=default/env',
             'ALIYUN_FUSION_SCHEME_CODE=scheme_100001',
             'ALIYUN_FUSION_PACKAGE_NAME=com.chishenme.app.alpha',
-            'ALIYUN_FUSION_PACKAGE_SIGN=0123456789abcdef0123456789abcdef',
-            'WECHAT_APP_ID=wx0123456789abcdef',
-            'WECHAT_APP_SECRET=fixture-only-not-a-real-secret'
+            'ALIYUN_FUSION_PACKAGE_SIGN=0123456789abcdef0123456789abcdef'
         ),
         [System.Text.UTF8Encoding]::new($false)
     )
@@ -197,8 +195,9 @@ try {
     }
     $fusionRuntimeFixture = New-RuntimeChildEnvironment -Entries $fusionFixtureEntries
     if ($fusionRuntimeFixture['PHONE_AUTH_ENABLED'] -cne 'false' -or
-        $fusionRuntimeFixture['FUSION_AUTH_ENABLED'] -cne 'true') {
-        throw 'Fusion-only 启动器夹具没有保持 Phone=false、Fusion=true。'
+        $fusionRuntimeFixture['FUSION_AUTH_ENABLED'] -cne 'true' -or
+        $fusionRuntimeFixture['WECHAT_AUTH_ENABLED'] -cne 'false') {
+        throw 'Fusion-only 启动器夹具没有保持 Phone=false、Fusion=true、WeChat=false。'
     }
     if ($fusionRuntimeFixture.Contains('AUTH_OTP_PEPPER_KEYS_JSON') -or
         ($fusionRuntimeFixture.Contains('AUTH_OTP_PEPPER_ACTIVE_VERSION') -and
@@ -207,9 +206,12 @@ try {
             ))) {
         throw 'Fusion-only 启动器向运行进程注入了不需要的 OTP 密钥或有效版本。'
     }
-    if (-not $fusionRuntimeFixture.Contains('AUTH_HASH_KEYS_JSON') -or
-        -not $fusionRuntimeFixture.Contains('WECHAT_APP_SECRET')) {
-        throw 'Fusion-only 启动器遗漏了账号或微信必需 Secret。'
+    if (-not $fusionRuntimeFixture.Contains('AUTH_HASH_KEYS_JSON')) {
+        throw 'Fusion-only 启动器遗漏了账号必需的 hash key ring。'
+    }
+    if ($fusionRuntimeFixture.Contains('WECHAT_APP_ID') -or
+        $fusionRuntimeFixture.Contains('WECHAT_APP_SECRET')) {
+        throw 'WeChat=false 的 Fusion-only 启动器夹具仍注入了微信配置。'
     }
 } finally {
     $resolvedLauncherFixturePath = [System.IO.Path]::GetFullPath($launcherFixturePath)
@@ -375,7 +377,7 @@ const hashKey = Buffer.alloc(32, 7).toString("base64");
 const valid = {
   PHONE_AUTH_ENABLED: "false",
   FUSION_AUTH_ENABLED: "true",
-  WECHAT_AUTH_ENABLED: "true",
+  WECHAT_AUTH_ENABLED: "false",
   AUTH_HASH_ACTIVE_VERSION: "hash.v1",
   AUTH_HASH_KEYS_JSON: JSON.stringify({ "hash.v1": hashKey }),
   AUTH_IDENTITY_DEDUP_KEY_VERSION: "hash.v1",
@@ -383,18 +385,23 @@ const valid = {
   ALIYUN_FUSION_SCHEME_CODE: "scheme_100001",
   ALIYUN_FUSION_PACKAGE_NAME: "com.chishenme.app.alpha",
   ALIYUN_FUSION_PACKAGE_SIGN: "0123456789abcdef0123456789abcdef",
-  WECHAT_APP_ID: "wx0123456789abcdef",
-  WECHAT_APP_SECRET: "fixture-only-not-a-real-secret",
 };
 const options = { accountsEnabled: true, databaseEnabled: true, production: true };
 const config = loadAuthRuntimeConfig(valid, options);
-if (!config.fusion.enabled || config.phone.enabled || config.otpPepperRing !== null) process.exit(21);
+if (Object.hasOwn(valid, "WECHAT_APP_ID") || Object.hasOwn(valid, "WECHAT_APP_SECRET")) process.exit(20);
+if (
+  !config.fusion.enabled ||
+  config.phone.enabled ||
+  config.wechat.enabled ||
+  config.registrationEnabled ||
+  config.otpPepperRing !== null
+) process.exit(21);
 for (const invalid of [
   { ...valid, AUTH_HASH_ACTIVE_VERSION: "bad/version" },
   { ...valid, AUTH_HASH_KEYS_JSON: JSON.stringify({ "hash.v1": "***" }) },
   { ...valid, AUTH_HASH_KEYS_JSON: JSON.stringify({ a: hashKey, b: hashKey, c: hashKey, d: hashKey }) },
   { ...valid, AUTH_IDENTITY_DEDUP_KEY_VERSION: "missing" },
-  { ...valid, WECHAT_APP_ID: "wx123" },
+  { ...valid, ALIYUN_FUSION_PACKAGE_SIGN: "bad" },
 ]) {
   let rejected = false;
   try { loadAuthRuntimeConfig(invalid, options); } catch { rejected = true; }

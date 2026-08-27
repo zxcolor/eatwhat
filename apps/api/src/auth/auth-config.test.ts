@@ -11,6 +11,7 @@ describe("account startup configuration", () => {
 			},
 		);
 		expect(config.enabled).toBe(false);
+		expect(config.registrationEnabled).toBe(false);
 		expect(config.dataExportEnabled).toBe(false);
 		expect(config.hashKeyRing).toBeNull();
 		expect(config.otpPepperRing).toBeNull();
@@ -30,7 +31,7 @@ describe("account startup configuration", () => {
 		).toThrow("账号服务启用时必须启用 PostgreSQL");
 	});
 
-	it("fails startup when required registration providers are disabled", () => {
+	it("fails startup when accounts have no mobile channel", () => {
 		expect(() =>
 			loadAuthRuntimeConfig(
 				{},
@@ -39,7 +40,33 @@ describe("account startup configuration", () => {
 					databaseEnabled: true,
 				},
 			),
-		).toThrow("账号服务启用前必须同时就绪手机和微信注册通道");
+		).toThrow("账号服务启用前必须至少就绪一个手机通道");
+	});
+
+	it("allows fusion login-only without WeChat registration credentials", () => {
+		const hashKey = Buffer.alloc(32, 7).toString("base64");
+		const config = loadAuthRuntimeConfig(
+			{
+				FUSION_AUTH_ENABLED: "true",
+				AUTH_HASH_ACTIVE_VERSION: "v1",
+				AUTH_HASH_KEYS_JSON: JSON.stringify({ v1: hashKey }),
+				AUTH_IDENTITY_DEDUP_KEY_VERSION: "v1",
+				ALIYUN_FUSION_SCHEME_CODE: "scheme_100001",
+				ALIYUN_FUSION_PACKAGE_NAME: "com.chishenme.app",
+				ALIYUN_FUSION_PACKAGE_SIGN: "A".repeat(32),
+			},
+			{ accountsEnabled: true, databaseEnabled: true },
+		);
+
+		expect(config.enabled).toBe(true);
+		expect(config.registrationEnabled).toBe(false);
+		expect(config.phone.enabled).toBe(false);
+		expect(config.fusion.enabled).toBe(true);
+		expect(config.wechat).toMatchObject({
+			enabled: false,
+			appId: null,
+			appSecret: null,
+		});
 	});
 
 	it("allows fusion plus WeChat registration without SMS and pins every Android field", () => {
@@ -84,6 +111,7 @@ describe("account startup configuration", () => {
 			options,
 		);
 		expect(config.phone.enabled).toBe(false);
+		expect(config.registrationEnabled).toBe(true);
 		expect(config.otpPepperRing).toBeNull();
 		expect(config.fusion).toMatchObject({
 			enabled: true,

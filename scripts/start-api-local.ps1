@@ -373,13 +373,9 @@ try {
         throw 'QWEN_ENABLED=true 时必须在同一私有文件中填写 QWEN_API_KEY。'
     }
     if ($entries.Contains('ACCOUNTS_ENABLED') -and $entries['ACCOUNTS_ENABLED'] -eq 'true') {
-        foreach ($requiredSwitch in @(
-            'DATABASE_ENABLED',
-            'WECHAT_AUTH_ENABLED'
-        )) {
-            if (-not $entries.Contains($requiredSwitch) -or $entries[$requiredSwitch] -ne 'true') {
-                throw "ACCOUNTS_ENABLED=true 时 $requiredSwitch 必须在同一私有文件中明确设为 true。"
-            }
+        if (-not $entries.Contains('DATABASE_ENABLED') -or
+            $entries['DATABASE_ENABLED'] -ne 'true') {
+            throw 'ACCOUNTS_ENABLED=true 时 DATABASE_ENABLED 必须在同一私有文件中明确设为 true。'
         }
         $phoneAuthEnabled = $entries.Contains('PHONE_AUTH_ENABLED') -and
             $entries['PHONE_AUTH_ENABLED'] -eq 'true'
@@ -392,12 +388,22 @@ try {
             'DATABASE_URL',
             'AUTH_HASH_ACTIVE_VERSION',
             'AUTH_HASH_KEYS_JSON',
-            'AUTH_IDENTITY_DEDUP_KEY_VERSION',
-            'WECHAT_APP_ID',
-            'WECHAT_APP_SECRET'
+            'AUTH_IDENTITY_DEDUP_KEY_VERSION'
         )) {
             if (-not (Test-ConfiguredValue -Entries $entries -Key $requiredValue)) {
                 throw "ACCOUNTS_ENABLED=true 时必须在私有文件或受控进程环境中填写 $requiredValue。"
+            }
+        }
+        $wechatAuthEnabled = $entries.Contains('WECHAT_AUTH_ENABLED') -and
+            $entries['WECHAT_AUTH_ENABLED'] -eq 'true'
+        if ($wechatAuthEnabled) {
+            foreach ($requiredWechatValue in @(
+                'WECHAT_APP_ID',
+                'WECHAT_APP_SECRET'
+            )) {
+                if (-not (Test-ConfiguredValue -Entries $entries -Key $requiredWechatValue)) {
+                    throw "WECHAT_AUTH_ENABLED=true 时必须在私有文件或受控进程环境中填写 $requiredWechatValue。"
+                }
             }
         }
         $emailAuthEnabled = $entries.Contains('EMAIL_AUTH_ENABLED') -and

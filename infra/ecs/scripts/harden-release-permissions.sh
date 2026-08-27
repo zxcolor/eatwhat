@@ -32,6 +32,7 @@ while IFS= read -r path; do
   chown root:root "$path"
   case "$path" in
     "$script_dir"/*.sh) chmod 700 "$path" ;;
+    "$bundle_root/postgres/pg_hba.conf") chmod 644 "$path" ;;
     *) chmod 600 "$path" ;;
   esac
 done < <(find "$bundle_root" -xdev -type f -print | sort)

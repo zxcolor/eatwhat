@@ -150,6 +150,11 @@ export class AuthService {
 		bearer: string | null,
 		clientIp: string,
 	): Promise<PhoneCodeChallengeResponse> {
+		if (input.purpose === "REGISTER") {
+			this.requireRegistrationEnabled("PHONE");
+		} else if (!this.config.auth.phone.enabled) {
+			throw new AuthUnavailableException();
+		}
 		const challenge = await this.requestCode(
 			"PHONE",
 			input.phoneNumber,
@@ -184,6 +189,9 @@ export class AuthService {
 		input: FusionAuthTokenRequest,
 		clientIp: string,
 	): Promise<FusionAuthTokenResponse> {
+		// REGISTER identifies a standalone phone-proof flow; it does not authorize
+		// account creation. The final registration and REGISTER OAuth paths enforce
+		// registrationEnabled before any provider or repository side effect.
 		const secrets = this.readySecrets();
 		const fusion = this.config.auth.fusion;
 		if (!fusion.enabled || fusion.schemeCode === null) {
@@ -299,21 +307,18 @@ export class AuthService {
 		bearer: string | null,
 		clientIp: string,
 	): Promise<OAuthStateResponse> {
+		if (
+			(input.provider === "WECHAT" && !this.config.auth.wechat.enabled) ||
+			(input.provider === "QQ" && !this.config.auth.qq.enabled)
+		) {
+			throw new AuthUnavailableException();
+		}
+		if (input.purpose === "REGISTER") {
+			this.requireRegistrationEnabled(
+				"phoneProofId" in input ? "FUSION" : "PHONE",
+			);
+		}
 		const secrets = this.readySecrets();
-		if (
-			input.purpose !== "BIND" &&
-			((input.provider === "WECHAT" && !this.config.auth.wechat.enabled) ||
-				(input.provider === "QQ" && !this.config.auth.qq.enabled))
-		) {
-			throw new AuthUnavailableException();
-		}
-		if (
-			input.purpose === "REGISTER" &&
-			"phoneProofId" in input &&
-			(!this.config.auth.fusion.enabled || !this.config.auth.wechat.enabled)
-		) {
-			throw new AuthUnavailableException();
-		}
 		const deviceCandidates = hashCandidates(
 			"device",
 			input.installationId,
@@ -351,9 +356,6 @@ export class AuthService {
 				bearer,
 				input.installationId,
 			);
-			if (!this.config.auth.qq.enabled) {
-				throw new AuthUnavailableException();
-			}
 			deviceHash = session.deviceHash;
 			targetUserId = session.userId;
 			flowReferenceHash = hashSensitiveRateLimitValue(
@@ -425,6 +427,7 @@ export class AuthService {
 		input: RegisterPhoneWechatRequest,
 		clientIp: string,
 	): Promise<AuthTokenResponse> {
+		this.requireRegistrationEnabled("PHONE");
 		const secrets = this.readySecrets();
 		assertDeviceLabel(input.device.label);
 		const deviceCandidates = deviceHashValues(
@@ -507,13 +510,8 @@ export class AuthService {
 		input: RegisterFusionWechatRequest,
 		clientIp: string,
 	): Promise<AuthTokenResponse> {
+		this.requireRegistrationEnabled("FUSION");
 		const secrets = this.readySecrets();
-		if (
-			!this.config.auth.fusion.enabled ||
-			!this.config.auth.wechat.enabled
-		) {
-			throw new AuthUnavailableException();
-		}
 		assertDeviceLabel(input.device.label);
 		const deviceCandidates = deviceHashValues(
 			input.device.installationId,
@@ -570,6 +568,7 @@ export class AuthService {
 		input: LoginRequest,
 		clientIp: string,
 	): Promise<AuthTokenResponse> {
+		this.requireLoginChannelEnabled(input.method);
 		const secrets = this.readySecrets();
 		assertDeviceLabel(input.device.label);
 		if (input.method === "PHONE" || input.method === "EMAIL") {
@@ -666,6 +665,12 @@ export class AuthService {
 		bearer: string,
 		input: BindIdentityRequest,
 	): Promise<BindIdentityResponse> {
+		if (
+			(input.type === "EMAIL" && !this.config.auth.email.enabled) ||
+			(input.type === "QQ" && !this.config.auth.qq.enabled)
+		) {
+			throw new AuthUnavailableException();
+		}
 		const session =
 			await this.authenticatedUserResolver.resolveAccessToken(bearer);
 		const secrets = this.readySecrets();
@@ -1000,6 +1005,36 @@ export class AuthService {
 			!this.config.auth.dataExportEnabled ||
 			this.config.dataExportWorkerReady !== true
 		) {
+			throw new AuthUnavailableException();
+		}
+	}
+
+	private requireRegistrationEnabled(channel: "PHONE" | "FUSION"): void {
+		const mobileEnabled =
+			channel === "PHONE"
+				? this.config.auth.phone.enabled
+				: this.config.auth.fusion.enabled;
+		if (
+			!this.config.auth.registrationEnabled ||
+			!mobileEnabled ||
+			!this.config.auth.wechat.enabled
+		) {
+			throw new AuthUnavailableException();
+		}
+	}
+
+	private requireLoginChannelEnabled(method: LoginRequest["method"]): void {
+		const enabled =
+			method === "PHONE"
+				? this.config.auth.phone.enabled
+				: method === "PHONE_FUSION"
+					? this.config.auth.fusion.enabled
+					: method === "EMAIL"
+						? this.config.auth.email.enabled
+						: method === "WECHAT"
+							? this.config.auth.wechat.enabled
+							: this.config.auth.qq.enabled;
+		if (!enabled) {
 			throw new AuthUnavailableException();
 		}
 	}
