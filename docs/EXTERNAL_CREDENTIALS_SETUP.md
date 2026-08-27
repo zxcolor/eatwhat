@@ -12,9 +12,10 @@ Android 1.0 当前只需要准备六类外部能力：高德 Web Service、阿�
 和本地安全验证，不能替代平台审核、真实投递或真机登录验收。
 
 账号总开关不是拿到一个验证码就能开启。`ACCOUNTS_ENABLED=true` 时，PostgreSQL、
-微信登录、认证哈希密钥环，以及手机号短信或融合认证至少一条手机通道必须同时
-就绪。OTP pepper 只在短信或邮箱验证码启用时需要。邮箱和 QQ 是已有账号的可选
-登录/绑定方式，不能单独创建账号。
+认证哈希密钥环，以及手机号短信或融合认证至少一条手机通道必须同时就绪。微信是
+独立通道：已有账号的 Fusion 登录不要求微信；但微信关闭时公开
+`registrationEnabled=false`，真实注册端点也失败关闭。OTP pepper 只在短信或邮箱
+验证码启用时需要。邮箱和 QQ 是已有账号的可选登录/绑定方式，不能单独创建账号。
 
 ## 2. 你最终要准备的清单
 
@@ -242,6 +243,11 @@ WECHAT_APP_SECRET=<当前变体 AppSecret>
 WECHAT_AUTH_TIMEOUT_MS=2000
 ```
 
+只有 `WECHAT_AUTH_ENABLED=true` 时，ECS 严格候选输入与生产 `api.env` 才能包含并要求
+`WECHAT_APP_ID` / `WECHAT_APP_SECRET`；保持 `false` 时应省略两项，而不是放占位值。
+本机公开 `.env.local.example` 为了展示完整字段会保留空键，但本机启动器不会把空值当作
+已配置 Secret，也不会向运行进程注入它们。
+
 ## 7. QQ 互联
 
 ### 7.1 平台侧
@@ -359,17 +365,20 @@ node .\scripts\generate-auth-keyrings.mjs v1
 2. 填写非 Secret 和本机测试 Secret。该文件已被 Git 忽略，但仍是明文，只能用于
    受控开发机；生产使用 Secret/KMS/RAM 角色。
 3. 先保持所有通道开关为 `false`，逐项取得平台材料。
-4. 开账号前同时准备 PostgreSQL、微信、认证哈希密钥环，以及短信或融合认证至少
-   一条手机通道。融合认证主链示例：
+4. 开账号前同时准备 PostgreSQL、认证哈希密钥环，以及短信或融合认证至少一条
+   手机通道。只开放已有账号登录的 Fusion-only 示例：
 
    ```dotenv
    DATABASE_ENABLED=true
    ACCOUNTS_ENABLED=true
    PHONE_AUTH_ENABLED=false
    FUSION_AUTH_ENABLED=true
-   WECHAT_AUTH_ENABLED=true
+   WECHAT_AUTH_ENABLED=false
    ```
 
+   此配置不填写 `WECHAT_APP_ID` / `WECHAT_APP_SECRET`；公开
+   `registrationEnabled=false`，真实注册请求也必须失败关闭。要开放注册时再单独完成
+   微信资质、包名/签名和真机回调验收，将微信开关改为 `true` 并补齐两项服务端值。
    如保留短信验证码降级，再把 `PHONE_AUTH_ENABLED=true` 并补齐短信签名、模板与
    OTP pepper；不能把测试验证码当作生产降级。
 

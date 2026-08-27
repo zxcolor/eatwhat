@@ -59,7 +59,7 @@ bash scripts/harden-release-permissions.sh
 scripts/preflight-deployment.sh
 ```
 
-预检会验证：release 和 Secret 的所有权/权限、环境变量精确集合、数据库角色 URL、CA 与证书、镜像 ID/平台/运行用户、API 入口和迁移文件，以及 Compose 渲染。它不打印密码、高德 Key 或签名私钥。
+预检会验证：release 和 Secret 的所有权/权限、环境变量精确集合、数据库角色 URL、CA 与证书、镜像 ID/平台/运行用户、API 入口和迁移文件，以及 Compose 渲染。除脚本为 `0700`、其余 release 文件为 `0600` 外，挂载给非 root PostgreSQL 进程读取的无密配置 `postgres/pg_hba.conf` 必须保持 root:root、`0644`；不得把这项例外扩展到 Secret。预检不打印密码、高德 Key 或签名私钥。
 
 预检失败时不得启动、迁移或切换 release。`provision-database.sh` 也会先执行同一预检。
 
@@ -98,9 +98,10 @@ scripts/update-amap-secrets.sh --disable
 融合认证只在新候选 release 中启用，不直接改活动容器。`deployment.env` 的
 `ACCOUNTS_ENABLED`、`PHONE_AUTH_ENABLED`、`FUSION_AUTH_ENABLED`、
 `WECHAT_AUTH_ENABLED` 和 `ALIBABA_CLOUD_ECS_METADATA` 是非 Secret 发布坐标；
-认证 hash ring、微信 AppSecret、短信材料和融合方案标识只进入 root:root、`0600`
-的共享 `api.env`。不要手填或拼接这两个活动文件。只在 root 私有目录准备一份完整
-候选输入，再由脚本把发布坐标和 Secret 原子拆分到各自文件：
+认证 hash ring，以及按实际启用通道提供的微信 AppSecret、短信材料和融合方案标识，
+只进入 root:root、`0600` 的共享 `api.env`。不要手填或拼接这两个活动文件。只在
+root 私有目录准备一份完整候选输入，再由脚本把发布坐标和 Secret 原子拆分到各自
+文件：
 
 ```bash
 install -d -m 700 /root/private
@@ -114,21 +115,25 @@ Fusion-only 候选文件的字段集合固定如下；尖括号只表示需要�
 ACCOUNTS_ENABLED=true
 PHONE_AUTH_ENABLED=false
 FUSION_AUTH_ENABLED=true
-WECHAT_AUTH_ENABLED=true
+WECHAT_AUTH_ENABLED=false
 ALIBABA_CLOUD_ECS_METADATA=<ECS RAM 角色名>
 AUTH_HASH_ACTIVE_VERSION=hash.v1
 AUTH_HASH_KEYS_JSON={"hash.v1":"<32 到 128 字节随机值的标准 Base64>"}
 AUTH_IDENTITY_DEDUP_KEY_VERSION=hash.v1
-WECHAT_APP_ID=<wx 加 16 位十六进制 AppID>
-WECHAT_APP_SECRET=<微信 AppSecret>
 ALIYUN_FUSION_SCHEME_CODE=<融合认证方案 Code>
 ALIYUN_FUSION_PACKAGE_NAME=com.chishenme.app.alpha
 ALIYUN_FUSION_PACKAGE_SIGN=<固定 Alpha signer 的 32 位 MD5>
 ```
 
-Fusion-only 不写 `AUTH_OTP_PEPPER_*` 或 `ALIYUN_SMS_*`；只有
-`PHONE_AUTH_ENABLED=true` 才把这四项加入候选文件。编辑完成后从待发布的候选
-release 执行：
+这个 Fusion-only 候选也不写 `WECHAT_APP_ID` / `WECHAT_APP_SECRET`；严格预检要求
+共享 `api.env` 同样不含这两项。它只开放已绑定手机号账号的融合登录：公开
+`registrationEnabled=false`，`POST /v1/auth/register/fusion-wechat` 也必须实际拒绝，
+不能只靠 Android 隐藏入口。为独立手机号验证和供应商 smoke，受限流保护的
+Fusion token/verify 可生成不建号的短时手机号 proof；最终注册和 REGISTER OAuth
+state 仍须在任何外部或数据库副作用前拒绝。只有另行启用 `WECHAT_AUTH_ENABLED=true` 时，才把微信
+AppID 与 AppSecret 加入候选输入。Fusion-only 也不写 `AUTH_OTP_PEPPER_*` 或
+`ALIYUN_SMS_*`；只有 `PHONE_AUTH_ENABLED=true` 才把这四项加入候选文件。编辑完成
+后从待发布的候选 release 执行：
 
 ```bash
 cd /opt/chi-shen-me/releases/<候选 release>/deploy
@@ -139,8 +144,8 @@ scripts/update-auth-secrets.sh --apply --config-file /root/private/auth-candidat
 目录生成候选和回滚文件；它先验证当前 release，再原子替换共享 `api.env` 与候选
 `deployment.env`，最后通过固定 API 镜像里的生产
 `loadAuthRuntimeConfig` 重新预检。JSON、1 到 3 个 current/retiring key、版本格式、
-标准 Base64、32 到 128 字节长度、active/dedup 归属、微信 AppID 或任何精确字段集合
-不合格时都会恢复原文件。成功只表示配置可发布；看到
+标准 Base64、32 到 128 字节长度、active/dedup 归属、启用微信时的 AppID 或任何
+精确字段集合不合格时都会恢复原文件。成功只表示配置可发布；看到
 `API_RECREATE_REQUIRED=true` 后仍必须用第 5 节候选激活脚本重建 API 和完成 smoke。
 
 首次开启前必须依次完成：
@@ -151,7 +156,8 @@ scripts/update-auth-secrets.sh --apply --config-file /root/private/auth-candidat
 2. 在控制台核对方案 Code、场景 `100001`、`com.chishenme.app.alpha` 与固定证书
    MD5，确认全局降级路径不依赖宿主自动回填手机号；
 3. 备份并复核数据库，运行包含 `0010_fusion_phone_auth.sql` 的迁移；
-4. 在候选环境运行配置、失败关闭和重放 smoke，不把真实 token/手机号写入日志；
+4. 在候选环境运行配置、失败关闭和重放 smoke；Fusion-only 必须同时证明公开
+   `registrationEnabled=false` 且真实注册请求失败，不把真实 token/手机号写入日志；
 5. 通过唯一候选激活脚本切换，再用 ARM64 + 中国大陆 SIM 真机完成闭环。
 
 融合防重放会对 `AUTH_HASH_KEYS_JSON` 中 current 与 retiring 的全部版本计算 HMAC。

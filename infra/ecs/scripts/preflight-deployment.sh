@@ -106,6 +106,7 @@ while IFS= read -r path; do
   case "$path" in
     "$deployment_env") ;;
     "$script_dir"/*.sh) assert_regular_file "$path" 700 ;;
+    "$bundle_root/postgres/pg_hba.conf") assert_regular_file "$path" 644 ;;
     *) assert_regular_file "$path" 600 ;;
   esac
 done < <(find "$bundle_root" -xdev -type f -print | sort)
@@ -168,7 +169,6 @@ for auth_switch in "$accounts_enabled" "$phone_auth_enabled" "$fusion_auth_enabl
   [[ "$auth_switch" == 'true' || "$auth_switch" == 'false' ]] || die 'authentication switches must be true or false'
 done
 if [[ "$accounts_enabled" == 'true' ]]; then
-  [[ "$wechat_auth_enabled" == 'true' ]] || die 'accounts require WeChat authentication'
   [[ "$phone_auth_enabled" == 'true' || "$fusion_auth_enabled" == 'true' ]] ||
     die 'accounts require SMS phone auth or FusionAuth'
 else
@@ -228,8 +228,10 @@ fi
 if [[ "$accounts_enabled" == 'true' ]]; then
   api_env_names+=(
     AUTH_HASH_ACTIVE_VERSION AUTH_HASH_KEYS_JSON AUTH_IDENTITY_DEDUP_KEY_VERSION
-    WECHAT_APP_ID WECHAT_APP_SECRET
   )
+fi
+if [[ "$wechat_auth_enabled" == 'true' ]]; then
+  api_env_names+=(WECHAT_APP_ID WECHAT_APP_SECRET)
 fi
 if [[ "$phone_auth_enabled" == 'true' ]]; then
   api_env_names+=(
@@ -284,7 +286,8 @@ fi
 # loadAuthRuntimeConfig implementation, without initializing credentials or
 # allowing any network access. This covers strict JSON parsing, the 1-3 key
 # limit, key-version grammar, canonical Base64/byte length, active and dedup
-# membership, cross-ring material reuse, provider fields and WeChat AppID.
+# membership, cross-ring material reuse, provider fields and the conditional
+# WeChat AppID.
 if ! docker run --rm --network none --read-only \
   --cap-drop ALL --security-opt no-new-privileges:true \
   --env-file "$secrets_dir/api.env" \
@@ -304,11 +307,17 @@ if ! docker run --rm --network none --read-only \
       databaseEnabled: true,
       production: true,
     });
+    const registrationEnabled =
+      enabled &&
+      (process.env.PHONE_AUTH_ENABLED === "true" ||
+        process.env.FUSION_AUTH_ENABLED === "true") &&
+      process.env.WECHAT_AUTH_ENABLED === "true";
     if (
       config.enabled !== enabled ||
       config.phone.enabled !== (process.env.PHONE_AUTH_ENABLED === "true" && enabled) ||
       config.fusion.enabled !== (process.env.FUSION_AUTH_ENABLED === "true" && enabled) ||
-      config.wechat.enabled !== (process.env.WECHAT_AUTH_ENABLED === "true" && enabled)
+      config.wechat.enabled !== (process.env.WECHAT_AUTH_ENABLED === "true" && enabled) ||
+      config.registrationEnabled !== registrationEnabled
     ) {
       throw new Error("authentication switch mismatch");
     }

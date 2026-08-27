@@ -12,7 +12,6 @@ import com.alicom.fusion.auth.numberauth.FusionNumberAuthModel
 import com.alicom.fusion.auth.smsauth.AlicomFusionVerifyCodeView
 import com.alicom.fusion.auth.token.AlicomFusionAuthToken
 import com.alicom.fusion.auth.upsms.AlicomFusionUpSMSView
-import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 
 /** Exact adapter for the locally prepared, integrity-pinned official SDK. */
@@ -23,9 +22,10 @@ internal class PlatformFusionAuthSdkFactory @Inject constructor() : FusionAuthSd
 }
 
 private class AlicomFusionAuthSdk : FusionAuthSdk {
-    private val closed = AtomicBoolean(false)
-    private val sceneStarted = AtomicBoolean(false)
-    private var business: AlicomFusionBusiness? = null
+    private val callbackGate = FusionAuthCallbackGate<AlicomFusionBusiness> { current ->
+        runCatching { current.stopSceneWithTemplateId(TEMPLATE_ID) }
+        runCatching { current.destory() }
+    }
 
     override fun start(
         activity: Activity,
@@ -33,7 +33,7 @@ private class AlicomFusionAuthSdk : FusionAuthSdk {
         authToken: String,
         listener: FusionAuthSdkListener,
     ): Boolean {
-        if (closed.get() || business != null) return false
+        if (callbackGate.isClosed) return false
 
         // The selected global strategy includes the official device-risk node.
         // Its two integrity-pinned Umeng AARs are packaged only in an explicitly
@@ -43,105 +43,128 @@ private class AlicomFusionAuthSdk : FusionAuthSdk {
 
         val instance = AlicomFusionBusiness()
         val initialToken = AlicomFusionAuthToken().apply { setAuthToken(authToken) }
-        business = instance
-        instance.initWithToken(activity.applicationContext, schemeCode, initialToken)
-        instance.setAlicomFusionAuthCallBack(
-            object : AlicomFusionAuthCallBack {
-                override fun onSDKTokenUpdate(): AlicomFusionAuthToken {
-                    // This adapter has no synchronous, server-authorized refresh path.
-                    // Reusing the old token would pretend a refresh succeeded, so fail
-                    // closed and require the user to start a new short-lived scene.
-                    listener.onFailure()
-                    return AlicomFusionAuthToken().apply { setAuthToken("") }
-                }
+        if (!callbackGate.attach(instance)) return false
 
-                override fun onSDKTokenAuthSuccess() {
-                    if (closed.get() || !sceneStarted.compareAndSet(false, true)) return
-                    try {
-                        instance.startSceneWithTemplateId(
-                            activity,
-                            TEMPLATE_ID,
-                            fusionUiCallback(),
-                        )
-                    } catch (_: Exception) {
-                        listener.onFailure()
-                    }
-                }
-
-                override fun onSDKTokenAuthFailure(
-                    token: AlicomFusionAuthToken?,
-                    event: AlicomFusionEvent?,
-                ) = listener.onFailure()
-
-                override fun onVerifySuccess(
-                    verifyToken: String?,
-                    nodeName: String?,
-                    event: AlicomFusionEvent?,
-                ) {
-                    val proof = verifyToken ?: return listener.onFailure()
-                    listener.onProof(proof) { success ->
-                        if (!closed.get()) {
-                            instance.continueSceneWithTemplateId(TEMPLATE_ID, success)
+        val initialized = try {
+            callbackGate.runIfOpen { current ->
+                current.initWithToken(activity.applicationContext, schemeCode, initialToken)
+                current.setAlicomFusionAuthCallBack(
+                    object : AlicomFusionAuthCallBack {
+                        override fun onSDKTokenUpdate(): AlicomFusionAuthToken {
+                            // This synchronous callback cannot fetch a new server token.
+                            // Returning a new empty token fails closed without re-entering
+                            // cancellation while the SDK is waiting for the return value.
+                            return AlicomFusionAuthToken().apply {
+                                setAuthToken(callbackGate.failClosedRefreshToken())
+                            }
                         }
-                    }
-                }
 
-                override fun onHalfWayVerifySuccess(
-                    nodeName: String?,
-                    maskedToken: String?,
-                    event: AlicomFusionEvent?,
-                    result: HalfWayVerifyResult?,
-                ) {
-                    val proof = maskedToken
-                    if (proof == null || result == null) {
-                        result?.verifyResult(false)
-                        listener.onFailure()
-                        return
-                    }
-                    listener.onProof(proof) { success -> result.verifyResult(success) }
-                }
+                        override fun onSDKTokenAuthSuccess() {
+                            try {
+                                callbackGate.startSceneOnce { active ->
+                                    active.startSceneWithTemplateId(
+                                        activity,
+                                        TEMPLATE_ID,
+                                        fusionUiCallback(),
+                                    )
+                                }
+                            } catch (_: Exception) {
+                                callbackGate.notifyTerminal(listener::onFailure)
+                            }
+                        }
 
-                override fun onVerifyFailed(event: AlicomFusionEvent?, nodeName: String?) {
-                    // A failed node is input to the configured global strategy:
-                    // false allows its captcha/SMS/fallback edge to run. Destroying
-                    // the SDK here would silently turn a recoverable branch into a
-                    // terminal failure.
-                    runCatching {
-                        instance.continueSceneWithTemplateId(TEMPLATE_ID, false)
-                    }.onFailure {
-                        listener.onFailure()
-                    }
-                }
+                        override fun onSDKTokenAuthFailure(
+                            token: AlicomFusionAuthToken?,
+                            event: AlicomFusionEvent?,
+                        ) {
+                            callbackGate.notifyTerminal(listener::onFailure)
+                        }
 
-                override fun onTemplateFinish(event: AlicomFusionEvent?) = listener.onFinished()
+                        override fun onVerifySuccess(
+                            verifyToken: String?,
+                            nodeName: String?,
+                            event: AlicomFusionEvent?,
+                        ) {
+                            val proof = verifyToken
+                            if (proof == null) {
+                                callbackGate.notifyTerminal(listener::onFailure)
+                                return
+                            }
+                            val completion = callbackGate.oneShotOperation { active, success ->
+                                active.continueSceneWithTemplateId(TEMPLATE_ID, success)
+                            }
+                            listener.onProof(proof) { success -> completion(success) }
+                        }
 
-                override fun onAuthEvent(event: AlicomFusionEvent?) = Unit
+                        override fun onHalfWayVerifySuccess(
+                            nodeName: String?,
+                            maskedToken: String?,
+                            event: AlicomFusionEvent?,
+                            result: HalfWayVerifyResult?,
+                        ) {
+                            val proof = maskedToken
+                            if (proof == null || result == null) {
+                                if (result != null) {
+                                    runCatching {
+                                        callbackGate.runIfOpen { result.verifyResult(false) }
+                                    }
+                                }
+                                callbackGate.notifyTerminal(listener::onFailure)
+                                return
+                            }
+                            val completion = callbackGate.oneShotOperation { _, success ->
+                                result.verifyResult(success)
+                            }
+                            listener.onProof(proof) { success -> completion(success) }
+                        }
 
-                // The app never supplies a guessed, cached, or user-entered phone number
-                // to the SDK. The server is the sole authority after proof verification.
-                override fun onGetPhoneNumberForVerification(
-                    nodeName: String?,
-                    event: AlicomFusionEvent?,
-                ): String = ""
+                        override fun onVerifyFailed(
+                            event: AlicomFusionEvent?,
+                            nodeName: String?,
+                        ) {
+                            // A failed node is input to the configured global strategy:
+                            // false allows its captcha/SMS/fallback edge to run.
+                            try {
+                                callbackGate.runIfOpen { active ->
+                                    active.continueSceneWithTemplateId(TEMPLATE_ID, false)
+                                }
+                            } catch (_: Exception) {
+                                callbackGate.notifyTerminal(listener::onFailure)
+                            }
+                        }
 
-                override fun onVerifyInterrupt(event: AlicomFusionEvent?) {
-                    // Missing protocol acceptance, editable input and temporary
-                    // node loading interruptions are recoverable inside SDK UI.
-                    // The user can correct them or explicitly cancel the scene.
-                }
-            },
-        )
-        // Initialization is accepted here. The scene is started exactly once
-        // from onSDKTokenAuthSuccess, as required by the provider lifecycle.
-        return true
+                        override fun onTemplateFinish(event: AlicomFusionEvent?) {
+                            callbackGate.notifyTerminal(listener::onFinished)
+                        }
+
+                        override fun onAuthEvent(event: AlicomFusionEvent?) = Unit
+
+                        // The app never supplies a guessed, cached, or user-entered phone
+                        // number. The server remains authoritative after proof verification.
+                        override fun onGetPhoneNumberForVerification(
+                            nodeName: String?,
+                            event: AlicomFusionEvent?,
+                        ): String = ""
+
+                        override fun onVerifyInterrupt(event: AlicomFusionEvent?) {
+                            // Missing protocol acceptance, editable input and temporary
+                            // loading interruptions remain recoverable inside the SDK UI.
+                        }
+                    },
+                )
+            }
+        } catch (_: Exception) {
+            callbackGate.close()
+            false
+        }
+
+        // A synchronous provider callback may have terminally closed the gate while
+        // setAlicomFusionAuthCallBack was still on the stack.
+        return initialized && !callbackGate.isClosed
     }
 
     override fun cancel() {
-        if (!closed.compareAndSet(false, true)) return
-        val current = business
-        business = null
-        runCatching { current?.stopSceneWithTemplateId(TEMPLATE_ID) }
-        runCatching { current?.destory() }
+        callbackGate.close()
     }
 
     /**

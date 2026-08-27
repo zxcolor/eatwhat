@@ -302,11 +302,19 @@ Android 官方安全基线：
 
 ## 8. 功能开关与失败关闭
 
-- `ACCOUNTS_ENABLED` 只有在数据库 schema、会话密钥、微信适配器就绪，并且
-  `PHONE_AUTH_ENABLED` 或 `FUSION_AUTH_ENABLED` 至少一个就绪时才允许为 true。
+- `ACCOUNTS_ENABLED` 只有在数据库 schema、会话密钥就绪，并且
+  `PHONE_AUTH_ENABLED` 或 `FUSION_AUTH_ENABLED` 至少一个手机号通道就绪时才允许
+  为 true；微信适配器不是已有账号 Fusion 登录的前置条件。
 - `PHONE_AUTH_ENABLED`、`FUSION_AUTH_ENABLED`、`EMAIL_AUTH_ENABLED`、
   `WECHAT_AUTH_ENABLED`、`QQ_AUTH_ENABLED` 分别控制真实通道；缺少所需配置时
-  生产环境启动失败或该能力明确不可用。
+  生产环境启动失败或该能力明确不可用。通道关闭后，请求新 challenge/state、消费
+  旧登录材料和绑定材料都必须在仓储或供应商副作用前拒绝；不能等待上游凭据缺失才失败。
+- 注册仍要求手机号通道和微信通道同时可用。Fusion-only + WeChat=false 时，公开
+  `registrationEnabled=false`，`POST /v1/auth/register/fusion-wechat` 等真实注册路径
+  也必须在服务端失败关闭；不能只靠 Android 隐藏入口。
+- 为完成独立手机号验证与真实供应商验收，受限流保护的 Fusion token/verify 链路仍可
+  生成 `REGISTER` 用途的短时手机号 proof；该 proof 本身不创建用户、不调用微信，且
+  无法绕过最终注册与 REGISTER OAuth state 的 `registrationEnabled` 门禁。
 - 功能配置返回 capability，不返回 AppSecret、模板 ID、签名、发信地址或供应商内部错误。
 - Android 在能力关闭时展示“尚未开放”，不展示可以提交但必然失败的表单。
 - 开发测试适配器只能在非生产环境通过显式开关启用，测试验证码和虚构第三方身份必须有醒目标识。

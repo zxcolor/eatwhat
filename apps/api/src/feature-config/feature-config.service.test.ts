@@ -33,24 +33,29 @@ function config(input?: {
 	const base = loadAppConfig({ NODE_ENV: "test" });
 	const accountsEnabled = input?.accounts ?? true;
 	const dataExportEnabled = input?.dataExport ?? false;
+	const phoneEnabled = input?.phone ?? false;
+	const fusionEnabled = input?.fusion ?? false;
+	const wechatEnabled = input?.wechat ?? false;
 	return Object.freeze({
 		...base,
 		dataExportWorkerReady: dataExportEnabled,
 		auth: Object.freeze({
 			...base.auth,
 			enabled: accountsEnabled,
+			registrationEnabled:
+				accountsEnabled && (phoneEnabled || fusionEnabled) && wechatEnabled,
 			dataExportEnabled,
 			phone: Object.freeze({
 				...base.auth.phone,
-				enabled: input?.phone ?? false,
+				enabled: phoneEnabled,
 			}),
 			fusion: Object.freeze({
 				...base.auth.fusion,
-				enabled: input?.fusion ?? false,
+				enabled: fusionEnabled,
 			}),
 			wechat: Object.freeze({
 				...base.auth.wechat,
-				enabled: input?.wechat ?? false,
+				enabled: wechatEnabled,
 			}),
 		}),
 		dataExportArtifacts: Object.freeze({
@@ -209,6 +214,27 @@ describe("FeatureConfigService persistence capabilities", () => {
 				phoneEnabled: false,
 				fusionEnabled: true,
 				wechatEnabled: true,
+			},
+		});
+	});
+
+	it("advertises Fusion login while keeping registration closed without WeChat", async () => {
+		const service = new FeatureConfigService(
+			config({ accounts: true, phone: false, fusion: true, wechat: false }),
+			placeProvider,
+			locationSearchProvider,
+			placeSearchProvider,
+			policy(),
+			supportFeedback(),
+		);
+
+		await expect(service.getPublicConfig()).resolves.toMatchObject({
+			authCapabilities: {
+				accountsEnabled: true,
+				registrationEnabled: false,
+				phoneEnabled: false,
+				fusionEnabled: true,
+				wechatEnabled: false,
 			},
 		});
 	});

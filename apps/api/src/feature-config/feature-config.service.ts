@@ -94,11 +94,7 @@ export class FeatureConfigService {
 			},
 			authCapabilities: {
 				accountsEnabled: this.config.auth.enabled,
-				registrationEnabled:
-					this.config.auth.enabled &&
-					(this.config.auth.phone.enabled ||
-						this.config.auth.fusion.enabled) &&
-					this.config.auth.wechat.enabled,
+				registrationEnabled: this.config.auth.registrationEnabled,
 				phoneEnabled:
 					this.config.auth.enabled && this.config.auth.phone.enabled,
 				fusionEnabled:
