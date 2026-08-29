@@ -177,7 +177,7 @@ class RecommendationRepositoryTest {
     }
 
     @Test
-    fun `feature config accepts fusion-only phone proof for registration`() = runTest {
+    fun `feature config rejects registration without ordinary phone OTP`() = runTest {
         val capabilities = AuthCapabilities(
             accountsEnabled = true,
             registrationEnabled = true,
@@ -186,7 +186,6 @@ class RecommendationRepositoryTest {
             emailEnabled = false,
             qqEnabled = false,
             dataExportEnabled = false,
-            fusionEnabled = true,
         )
         val config = validFeatureConfig().copy(
             accountsEnabled = true,
@@ -204,11 +203,11 @@ class RecommendationRepositoryTest {
             },
         )
 
-        assertEquals(FeatureConfigOutcome.Success(config), repository.featureConfig())
+        assertEquals(FeatureConfigOutcome.Unavailable, repository.featureConfig())
     }
 
     @Test
-    fun `feature config rejects fusion when accounts are disabled`() = runTest {
+    fun `feature config accepts all auth capabilities disabled with accounts`() = runTest {
         val config = validFeatureConfig().copy(
             accountsEnabled = false,
             authCapabilities = AuthCapabilities(
@@ -218,7 +217,6 @@ class RecommendationRepositoryTest {
                 wechatEnabled = false,
                 emailEnabled = false,
                 qqEnabled = false,
-                fusionEnabled = true,
             ),
         )
         val repository = RecommendationRepository(
@@ -233,7 +231,7 @@ class RecommendationRepositoryTest {
             },
         )
 
-        assertEquals(FeatureConfigOutcome.Unavailable, repository.featureConfig())
+        assertEquals(FeatureConfigOutcome.Success(config), repository.featureConfig())
     }
 
     @Test

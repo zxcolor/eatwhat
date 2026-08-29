@@ -146,13 +146,55 @@ SELECT NOT EXISTS (
   $psql_fail$;
 \endif
 
+-- The isolated restore path can intentionally recreate the last legacy schema
+-- (0010), PHONE_ONLY (0011), or the UnionID alias schema (0012). Select exactly
+-- one least-privilege whitelist; never apply a mixed authentication grant set.
+SELECT (
+  count(*) = 11
+  AND min(version) = 1
+  AND max(version) = 11
+  AND bool_or(version = 11 AND name = 'phone_only_auth')
+) AS phone_only_schema_0011,
+(
+  count(*) = 12
+  AND min(version) = 1
+  AND max(version) = 12
+  AND bool_or(version = 12 AND name = 'wechat_union_aliases')
+) AS wechat_union_alias_schema,
+(
+  count(*) = 10
+  AND min(version) = 1
+  AND max(version) = 10
+  AND bool_or(version = 10 AND name = 'fusion_phone_auth')
+) AS legacy_fusion_schema
+FROM public.schema_migrations
+\gset
+SELECT (
+  :'phone_only_schema_0011'::boolean OR :'wechat_union_alias_schema'::boolean
+) AS phone_only_schema,
+(
+  :'phone_only_schema_0011'::boolean
+  OR :'wechat_union_alias_schema'::boolean
+  OR :'legacy_fusion_schema'::boolean
+) AS supported_auth_schema \gset
+\if :supported_auth_schema
+\else
+  DO $psql_fail$
+  BEGIN
+    RAISE EXCEPTION USING
+      ERRCODE = '55000',
+      MESSAGE = 'role grants require the exact 0010, 0011 or 0012 auth schema';
+  END
+  $psql_fail$;
+\endif
+
 BEGIN;
 
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 -- Revoke only migration-owned application objects. PostGIS extension objects
 -- are owned by the separate bootstrap role and are not mutable here.
 SELECT pg_catalog.format(
-  'REVOKE ALL PRIVILEGES ON TABLE %I.%I FROM %I, %I, %I, %I;',
+  'REVOKE ALL PRIVILEGES ON TABLE %I.%I FROM PUBLIC, %I, %I, %I, %I;',
   namespace.nspname,
   relation.relname,
   :'runtime_role',
@@ -171,7 +213,7 @@ ORDER BY relation.relname
 -- Table-level REVOKE does not necessarily erase historical column ACLs. Build
 -- one safely quoted column-level REVOKE per current table inside this transaction.
 SELECT pg_catalog.format(
-  'REVOKE ALL PRIVILEGES (%s) ON TABLE %I.%I FROM %I, %I, %I, %I;',
+  'REVOKE ALL PRIVILEGES (%s) ON TABLE %I.%I FROM PUBLIC, %I, %I, %I, %I;',
   string_agg(pg_catalog.format('%I', column_name), ', ' ORDER BY ordinal_position),
   table_schema,
   table_name,
@@ -195,7 +237,7 @@ GROUP BY table_schema, table_name
 ORDER BY table_name
 \gexec
 SELECT pg_catalog.format(
-  'REVOKE ALL PRIVILEGES ON SEQUENCE %I.%I FROM %I, %I, %I, %I;',
+  'REVOKE ALL PRIVILEGES ON SEQUENCE %I.%I FROM PUBLIC, %I, %I, %I, %I;',
   namespace.nspname,
   relation.relname,
   :'runtime_role',
@@ -243,9 +285,11 @@ GRANT SELECT, INSERT ON
   public.otp_challenges,
   public.auth_refresh_credentials,
   public.auth_access_tokens,
-  public.oauth_states,
-  public.fusion_auth_flows
+  public.oauth_states
 TO :"runtime_role";
+\if :legacy_fusion_schema
+GRANT SELECT, INSERT ON public.fusion_auth_flows TO :"runtime_role";
+\endif
 GRANT SELECT, INSERT ON public.auth_session_families TO :"runtime_role";
 GRANT UPDATE (status, last_seen_at, last_ip_hash, compromised_at, revoked_at)
   ON public.auth_session_families TO :"runtime_role";
@@ -304,15 +348,41 @@ GRANT EXECUTE ON FUNCTION public.revoke_non_primary_identity_binding(uuid, uuid)
 GRANT EXECUTE ON FUNCTION public.bind_email_identity_from_consumed_otp(
   uuid, uuid, varchar, varchar
 ) TO :"runtime_role";
-GRANT EXECUTE ON FUNCTION public.bind_qq_identity_from_consumed_oauth_state(
-  uuid, uuid, varchar, varchar, varchar
+\if :phone_only_schema
+GRANT EXECUTE ON FUNCTION public.bind_oauth_identity_from_consumed_state(
+  uuid, uuid, varchar, varchar, varchar, varchar
 ) TO :"runtime_role";
+\endif
+\if :wechat_union_alias_schema
+GRANT EXECUTE ON FUNCTION public.bind_oauth_identity_with_wechat_union_from_consumed_state(
+  uuid, uuid, varchar, varchar, varchar, varchar
+) TO :"runtime_role";
+GRANT EXECUTE ON FUNCTION public.consume_oauth_state_with_wechat_union(
+  uuid, varchar, varchar, varchar, varchar, uuid, varchar,
+  varchar, varchar, varchar, varchar, varchar, varchar, varchar
+) TO :"runtime_role";
+GRANT EXECUTE ON FUNCTION public.record_wechat_union_alias_from_consumed_state(
+  uuid, uuid
+) TO :"runtime_role";
+\endif
 GRANT EXECUTE ON FUNCTION public.finalize_otp_delivery(
   uuid, varchar, varchar, timestamptz
 ) TO :"runtime_role";
 GRANT EXECUTE ON FUNCTION public.record_otp_verification_attempt(
   uuid, varchar, uuid, varchar, varchar, boolean
 ) TO :"runtime_role";
+\if :phone_only_schema
+GRANT EXECUTE ON FUNCTION public.claim_otp_verification_lease(
+  uuid, varchar, uuid, varchar, varchar, varchar, timestamptz
+) TO :"runtime_role";
+GRANT EXECUTE ON FUNCTION public.release_otp_verification_lease(uuid, varchar)
+  TO :"runtime_role";
+GRANT EXECUTE ON FUNCTION public.supersede_phone_otp_challenges_for_send(uuid)
+  TO :"runtime_role";
+GRANT EXECUTE ON FUNCTION public.complete_otp_verification_lease(
+  uuid, varchar, uuid, varchar, varchar, varchar, boolean
+) TO :"runtime_role";
+\endif
 GRANT EXECUTE ON FUNCTION public.rotate_auth_refresh_credential(
   uuid, uuid, uuid
 ) TO :"runtime_role";
@@ -322,6 +392,15 @@ GRANT EXECUTE ON FUNCTION public.mark_auth_refresh_replay(
 GRANT EXECUTE ON FUNCTION public.consume_oauth_state(
   uuid, varchar, varchar, varchar, varchar, uuid, varchar,
   varchar, varchar, varchar, varchar
+) TO :"runtime_role";
+\if :phone_only_schema
+GRANT EXECUTE ON FUNCTION public.register_phone_account_from_consumed_otp(
+  uuid, uuid, varchar
+) TO :"runtime_role";
+\endif
+\if :legacy_fusion_schema
+GRANT EXECUTE ON FUNCTION public.bind_qq_identity_from_consumed_oauth_state(
+  uuid, uuid, varchar, varchar, varchar
 ) TO :"runtime_role";
 GRANT EXECUTE ON FUNCTION public.register_phone_wechat_account(
   uuid, uuid, uuid, varchar, varchar
@@ -336,6 +415,7 @@ GRANT EXECUTE ON FUNCTION public.record_fusion_auth_result(
 GRANT EXECUTE ON FUNCTION public.register_fusion_phone_wechat_account(
   uuid, uuid, uuid, varchar, varchar
 ) TO :"runtime_role";
+\endif
 GRANT EXECUTE ON FUNCTION public.begin_account_deletion(
   uuid, uuid, varchar, varchar, timestamptz
 ) TO :"runtime_role";
@@ -463,15 +543,18 @@ GRANT EXECUTE ON FUNCTION public.preview_persistence_retention_cleanup()
   TO :"maintenance_role";
 GRANT EXECUTE ON FUNCTION public.execute_persistence_retention_cleanup()
   TO :"maintenance_role";
-GRANT EXECUTE ON FUNCTION public.preview_fusion_auth_retention_cleanup()
-  TO :"maintenance_role";
-GRANT EXECUTE ON FUNCTION public.execute_fusion_auth_retention_cleanup()
-  TO :"maintenance_role";
 GRANT EXECUTE ON FUNCTION public.complete_account_deletion(uuid, uuid)
   TO :"maintenance_role";
 GRANT EXECUTE ON FUNCTION public.preview_admin_security_retention_cleanup()
   TO :"maintenance_role";
 GRANT EXECUTE ON FUNCTION public.execute_admin_security_retention_cleanup()
+  TO :"maintenance_role";
+-- The 0010 tables remain only long enough to enforce their 24-hour deletion
+-- policy during the PHONE_ONLY transition. These grants are historical-data
+-- minimization duties, not a retained Fusion authentication capability.
+GRANT EXECUTE ON FUNCTION public.preview_fusion_auth_retention_cleanup()
+  TO :"maintenance_role";
+GRANT EXECUTE ON FUNCTION public.execute_fusion_auth_retention_cleanup()
   TO :"maintenance_role";
 GRANT EXECUTE ON FUNCTION public.rewrap_support_feedback(
   uuid, varchar, varchar, varchar, bytea, varchar, varchar, varchar
@@ -534,6 +617,10 @@ REVOKE EXECUTE ON FUNCTION public.append_admin_audit_event(
 REVOKE EXECUTE ON FUNCTION public.preview_admin_security_retention_cleanup()
   FROM :"runtime_role", :"admin_runtime_role", :"export_worker_role";
 REVOKE EXECUTE ON FUNCTION public.execute_admin_security_retention_cleanup()
+  FROM :"runtime_role", :"admin_runtime_role", :"export_worker_role";
+REVOKE EXECUTE ON FUNCTION public.preview_fusion_auth_retention_cleanup()
+  FROM :"runtime_role", :"admin_runtime_role", :"export_worker_role";
+REVOKE EXECUTE ON FUNCTION public.execute_fusion_auth_retention_cleanup()
   FROM :"runtime_role", :"admin_runtime_role", :"export_worker_role";
 REVOKE EXECUTE ON FUNCTION public.rewrap_support_feedback(
   uuid, varchar, varchar, varchar, bytea, varchar, varchar, varchar

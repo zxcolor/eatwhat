@@ -41,7 +41,7 @@ internal fun Activity.toQqLoginHost(): QqLoginHost = object : QqLoginHost {
 }
 
 internal sealed interface QqSdkCallback {
-    class Authorized(val accessToken: String?) : QqSdkCallback {
+    class Authorized(val authorizationCode: String?) : QqSdkCallback {
         override fun toString(): String = "QqSdkCallback.Authorized"
     }
 
@@ -59,20 +59,20 @@ internal sealed interface QqOAuthStartResult {
 internal sealed interface QqOAuthEvent {
     /**
      * The proof can be taken once by the account ViewModel and is never exposed
-     * through UI state. Debug text deliberately contains neither state nor token.
+     * through UI state. Debug text deliberately contains neither state nor code.
      */
     class Authorized internal constructor(
         val purpose: OAuthPurpose,
         state: String,
-        accessToken: String,
+        authorizationCode: String,
     ) : QqOAuthEvent {
-        private val proof = AtomicReference(Proof(state, accessToken))
+        private val proof = AtomicReference(Proof(state, authorizationCode))
 
         internal suspend fun <Value> consumeProof(
-            block: suspend (state: String, accessToken: String) -> Value,
+            block: suspend (state: String, authorizationCode: String) -> Value,
         ): Value? {
             val current = proof.getAndSet(null) ?: return null
-            return block(current.state, current.accessToken)
+            return block(current.state, current.authorizationCode)
         }
 
         internal fun discardProof() {
@@ -83,7 +83,7 @@ internal sealed interface QqOAuthEvent {
 
         private class Proof(
             val state: String,
-            val accessToken: String,
+            val authorizationCode: String,
         ) {
             override fun toString(): String = "QqOAuthProof(redacted)"
         }
@@ -164,8 +164,8 @@ class QqOAuthManager internal constructor(
             val attempt = ActiveAttempt(marker)
             activeAttempt = attempt
             val session = try {
-            // Factory creation is the first point allowed to notify or create
-            // Tencent OpenSDK, after both consent and explicit user action.
+                // Factory creation is the first point allowed to notify or create
+                // Tencent OpenSDK, after both consent and explicit user action.
                 sessionFactory.create { callback -> acceptSdkCallback(marker, callback) }
             } catch (_: Exception) {
                 coordinator.cancel()
@@ -255,12 +255,12 @@ class QqOAuthManager internal constructor(
                 ?: return
             val event = when (callback) {
                 is QqSdkCallback.Authorized -> when (
-                    val consumed = coordinator.consume(callback.accessToken)
+                    val consumed = coordinator.consume(callback.authorizationCode)
                 ) {
                     is QqCoordinatorConsumeResult.Accepted -> QqOAuthEvent.Authorized(
                         purpose = consumed.purpose,
                         state = consumed.state,
-                        accessToken = consumed.accessToken,
+                        authorizationCode = consumed.authorizationCode,
                     )
                     is QqCoordinatorConsumeResult.Rejected -> QqOAuthEvent.Failed(
                         purpose = consumed.purpose,

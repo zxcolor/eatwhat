@@ -29,7 +29,7 @@ internal sealed interface QqCoordinatorConsumeResult {
     class Accepted(
         val purpose: OAuthPurpose,
         val state: String,
-        val accessToken: String,
+        val authorizationCode: String,
     ) : QqCoordinatorConsumeResult {
         override fun toString(): String = "QqCoordinatorConsumeResult.Accepted(purpose=$purpose)"
     }
@@ -84,7 +84,7 @@ internal class QqOAuthCoordinator(
 
     /** Atomically consumes the only pending attempt even when validation fails. */
     @Synchronized
-    fun consume(accessToken: String?): QqCoordinatorConsumeResult {
+    fun consume(authorizationCode: String?): QqCoordinatorConsumeResult {
         val current = pending.also { pending = null }
             ?: return QqCoordinatorConsumeResult.Rejected(
                 purpose = null,
@@ -97,9 +97,9 @@ internal class QqOAuthCoordinator(
             )
         }
         if (
-            accessToken == null ||
-            accessToken.length !in MIN_ACCESS_TOKEN_LENGTH..MAX_ACCESS_TOKEN_LENGTH ||
-            !accessToken.matches(SAFE_ACCESS_TOKEN)
+            authorizationCode == null ||
+            authorizationCode.length !in MIN_AUTHORIZATION_CODE_LENGTH..MAX_AUTHORIZATION_CODE_LENGTH ||
+            !authorizationCode.matches(SAFE_AUTHORIZATION_CODE)
         ) {
             return QqCoordinatorConsumeResult.Rejected(
                 purpose = current.purpose,
@@ -109,7 +109,7 @@ internal class QqOAuthCoordinator(
         return QqCoordinatorConsumeResult.Accepted(
             purpose = current.purpose,
             state = current.state,
-            accessToken = accessToken,
+            authorizationCode = authorizationCode,
         )
     }
 
@@ -136,9 +136,9 @@ internal class QqOAuthCoordinator(
 
     private companion object {
         const val MAX_STATE_LIFETIME_SECONDS = 15 * 60L + 30L
-        const val MIN_ACCESS_TOKEN_LENGTH = 16
-        const val MAX_ACCESS_TOKEN_LENGTH = 2_048
+        const val MIN_AUTHORIZATION_CODE_LENGTH = 8
+        const val MAX_AUTHORIZATION_CODE_LENGTH = 2_048
         val OPAQUE_STATE = Regex("^[A-Za-z0-9_-]{43}$")
-        val SAFE_ACCESS_TOKEN = Regex("^[A-Za-z0-9._~+/=-]+$")
+        val SAFE_AUTHORIZATION_CODE = Regex("^[A-Za-z0-9._~+/=-]+$")
     }
 }

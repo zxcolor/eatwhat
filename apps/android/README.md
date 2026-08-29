@@ -17,8 +17,8 @@
 - Android 1.0 的分享入口由 `BuildConfig.SHARE_FEATURE_ENABLED=false` 在编译期唯一固定关闭，没有 Gradle 属性、服务端配置或其他远程开关。渲染器、只读 FileProvider、临时文件租约与清理测试仅作为不可达的封存实现保留，不构成 1.0 已开放能力、待验收缺口或发布门禁；2.0 如需重新启用，必须重新评审产品范围、数据权利、隐私、安全和设备兼容性。
 - 本机最近决策只保存餐段、模式、预算、时间、交通和结果数量等白名单摘要，最多 30 条、90 天；不保存位置或餐厅信息，可在设置中清空。
 - 设置中的定位状态、端到端 AI 偏好、数据来源、算法摘要、隐私撤回和浅色/深色模式。
-- 账号为可选能力：游客核心推荐不依赖登录；Android 1.0 固定支持手机号注册/登录、邮箱登录/绑定、微信注册/登录和 QQ 登录/绑定，不开放手机号/微信绑定或任何账号恢复入口。微信登录及“手机号验证码 + 微信授权”双验证注册使用官方 OpenSDK 6.8.40；只有隐私同意后且用户主动点击时才创建并注册 SDK。撤回隐私会先同步废止所有在途认证代际并清除第三方授权状态，迟到回调不能写回 Keystore。
-- QQ 登录已有账号及登录后绑定使用腾讯官方下载的 QQ 互联 OpenSDK 3.5.19 Lite 包。后端先签发绑定安装 ID 和用途的一次性 state，客户端只在内存中保留到当前授权回调；只把 access token 交给后端，不采信或发送客户端 open identity。QQ 不能创建账号，能力关闭或 AppID 缺失时游客推荐不受影响。
+- 账号为可选能力：游客核心推荐不依赖登录；Android 使用普通短信验证码完成手机号注册/登录，注册验证码成功后直接创建账号与会话，不要求微信。邮箱、微信和 QQ 登录都只面向已绑定账号；登录后可绑定邮箱、微信和 QQ。微信使用官方 OpenSDK 6.8.40，QQ 使用官方 OpenSDK 3.5.19 Lite；只有隐私同意后且用户主动点击时才创建对应 SDK 会话。挑战导航元数据可通过 `SavedStateHandle` 恢复，但验证码、完整手机号、OAuth state/code/token 始终只在内存中持有且不会持久化。
+- QQ 登录已有账号及登录后绑定使用腾讯官方下载的 QQ 互联 OpenSDK 3.5.19 Lite 包。后端先签发绑定 installation 与用途的一次性 state；客户端调用官方 `loginServerSide`，只在内存中短暂持有回调 code 并交给自有后端，不采信或发送客户端 open identity。QQ access/refresh token 只由服务端换取并在本次核验内存中使用。QQ 不能创建账号，能力关闭或 AppID 缺失时游客推荐不受影响。
 - 账号数据导出支持显式选择是否包含近 90 天推荐行为、恢复最近任务、刷新状态及 7 天内下载。下载前由用户通过系统 `ACTION_CREATE_DOCUMENT` 选择位置，随后 App 通过固定的 Bearer 鉴权 API 流式写入；不申请存储权限、不生成签名 URL、不持久化保存 URI/令牌，并在长度或 SHA-256 校验失败时尽力删除或截断未完成文件。
 
 ## 环境
@@ -35,7 +35,7 @@
 gradle wrapper --gradle-version 8.13
 ```
 
-从仓库根目录执行完整可复现门禁（包含 buildSrc、云端 Debug、隔离 Fixture AndroidTest、Alpha 混淆和工件检查）：
+从仓库根目录执行完整可复现门禁（包含 buildSrc、云端 Debug、隔离 Fixture AndroidTest、Alpha 混淆和工件检查）。执行前必须仅在当前进程把受控的 Alpha 微信、QQ 公开 AppID 设置为 `CHISHENME_ALPHA_WECHAT_APP_ID`、`CHISHENME_ALPHA_QQ_APP_ID`，不得使用微信 AppSecret 或 QQ AppKey：
 
 ```powershell
 .\scripts\verify.ps1 -AlphaApiBaseUrl 'https://api.unfinished-era.com/'
@@ -211,18 +211,31 @@ Release 另需通过进程环境提供 `CHISHENME_RELEASE_STORE_FILE`、
 微信 AppID 是公开应用标识，不是 Secret；按具体开放平台应用登记的包名与签名，通过 Gradle 属性配置：
 
 ```properties
-CHISHENME_WECHAT_APP_ID=<微信开放平台分配的真实 AppID>
+CHISHENME_WECHAT_APP_ID=<release 对应的真实 AppID>
+CHISHENME_DEBUG_WECHAT_APP_ID=<debug 对应的真实 AppID>
+CHISHENME_ALPHA_WECHAT_APP_ID=<alpha 对应的真实 AppID>
 ```
 
-未配置时 `BuildConfig.CHISHENME_WECHAT_APP_ID` 固定为空，debug/alpha/release 都会诚实关闭本地微信入口，不会使用假 AppID。debug 与 alpha 分别使用 `com.chishenme.app.debug`、`com.chishenme.app.alpha` 回调包名，必须与对应开放平台登记完全一致；不能把一个环境的 AppID/签名假定为另一个环境可用。
+三个属性分别只进入对应构建，不能互相回退：release 使用包名
+`com.chishenme.app` 与回调 `com.chishenme.app.wxapi.WXEntryActivity`；debug 使用
+`com.chishenme.app.debug` 与回调 `com.chishenme.app.debug.wxapi.WXEntryActivity`；Alpha 使用
+`com.chishenme.app.alpha` 与回调 `com.chishenme.app.alpha.wxapi.WXEntryActivity`。Fixture
+始终关闭微信。Release 与 Debug 对应属性未配置时
+`BuildConfig.CHISHENME_WECHAT_APP_ID` 固定为空，Manifest 中的微信回调 Activity 也保持禁用，
+不会使用假 AppID。Alpha 是可安装的真机验证候选，必须显式提供其专用 AppID；缺失时
+`validateAlphaConfiguration` 会直接失败，完整验证还会核对 AppID 已进入最终 DEX 且回调
+Activity 已启用并导出。每个包名、签名、AppID 必须与各自开放平台登记完全一致；AppSecret
+只属于服务端，禁止写入 Gradle 属性或 APK。
 
 QQ 互联 AppID 同样是公开应用标识，不是 Secret；它只允许 5 至 16 位、不以 0 开头的纯数字，并通过 Gradle 属性配置：
 
 ```properties
-CHISHENME_QQ_APP_ID=<腾讯 QQ 互联分配的真实 AppID>
+CHISHENME_QQ_APP_ID=<release 对应的真实 AppID>
+CHISHENME_DEBUG_QQ_APP_ID=<debug 对应的真实 AppID>
+CHISHENME_ALPHA_QQ_APP_ID=<alpha 对应的真实 AppID>
 ```
 
-该属性默认空，debug/alpha/release 都会关闭 QQ SDK Activity 和入口；QQ 是可选登录方式，因此未获资质时不会阻断其他 Release 能力，但任何非空值都会先通过严格格式门禁。运行时 FileProvider authority、QQ 回调任务归属和宿主包名都取实际 `applicationId`，因此 debug、alpha、release 分别是 `com.chishenme.app.debug`、`com.chishenme.app.alpha`、`com.chishenme.app`，每个测试包的包名与签名必须在腾讯平台正确登记，不能互换。回调 scheme 固定为 `tencent<AppID>`。
+三个属性互不回退；Fixture 始终关闭 QQ。Release/Debug 对应属性未配置时 QQ SDK Activity 和入口失败关闭。Alpha 是真实验收候选，必须显式提供专用 AppID；缺失时 `validateAlphaConfiguration` 直接失败，完整门禁还会核对 BuildConfig、最终 DEX、`tencent<AppID>` scheme、AuthActivity/AssistActivity、固定 JAR 哈希和 R8 后必需类。运行时 FileProvider authority、QQ 回调任务归属和宿主包名都取实际 `applicationId`，因此 debug、alpha、release 分别是 `com.chishenme.app.debug`、`com.chishenme.app.alpha`、`com.chishenme.app`；每个包名、签名、AppID 必须与腾讯平台登记完全一致。QQ AppKey 只属于服务端 Server-Side 换票，禁止写入这些属性、BuildConfig、Manifest 或 APK。
 
 QQ OpenSDK 不是从 JCenter 或第三方镜像获取。仓库固定保存腾讯官网压缩包中的 Lite JAR，其官方下载 URL、时间、大小和 SHA-256 见 [`THIRD_PARTY_ARTIFACTS.md`](THIRD_PARTY_ARTIFACTS.md)。腾讯官网/文件名标注 3.5.19，但包内版本常量及 Demo 仍报告 3.5.18；该上游差异已保留记录，公开发布前需向腾讯复核。
 

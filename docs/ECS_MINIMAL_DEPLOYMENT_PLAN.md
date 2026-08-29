@@ -150,12 +150,15 @@ POSTGRES_DB=chi_shen_me
 POSTGRES_BOOTSTRAP_USER=postgres_bootstrap
 POSTGRES_VOLUME_NAME=chi-shen-me-alpha_postgres_data
 POSTGIS_IMAGE_ID=sha256:<已校验的 PostGIS 镜像 ID>
-MINIMUM_SUPPORTED_VERSION=0.1.1
+MINIMUM_SUPPORTED_VERSION=0.1.3
 AMAP_ENABLED=true
 ACCOUNTS_ENABLED=false
 PHONE_AUTH_ENABLED=false
-FUSION_AUTH_ENABLED=false
+EMAIL_AUTH_ENABLED=false
 WECHAT_AUTH_ENABLED=false
+QQ_AUTH_ENABLED=false
+QQ_UNION_ID_ENABLED=false
+QQ_OPEN_PLATFORM_REALM_ID=eatwhat-qq-primary
 ALIBABA_CLOUD_ECS_METADATA=<最小权限 RAM 实例角色名>
 RETENTION_MODE=--dry-run
 ```
@@ -178,11 +181,28 @@ ALLOW_DEMO_DATA=false
 QWEN_ENABLED=false
 ACCOUNTS_ENABLED=${ACCOUNTS_ENABLED}
 PHONE_AUTH_ENABLED=${PHONE_AUTH_ENABLED}
-FUSION_AUTH_ENABLED=${FUSION_AUTH_ENABLED}
+EMAIL_AUTH_ENABLED=${EMAIL_AUTH_ENABLED}
 WECHAT_AUTH_ENABLED=${WECHAT_AUTH_ENABLED}
+QQ_AUTH_ENABLED=${QQ_AUTH_ENABLED}
+QQ_UNION_ID_ENABLED=${QQ_UNION_ID_ENABLED}
 ```
 
-`api.env`、`migration.env` 和 `maintenance.env` 分别只保存对应进程需要的 URL、CA 和服务端 Secret。账号关闭时 `api.env` 仍保持最小数据库/高德字段；账号开启时严格预检才允许按启用通道增加认证哈希、微信、短信或融合认证字段，其他未知字段继续拒绝。真实值只在 ECS 的 root 管理目录录入，不在本文示例中展开。
+`api.env`、`migration.env` 和 `maintenance.env` 分别只保存对应进程需要的 URL、CA 和服务端 Secret。账号关闭时 `api.env` 仍保持最小数据库/高德字段；账号开启时严格预检才允许按启用通道增加认证哈希、短信认证、微信、QQ 或 SMTP 字段，其他未知字段继续拒绝。真实值只在 ECS 的 root 管理目录录入，不在本文示例中展开。
+
+QQ realm 的唯一权威值与单调 marker 不属于 release 本身。首次受控初始化后，二者的唯一权威
+位于 root:root、`0600` 的 `/opt/chi-shen-me/shared/auth-identity-state.env`；release 的
+`deployment.env` 仅镜像候选 `QQ_OPEN_PLATFORM_REALM_ID`，且必须与共享值一致，绝不携带
+marker。共享文件精确形状为：
+
+```dotenv
+AUTH_IDENTITY_STATE_FORMAT_VERSION=1
+QQ_OPEN_PLATFORM_REALM_ID=eatwhat-qq-primary
+QQ_UNION_ID_NAMESPACE_INITIALIZED=<false 或 true>
+```
+
+该文件是非秘密完整性状态，不注入 API 容器，也不得随 release 清理或在失败回滚中恢复旧值。
+`deployment.env` 中的 realm 只能与它一致；共享文件不存在时 QQ 必须保持关闭，直到受控更新器
+完成零 binding 聚合门禁并原子创建。
 
 ## 7. 高德阶段 A 门禁
 
@@ -280,22 +300,43 @@ Key 能返回数据不等于数据使用和商业授权已经完整解决；自�
 
 ## 12. 登录阶段 B
 
-阶段 A 全部通过后，才准备并启用账号。当前代码要求微信注册链路与至少一条手机
-验证链路同时就绪：`PHONE_AUTH_ENABLED`（短信验证码）或
-`FUSION_AUTH_ENABLED`（融合认证）。不能只开微信或只开手机通道伪装完成。邮箱
-仍只需要标准 SMTP；阿里云短信与融合认证共享 ECS RAM 临时凭据链，但权限按实际
-启用的 API 最小化。
+阶段 A 全部通过后，才准备并启用账号。产品政策固定为 `PHONE_ONLY`：
+`ACCOUNTS_ENABLED=true` 时必须同时启用 `PHONE_AUTH_ENABLED=true`；手机短信验证码
+校验成功后直接创建账号/会话。微信、QQ、邮箱只允许登录已经绑定的身份，不能单独
+建号；登录后可以绑定微信。
 
-融合认证主链还需要：控制台方案 Code、场景 `100001` 的全局策略、Alpha 包名/签名
-登记、三 AAR 精确哈希、ECS RAM 角色的 `GetFusionAuthToken` /
-`VerifyWithFusionAuthToken` 权限、微信 AppID/AppSecret 和认证哈希密钥环。若同时
-启用短信降级，再补短信签名/模板与 OTP pepper 密钥环。所有私有值只进入
-root-owned `api.env` 或 RAM 临时凭据链，不进入 APK、Git、镜像或 bundle。
+手机通道使用号码认证服务 `SendSmsVerifyCode` / `CheckSmsVerifyCode`，需要控制台
+当前可用且配套的签名/模板、认证哈希密钥环，以及只授予这两个动作的 ECS RAM 角色。
+验证码由供应商动态生成，发送请求固定 `ReturnVerifyCode=false`。Android 不集成号码
+认证供应商 SDK，也不申请电话状态权限。服务端 SDK 关闭自动重试且请求显式 `AutoRetry=0`，
+不允许自动切换签名/模板/节点重发，使每次受控发送的资源、次数、计费和审计可预测。
 
-`preflight-deployment.sh` 会核对四个账号开关的组合、真实 RAM 角色名、`api.env`
-精确字段集合、Alpha 包名和包签名形状；任一不满足时拒绝启动。首次启用前必须先
-备份数据库、运行 0010 迁移、在候选容器完成融合登录/注册失败关闭 smoke，再由唯一
-激活脚本切换。ARM64 + 中国大陆 SIM 真机闭环仍是独立门禁。
+邮件启用时补 OTP pepper 和 SMTP 服务端字段；微信启用时补 AppID/AppSecret；QQ
+启用时同时补 AppID 与 AppKey，UnionID 必须显式开启。所有私有值只进入 root-owned `api.env` 或
+RAM 临时凭据链，不进入 APK、Git、镜像或 bundle。当前 DMARC 状态为 `false`，作为
+Alpha 非阻断缺口记录，对外发布前必须补齐。
+
+`QQ_UNION_ID_NAMESPACE_INITIALIZED` 只存在于共享身份状态文件。共享文件缺失或 marker 需要提升
+时，必须从 QQ 关闭态开始并确认聚合 QQ binding 为零；首次直接启用 UnionID 会直接持久化
+`true`。紧急关闭保留共享文件，后续恢复 QQ 时 marker 为 `true` 就必须同时恢复 UnionID。
+API/`deployment.env` 回滚不会回滚该状态，旧 release 缺少 marker 时也必须以共享值为准。
+
+`preflight-deployment.sh` 会核对 schema transition、六个账号开关、真实 RAM 角色名、
+`api.env` 精确字段集合与生产配置；任一不满足即拒绝启动。0010→0011 只允许一次性
+`legacy_phone_drain`：所有账号通道关闭，API 只容忍 schema 已完整或仅缺精确最后一项
+0011，且共享旧认证 Secret 保持原样。发布顺序固定为“激活停号 bridge → 备份 → 迁移
+0011 并重新授权/做 ACL smoke → enabled 候选 `--apply` → 激活”。最终候选失败时退回
+停号 bridge；恢复旧 Fusion 必须恢复迁移前数据库，不能只切镜像。真实 Android 手机
+短信闭环仍是独立门禁。迁移入口、备份、Secret 更新和候选激活共用 root-owned 非阻塞
+`mutation.lock`；隔离恢复和生产回滚也在恢复、停 API、rename、重启及失败清理的整个区间
+持有同一把锁。锁冲突必须在 preflight 或数据库动作前拒绝。共享 `api.env` 尚有旧认证字段时，
+`--apply` / `--disable` 必须在改文件前直接证明活动停号 bridge、0011 和最小 ACL；迁移前停号
+只能使用保持 Secret 原样的 `--legacy-drain`。
+
+schema 0010 的唯一迁移命令是活动 bridge 下的
+`scripts/provision-database.sh --phone-only-cutover`。它在同一 mutation lock 内精确核对活动
+API 容器 image/env、排空未过期证明及 15 分钟已消费未领取窗口，自动生成并验证携带完整
+`SCHEMA_MIGRATIONS.txt` 与 schema 匹配 `ROLE_GRANTS.sql` 的备份，二次排空后才允许 0011。
 
 ## 13. 回滚与恢复
 

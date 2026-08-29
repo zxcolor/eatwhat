@@ -49,7 +49,7 @@ function expectFailClosedPsqlBranches(
 describe("database role grant deployment gate", () => {
 	it("fails closed and changes privileges in one transaction", async () => {
 		const sql = await loadRoleGrants();
-		expectFailClosedPsqlBranches(sql, 8);
+		expectFailClosedPsqlBranches(sql, 9);
 		expect(sql.indexOf("BEGIN;")).toBeLessThan(sql.indexOf("REVOKE CREATE"));
 		expect(sql.trimEnd().endsWith("COMMIT;")).toBe(true);
 		expect(sql).toContain("declared_roles_are_distinct");
@@ -60,6 +60,18 @@ describe("database role grant deployment gate", () => {
 		expect(sql).toContain("'USAGE'");
 		expect(sql).toContain("export_worker_role psql variable is required");
 		expect(sql).toContain(":'admin_runtime_role' <> :'export_worker_role'");
+		expect(sql).toContain("AS phone_only_schema_0011");
+		expect(sql).toContain("AS wechat_union_alias_schema");
+		expect(sql).toContain("AS legacy_fusion_schema");
+		expect(sql).toContain(
+			":'phone_only_schema_0011'::boolean OR :'wechat_union_alias_schema'::boolean",
+		);
+		expect(sql).not.toContain(
+			"SELECT (:phone_only_schema OR :legacy_fusion_schema)",
+		);
+		expect(sql).toContain(
+			"role grants require the exact 0010, 0011 or 0012 auth schema",
+		);
 	});
 
 	it("fails extension bootstrap validation with server errors", async () => {
@@ -80,6 +92,28 @@ describe("database role grant deployment gate", () => {
 		expect(workflow).not.toMatch(/\\q(?:uit)?[\t ]+\S/u);
 		expect(workflow).not.toContain("jsonb_object_length");
 		expect(assertionFailures).toHaveLength(31);
+	});
+
+	it("keeps destructive rollout ordering and global-lock rejection executable in CI", async () => {
+		const workflow = await loadCiWorkflow();
+		for (const required of [
+			"Verify database mutators reject a concurrent mutation",
+			"infra/ecs/scripts/provision-database.sh",
+			"infra/ecs/scripts/restore-database.sh",
+			"infra/ecs/scripts/rollback-database.sh",
+			"assert_inherited_lock_reaches_preflight",
+			"Reject legacy authentication retirement before the active bridge",
+			"assert_auth_order_rejected --apply",
+			"assert_auth_order_rejected --disable",
+			"shared api.env changed on rejected auth update",
+			"Preserve authentication continuity across email-only and emergency disable",
+			"AUTH_IDENTITY_DEDUP_KEY_VERSION=hash.v2",
+			"reenabling disabled accounts must preserve authentication identity/session continuity",
+			'api_disabled="$(sha256sum',
+			'deployment_disabled="$(sha256sum',
+		]) {
+			expect(workflow).toContain(required);
+		}
 	});
 
 	it("isolates export generation behind a dedicated function-only role", async () => {
@@ -128,6 +162,7 @@ describe("database role grant deployment gate", () => {
 		expect(sql).toContain("REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC");
 		expect(sql).toContain("REVOKE CREATE ON SCHEMA public FROM PUBLIC");
 		expect(sql).toContain("REVOKE ALL PRIVILEGES (%s) ON TABLE");
+		expect(sql).toContain("FROM PUBLIC, %I, %I, %I, %I;");
 		expect(sql).toContain("owner_role.rolname = :'migration_owner'");
 	});
 
@@ -146,12 +181,6 @@ describe("database role grant deployment gate", () => {
 		);
 		expect(maintenanceGrants.join("\n")).toContain("preview_retention_cleanup");
 		expect(maintenanceGrants.join("\n")).toContain("execute_retention_cleanup");
-		expect(maintenanceGrants.join("\n")).toContain(
-			"preview_fusion_auth_retention_cleanup",
-		);
-		expect(maintenanceGrants.join("\n")).toContain(
-			"execute_fusion_auth_retention_cleanup",
-		);
 		expect(maintenanceGrants.join("\n")).toContain("complete_account_deletion");
 		expect(maintenanceGrants.join("\n")).toContain(
 			"preview_admin_security_retention_cleanup",
@@ -159,10 +188,24 @@ describe("database role grant deployment gate", () => {
 		expect(maintenanceGrants.join("\n")).toContain(
 			"execute_admin_security_retention_cleanup",
 		);
+		expect(maintenanceGrants.join("\n")).toContain(
+			"preview_fusion_auth_retention_cleanup",
+		);
+		expect(maintenanceGrants.join("\n")).toContain(
+			"execute_fusion_auth_retention_cleanup",
+		);
 		expect(maintenanceGrants.join("\n")).toContain("rewrap_support_feedback");
 		expect(maintenanceGrants.join("\n")).toContain(
 			"anonymize_expired_support_feedback_guest_ip_hashes",
 		);
+		for (const functionName of [
+			"preview_fusion_auth_retention_cleanup",
+			"execute_fusion_auth_retention_cleanup",
+		]) {
+			expect(sql).toContain(
+				`REVOKE EXECUTE ON FUNCTION public.${functionName}()\n  FROM :"runtime_role", :"admin_runtime_role", :"export_worker_role";`,
+			);
+		}
 	});
 
 	it("isolates the administrator runtime behind passkey-only functions", async () => {
@@ -218,22 +261,30 @@ describe("database role grant deployment gate", () => {
 			"GRANT EXECUTE ON FUNCTION public.append_admin_audit_event",
 		);
 		expect(sql).toContain("GRANT SELECT, INSERT ON\n  public.otp_challenges");
-		expect(sql).toContain("public.fusion_auth_flows");
+		expect(sql).not.toMatch(
+			/GRANT (?:SELECT|INSERT|UPDATE|DELETE)[^;]*public\.otp_verification_leases/u,
+		);
+		const legacyBranch =
+			sql.match(/\\if :legacy_fusion_schema([\s\S]*?)\\endif/gu)?.join("\n") ??
+			"";
+		expect(legacyBranch).toContain(
+			"GRANT SELECT, INSERT ON public.fusion_auth_flows",
+		);
 		expect(sql).toContain(
 			"GRANT UPDATE (revoked_at) ON public.auth_access_tokens",
 		);
 		for (const functionName of [
-			"register_phone_wechat_account",
+			"register_phone_account_from_consumed_otp",
 			"bind_email_identity_from_consumed_otp",
-			"bind_qq_identity_from_consumed_oauth_state",
+			"bind_oauth_identity_from_consumed_state",
 			"finalize_otp_delivery",
 			"record_otp_verification_attempt",
+			"claim_otp_verification_lease",
+			"release_otp_verification_lease",
+			"complete_otp_verification_lease",
 			"rotate_auth_refresh_credential",
 			"mark_auth_refresh_replay",
 			"consume_oauth_state",
-			"claim_fusion_auth_verify_token",
-			"record_fusion_auth_result",
-			"register_fusion_phone_wechat_account",
 			"persistence_insert_favorite",
 			"persistence_record_history",
 			"persistence_insert_private_feedback",
@@ -246,6 +297,41 @@ describe("database role grant deployment gate", () => {
 		]) {
 			expect(sql).toContain(`GRANT EXECUTE ON FUNCTION public.${functionName}`);
 		}
+		for (const functionName of [
+			"consume_oauth_state_with_wechat_union",
+			"record_wechat_union_alias_from_consumed_state",
+			"bind_oauth_identity_with_wechat_union_from_consumed_state",
+		]) {
+			expect(sql).toContain(`GRANT EXECUTE ON FUNCTION public.${functionName}`);
+		}
+		expect(sql).not.toMatch(
+			/GRANT (?:SELECT|INSERT|UPDATE|DELETE)[^;]*public\.wechat_union_aliases/u,
+		);
+		for (const legacyFunction of [
+			"register_phone_wechat_account",
+			"bind_qq_identity_from_consumed_oauth_state",
+			"claim_fusion_auth_verify_token",
+			"record_fusion_auth_result",
+			"register_fusion_phone_wechat_account",
+		]) {
+			expect(legacyBranch).toContain(
+				`GRANT EXECUTE ON FUNCTION public.${legacyFunction}`,
+			);
+		}
+		const phoneOnlyBranches =
+			sql.match(/\\if :phone_only_schema([\s\S]*?)\\endif/gu)?.join("\n") ?? "";
+		expect(phoneOnlyBranches).toContain(
+			"GRANT EXECUTE ON FUNCTION public.register_phone_account_from_consumed_otp",
+		);
+		expect(phoneOnlyBranches).toContain(
+			"GRANT EXECUTE ON FUNCTION public.supersede_phone_otp_challenges_for_send",
+		);
+		expect(phoneOnlyBranches).toContain(
+			"GRANT EXECUTE ON FUNCTION public.claim_otp_verification_lease",
+		);
+		expect(phoneOnlyBranches).not.toMatch(
+			/register_phone_wechat|fusion_auth|bind_qq_identity/u,
+		);
 		expect(sql).not.toContain(
 			"GRANT EXECUTE ON FUNCTION public.persist_licensed_external_place_reference",
 		);

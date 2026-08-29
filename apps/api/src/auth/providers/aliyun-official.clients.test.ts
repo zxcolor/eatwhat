@@ -1,24 +1,22 @@
-import { SendSmsRequest } from "@alicloud/dysmsapi20170525";
 import {
-	GetFusionAuthTokenRequest,
-	VerifyWithFusionAuthTokenRequest,
+	CheckSmsVerifyCodeRequest,
+	SendSmsVerifyCodeRequest,
 } from "@alicloud/dypnsapi20170525";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadAppConfig } from "../../config/app-config.js";
 import {
 	type AliyunCredentialLike,
-	type AliyunFusionOfficialClientDependencies,
 	type AliyunOfficialClientDependencies,
 	createAliyunCredential,
-	createOfficialAliyunFusionClient,
-	createOfficialAliyunSmsClient,
+	createOfficialAliyunPnvsClient,
 	SafeAliyunSdkError,
 } from "./aliyun-official.clients.js";
-import type { AliyunSmsRuntimeOptions } from "./aliyun-sms-otp.provider.js";
-import type { AliyunFusionRuntimeOptions } from "./fusion-auth.provider.js";
+import type {
+	AliyunPnvsRuntimeOptions,
+	AliyunPnvsSendResponse,
+} from "./aliyun-pnvs-otp.provider.js";
 
 const hashKey = Buffer.alloc(32, 5).toString("base64");
-const otpPepper = Buffer.alloc(32, 6).toString("base64");
 
 function config(overrides: NodeJS.ProcessEnv = {}) {
 	return loadAppConfig({
@@ -27,36 +25,19 @@ function config(overrides: NodeJS.ProcessEnv = {}) {
 		DATABASE_URL: "postgresql://runtime:password@127.0.0.1/chishenme",
 		ACCOUNTS_ENABLED: "true",
 		PHONE_AUTH_ENABLED: "true",
-		WECHAT_AUTH_ENABLED: "true",
 		AUTH_HASH_ACTIVE_VERSION: "v1",
 		AUTH_HASH_KEYS_JSON: JSON.stringify({ v1: hashKey }),
-		AUTH_OTP_PEPPER_ACTIVE_VERSION: "v1",
-		AUTH_OTP_PEPPER_KEYS_JSON: JSON.stringify({ v1: otpPepper }),
 		AUTH_IDENTITY_DEDUP_KEY_VERSION: "v1",
-		ALIYUN_SMS_SIGN_NAME: "吃什么",
-		ALIYUN_SMS_TEMPLATE_CODE: "SMS_123456",
-		WECHAT_APP_ID: "wx0123456789abcdef",
-		WECHAT_APP_SECRET: "wechat-secret",
-		...overrides,
-	});
-}
-
-function fusionConfig(overrides: NodeJS.ProcessEnv = {}) {
-	return config({
-		PHONE_AUTH_ENABLED: "false",
-		ALIYUN_SMS_SIGN_NAME: "",
-		ALIYUN_SMS_TEMPLATE_CODE: "",
-		FUSION_AUTH_ENABLED: "true",
-		ALIYUN_FUSION_SCHEME_CODE: "100001",
-		ALIYUN_FUSION_PACKAGE_NAME: "com.chishenme.app",
-		ALIYUN_FUSION_PACKAGE_SIGN: "a".repeat(32),
+		ALIYUN_PNVS_SIGN_NAME: "吃什么",
+		ALIYUN_PNVS_TEMPLATE_CODE: "100001",
 		...overrides,
 	});
 }
 
 function dependencies(input?: {
 	credential?: AliyunCredentialLike;
-	smsCall?: ReturnType<typeof vi.fn>;
+	sendCall?: ReturnType<typeof vi.fn>;
+	checkCall?: ReturnType<typeof vi.fn>;
 }): AliyunOfficialClientDependencies {
 	const credential = input?.credential ?? {
 		getCredential: vi.fn().mockResolvedValue({
@@ -68,17 +49,30 @@ function dependencies(input?: {
 	};
 	return {
 		createCredential: vi.fn(() => credential),
-		createSmsSdkClient: vi.fn(() => ({
-			sendSmsWithOptions:
-				input?.smsCall ??
+		createPnvsSdkClient: vi.fn(() => ({
+			sendSmsVerifyCodeWithOptions:
+				input?.sendCall ??
 				vi.fn().mockResolvedValue({
-					body: { code: "OK", bizId: "safe-reference" },
+					body: {
+						code: "OK",
+						success: true,
+						model: { bizId: "123^456" },
+					},
+				}),
+			checkSmsVerifyCodeWithOptions:
+				input?.checkCall ??
+				vi.fn().mockResolvedValue({
+					body: {
+						code: "OK",
+						success: true,
+						model: { verifyResult: "PASS" },
+					},
 				}),
 		})),
 	};
 }
 
-const smsRuntime: AliyunSmsRuntimeOptions = Object.freeze({
+const runtime: AliyunPnvsRuntimeOptions = Object.freeze({
 	autoretry: false,
 	maxAttempts: 1,
 	connectTimeout: 1_500,
@@ -87,21 +81,10 @@ const smsRuntime: AliyunSmsRuntimeOptions = Object.freeze({
 	maxIdleConns: 1,
 });
 
-const fusionRuntime: AliyunFusionRuntimeOptions = Object.freeze({
-	autoretry: false,
-	maxAttempts: 1,
-	connectTimeout: 1_500,
-	readTimeout: 1_500,
-	keepAlive: false,
-	maxIdleConns: 1,
-});
+describe("official Alibaba Cloud PNVS client", () => {
+	afterEach(() => vi.useRealTimers());
 
-describe("official Alibaba Cloud SMS client", () => {
-	afterEach(() => {
-		vi.useRealTimers();
-	});
-
-	it("does not initialize the credential chain while delivery is disabled", async () => {
+	it("does not initialize credentials while the phone channel is disabled", async () => {
 		const deps = dependencies();
 		await expect(
 			createAliyunCredential(loadAppConfig({ NODE_ENV: "test" }), deps),
@@ -109,7 +92,7 @@ describe("official Alibaba Cloud SMS client", () => {
 		expect(deps.createCredential).not.toHaveBeenCalled();
 	});
 
-	it("preflights a usable temporary credential before constructing clients", async () => {
+	it("preflights one usable temporary credential", async () => {
 		const deps = dependencies();
 		const credential = await createAliyunCredential(config(), deps);
 		expect(credential).toBeDefined();
@@ -117,104 +100,91 @@ describe("official Alibaba Cloud SMS client", () => {
 		expect(credential?.getCredential).toHaveBeenCalledOnce();
 	});
 
-	it("constructs the official SMS SDK client around a credential handle", () => {
-		const credential: AliyunCredentialLike = {
-			getCredential: vi.fn().mockResolvedValue({
-				accessKeyId: "temporary-id",
-				accessKeySecret: "temporary-secret",
-				type: "ecs_ram_role",
-				providerName: "default/ecs_ram_role",
-			}),
-		};
-		expect(createOfficialAliyunSmsClient(config(), credential)).toBeDefined();
-	});
-
-	it("reuses the credential chain and official Dypns request models for fusion", async () => {
-		const credential: AliyunCredentialLike = {
-			getCredential: vi.fn().mockResolvedValue({
-				accessKeyId: "temporary-id",
-				accessKeySecret: "temporary-secret",
-				type: "ecs_ram_role",
-				providerName: "default/ecs_ram_role",
-			}),
-		};
-		const getFusionAuthTokenWithOptions = vi.fn().mockResolvedValue({
-			body: { code: "OK", success: true, model: "FusionAuthToken_1234567890" },
-		});
-		const verifyWithFusionAuthTokenWithOptions = vi.fn().mockResolvedValue({
+	it("uses official PNVS request models for send and check", async () => {
+		const sendCall = vi.fn().mockResolvedValue({
 			body: {
 				code: "OK",
 				success: true,
-				model: { verifyResult: "PASS", phoneNumber: "13800138000" },
+				model: { bizId: "123^456" },
 			},
+		} satisfies AliyunPnvsSendResponse);
+		const checkCall = vi.fn().mockResolvedValue({
+			body: { code: "OK", success: true, model: { verifyResult: "PASS" } },
 		});
-		const deps: AliyunFusionOfficialClientDependencies = {
-			createFusionSdkClient: vi.fn(() => ({
-				getFusionAuthTokenWithOptions,
-				verifyWithFusionAuthTokenWithOptions,
-			})),
-		};
-		const client = createOfficialAliyunFusionClient(
-			fusionConfig(),
-			credential,
-			deps,
-		);
-		await client?.getFusionAuthTokenWithOptions(
+		const deps = dependencies({ sendCall, checkCall });
+		const credential = await createAliyunCredential(config(), deps);
+		const client = createOfficialAliyunPnvsClient(config(), credential, deps);
+		await client?.sendSmsVerifyCodeWithOptions(
 			{
-				durationSeconds: 900,
-				packageName: "com.chishenme.app",
-				packageSign: "a".repeat(32),
-				platform: "Android",
-				schemeCode: "100001",
+				countryCode: "86",
+				phoneNumber: "13800138000",
+				signName: "吃什么",
+				templateCode: "100001",
+				templateParam: '{"code":"##code##","min":"5"}',
+				codeLength: 6,
+				validTime: 300,
+				duplicatePolicy: 1,
+				interval: 60,
+				codeType: 1,
+				returnVerifyCode: false,
+				outId: "3bf405ae-82a1-4f87-86b7-1c97c4a8683f",
 			},
-			fusionRuntime,
+			runtime,
 		);
-		await client?.verifyWithFusionAuthTokenWithOptions(
-			{ verifyToken: "FusionVerifyToken_1234567890" },
-			fusionRuntime,
+		await client?.checkSmsVerifyCodeWithOptions(
+			{
+				countryCode: "86",
+				phoneNumber: "13800138000",
+				verifyCode: "001204",
+				outId: "3bf405ae-82a1-4f87-86b7-1c97c4a8683f",
+			},
+			runtime,
 		);
 
-		const [tokenRequest, tokenRuntime] =
-			getFusionAuthTokenWithOptions.mock.calls[0] ?? [];
-		expect(tokenRequest).toBeInstanceOf(GetFusionAuthTokenRequest);
-		expect(tokenRequest).toMatchObject({
-			packageName: "com.chishenme.app",
-			packageSign: "a".repeat(32),
-			schemeCode: "100001",
+		const [sendRequest, sendRuntime] = sendCall.mock.calls[0] ?? [];
+		expect(sendRequest).toBeInstanceOf(SendSmsVerifyCodeRequest);
+		expect(sendRequest).toMatchObject({
+			countryCode: "86",
+			phoneNumber: "13800138000",
+			returnVerifyCode: false,
 		});
-		expect(tokenRuntime).toMatchObject(fusionRuntime);
-		const [verifyRequest, verifyRuntime] =
-			verifyWithFusionAuthTokenWithOptions.mock.calls[0] ?? [];
-		expect(verifyRequest).toBeInstanceOf(VerifyWithFusionAuthTokenRequest);
-		expect(verifyRequest).toMatchObject({
-			verifyToken: "FusionVerifyToken_1234567890",
+		expect(sendRuntime).toMatchObject(runtime);
+		const [checkRequest, checkRuntime] = checkCall.mock.calls[0] ?? [];
+		expect(checkRequest).toBeInstanceOf(CheckSmsVerifyCodeRequest);
+		expect(checkRequest).toMatchObject({
+			countryCode: "86",
+			phoneNumber: "13800138000",
+			verifyCode: "001204",
 		});
-		expect(verifyRuntime).toMatchObject(fusionRuntime);
+		expect(checkRuntime).toMatchObject(runtime);
 	});
 
-	it("fails startup on missing credentials without retaining upstream details", async () => {
+	it("fails startup without leaking credential details", async () => {
 		const marker = "AK-and-profile-path-must-never-leak";
-		const deps = dependencies({
-			credential: {
-				getCredential: vi.fn().mockRejectedValue(new Error(marker)),
-			},
-		});
 		const failure = await captureFailure(
-			createAliyunCredential(config(), deps),
+			createAliyunCredential(
+				config(),
+				dependencies({
+					credential: {
+						getCredential: vi.fn().mockRejectedValue(new Error(marker)),
+					},
+				}),
+			),
 		);
 		expect(failure.message).toBe("账号阿里云认证凭据不可用");
 		expect(failure.message).not.toContain(marker);
 		expect(failure).not.toHaveProperty("cause");
 	});
 
-	it("bounds credential preflight and releases its deadline timer", async () => {
+	it("bounds credential preflight and clears its deadline timer", async () => {
 		vi.useFakeTimers();
-		const deps = dependencies({
-			credential: { getCredential: vi.fn(() => new Promise(() => undefined)) },
-		});
 		const pending = createAliyunCredential(
 			config({ ALIYUN_CREDENTIAL_TIMEOUT_MS: "500" }),
-			deps,
+			dependencies({
+				credential: {
+					getCredential: vi.fn(() => new Promise(() => undefined)),
+				},
+			}),
 		);
 		const assertion = expect(pending).rejects.toThrow(
 			"账号阿里云认证凭据不可用",
@@ -224,54 +194,22 @@ describe("official Alibaba Cloud SMS client", () => {
 		expect(vi.getTimerCount()).toBe(0);
 	});
 
-	it("uses the official request model and forwards only bounded runtime options", async () => {
-		const sendSmsWithOptions = vi.fn().mockResolvedValue({
-			body: { code: "OK", bizId: "safe-reference" },
-		});
-		const deps = dependencies({ smsCall: sendSmsWithOptions });
-		const appConfig = config();
-		const credential = await createAliyunCredential(appConfig, deps);
-		const client = createOfficialAliyunSmsClient(appConfig, credential, deps);
-		await expect(
-			client?.sendSmsWithOptions(
-				{
-					phoneNumbers: "13800138000",
-					signName: "吃什么",
-					templateCode: "SMS_123456",
-					templateParam: '{"code":"001204"}',
-					outId: "challenge_1234567890",
-				},
-				smsRuntime,
-			),
-		).resolves.toMatchObject({ body: { code: "OK" } });
-
-		const [officialRequest, officialRuntime] =
-			sendSmsWithOptions.mock.calls[0] ?? [];
-		expect(officialRequest).toBeInstanceOf(SendSmsRequest);
-		expect(officialRequest).toMatchObject({
-			phoneNumbers: "13800138000",
-			templateParam: '{"code":"001204"}',
-		});
-		expect(officialRuntime).toMatchObject(smsRuntime);
-	});
-
-	it("rejects a credential resolved from a source other than the pinned provider", async () => {
-		const deps = dependencies({
-			credential: {
-				getCredential: vi.fn().mockResolvedValue({
-					accessKeyId: "temporary-id",
-					accessKeySecret: "temporary-secret",
-					type: "access_key",
-					providerName: "default/env",
-				}),
-			},
-		});
+	it("rejects credentials resolved from a source other than the pin", async () => {
 		await expect(
 			createAliyunCredential(
 				config({
 					ALIYUN_CREDENTIAL_ALLOWED_PROVIDER: "default/ecs_ram_role",
 				}),
-				deps,
+				dependencies({
+					credential: {
+						getCredential: vi.fn().mockResolvedValue({
+							accessKeyId: "temporary-id",
+							accessKeySecret: "temporary-secret",
+							type: "access_key",
+							providerName: "default/env",
+						}),
+					},
+				}),
 			),
 		).rejects.toThrow("账号阿里云认证凭据不可用");
 	});
@@ -283,36 +221,37 @@ describe("official Alibaba Cloud SMS client", () => {
 		],
 		[{ code: "ETIMEDOUT", message: "code=001204" }, "TIMEOUT"],
 		[new Error("recipient=user@example.com"), "NETWORK_ERROR"],
-	] as const)(
-		"sanitizes SDK failure %# and maps it safely",
-		async (upstream, reason) => {
-			const deps = dependencies({
-				smsCall: vi.fn().mockRejectedValue(upstream),
-			});
-			const appConfig = config();
-			const credential = await createAliyunCredential(appConfig, deps);
-			const client = createOfficialAliyunSmsClient(appConfig, credential, deps);
-			const failure = await captureFailure(
-				client?.sendSmsWithOptions(
-					{
-						phoneNumbers: "13800138000",
-						signName: "吃什么",
-						templateCode: "SMS_123456",
-						templateParam: '{"code":"001204"}',
-						outId: "challenge_1234567890",
-					},
-					smsRuntime,
-				) ?? Promise.reject(new Error("client missing")),
-			);
-			expect(failure).toBeInstanceOf(SafeAliyunSdkError);
-			expect(failure).toMatchObject({ reason });
-			expect(failure.message).toBe("阿里云认证请求失败");
-			expect(JSON.stringify(failure)).not.toContain("13800138000");
-			expect(JSON.stringify(failure)).not.toContain("001204");
-			expect(JSON.stringify(failure)).not.toContain("user@example.com");
-			expect(failure).not.toHaveProperty("cause");
-		},
-	);
+	] as const)("sanitizes SDK failure %#", async (upstream, reason) => {
+		const sendCall = vi.fn().mockRejectedValue(upstream);
+		const deps = dependencies({ sendCall });
+		const credential = await createAliyunCredential(config(), deps);
+		const client = createOfficialAliyunPnvsClient(config(), credential, deps);
+		const failure = await captureFailure(
+			client?.sendSmsVerifyCodeWithOptions(
+				{
+					countryCode: "86",
+					phoneNumber: "13800138000",
+					signName: "吃什么",
+					templateCode: "100001",
+					templateParam: '{"code":"##code##"}',
+					codeLength: 6,
+					validTime: 300,
+					duplicatePolicy: 1,
+					interval: 60,
+					codeType: 1,
+					returnVerifyCode: false,
+					outId: "3bf405ae-82a1-4f87-86b7-1c97c4a8683f",
+				},
+				runtime,
+			) ?? Promise.reject(new Error("client missing")),
+		);
+		expect(failure).toBeInstanceOf(SafeAliyunSdkError);
+		expect(failure).toMatchObject({ reason });
+		expect(failure.message).toBe("阿里云认证请求失败");
+		expect(JSON.stringify(failure)).not.toContain("13800138000");
+		expect(JSON.stringify(failure)).not.toContain("001204");
+		expect(failure).not.toHaveProperty("cause");
+	});
 });
 
 async function captureFailure(promise: Promise<unknown>): Promise<Error> {

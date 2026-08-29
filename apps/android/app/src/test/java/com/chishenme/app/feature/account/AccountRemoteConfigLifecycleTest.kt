@@ -2,12 +2,8 @@ package com.chishenme.app.feature.account
 
 import android.app.Activity
 import android.content.Intent
-import com.chishenme.app.auth.fusion.FusionAuthHost
-import com.chishenme.app.auth.fusion.FusionAuthManager
-import com.chishenme.app.auth.fusion.FusionAuthProofCompletion
-import com.chishenme.app.auth.fusion.FusionAuthSdk
-import com.chishenme.app.auth.fusion.FusionAuthSdkFactory
-import com.chishenme.app.auth.fusion.FusionAuthSdkListener
+import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.viewModelScope
 import com.chishenme.app.auth.qq.QqConsentGate
 import com.chishenme.app.auth.qq.QqLoginHost
 import com.chishenme.app.auth.qq.QqOAuthCoordinator
@@ -25,6 +21,7 @@ import com.chishenme.app.auth.wechat.WechatSdkSessionFactory
 import com.chishenme.app.data.AccountAuthActions
 import com.chishenme.app.data.AccountExportActions
 import com.chishenme.app.data.AccountExportOutcome
+import com.chishenme.app.data.AuthFailureKind
 import com.chishenme.app.data.AuthOutcome
 import com.chishenme.app.data.LocalAuthSession
 import com.chishenme.app.data.remote.AccountExportResponse
@@ -37,13 +34,10 @@ import com.chishenme.app.data.remote.AuthSessionSummary
 import com.chishenme.app.data.remote.DataRightsMode
 import com.chishenme.app.data.remote.DeleteAccountResponse
 import com.chishenme.app.data.remote.FeatureConfig
-import com.chishenme.app.data.remote.FusionAuthPurpose
-import com.chishenme.app.data.remote.FusionAuthTokenResponse
 import com.chishenme.app.data.remote.OAuthPurpose
 import com.chishenme.app.data.remote.OAuthStateResponse
 import com.chishenme.app.data.remote.OtpPurpose
 import com.chishenme.app.feature.config.RemoteFeatureConfigState
-import com.chishenme.app.feature.consent.PrivacyAuthorizationGate
 import java.time.Instant
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.resume
@@ -52,8 +46,10 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -67,93 +63,55 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class AccountRemoteConfigLifecycleTest {
     @Test
-    fun `host stop for active fusion preserves trusted lease and consumes proof`() = runTest {
+    fun `process recreation restores only challenge metadata and requires phone resend`() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        var firstForCleanup: ConfigLifecycleFixture? = null
+        var recreatedForCleanup: ConfigLifecycleFixture? = null
         try {
-            val auth = ConfigLifecycleAuthActions()
-            val fusionFactory = ConfigLifecycleFusionFactory()
-            val fusionManager = FusionAuthManager(
-                factory = fusionFactory,
-                privacyAuthorizationGate = ConfigLifecyclePrivacyGate,
-            )
-            val fixture = fixture(auth, fusionManager)
-            fixture.start(
-                ready(
-                    1,
-                    capabilities(phone = false, fusion = true),
-                ),
+            val savedState = SavedStateHandle()
+            val firstAuth = ConfigLifecycleAuthActions()
+            val first = fixture(firstAuth, savedState)
+            firstForCleanup = first
+            first.start(ready(1, capabilities(registration = true)))
+            runCurrent()
+            first.viewModel.requestCode(
+                AuthIdentityType.PHONE,
+                OtpPurpose.REGISTER,
+                PHONE_NUMBER,
             )
             runCurrent()
+            first.viewModel.updateOtpCodeDraft("123456")
+            assertFalse(first.viewModel.state.value.toString().contains(PHONE_NUMBER))
+            assertFalse(first.viewModel.state.value.toString().contains("123456"))
 
-            fusionManager.start(
-                host = ConfigLifecycleFusionHost,
-                configurationGeneration = 1,
-                purpose = FusionAuthPurpose.LOGIN,
-                serverEnabled = true,
-                token = FusionAuthTokenResponse(
-                    flowId = "2af305ae-82a1-4f87-86b7-1c97c4a8683f",
-                    schemeCode = "scheme-100001",
-                    authToken = "a",
-                    expiresAt = Instant.now().plusSeconds(600).toString(),
-                ),
+            assertTrue(
+                savedState.keys().none { key ->
+                    val value = savedState.get<Any>(key)?.toString().orEmpty()
+                    value.contains(PHONE_NUMBER) || value.contains("123456")
+                },
             )
-
-            fixture.viewModel.suspendRemoteAccessForForegroundRefresh()
-            val completion = ConfigLifecycleFusionCompletion()
-            fusionFactory.sdk.listener!!.onProof("v", completion)
+            first.viewModel.viewModelScope.cancel()
             runCurrent()
 
-            assertEquals(1, auth.fusionLoginCalls)
-            assertEquals(listOf(true), completion.results)
-            assertEquals(AccountStatus.SIGNED_IN, fixture.viewModel.state.value.status)
-            assertTrue(fusionManager.hasActiveSession)
+            val recreatedAuth = ConfigLifecycleAuthActions()
+            val recreated = fixture(recreatedAuth, savedState)
+            recreatedForCleanup = recreated
+            recreated.start(ready(1, capabilities(registration = true)))
+            runCurrent()
+            assertEquals(AccountAuthStep.PHONE_REGISTER, recreated.viewModel.state.value.authStep)
+            assertEquals(PHONE_CHALLENGE_ID, recreated.viewModel.state.value.challenge?.challengeId)
+            assertEquals("", recreated.viewModel.state.value.otpTargetDraft)
+            assertEquals("", recreated.viewModel.state.value.otpCodeDraft)
+
+            recreated.viewModel.submitLoginCode("123456")
+            runCurrent()
+
+            assertEquals(0, recreatedAuth.phoneLoginCalls)
+            assertEquals("为保护手机号，App 重启后需重新发送验证码", recreated.viewModel.state.value.message)
         } finally {
-            Dispatchers.resetMain()
-        }
-    }
-
-    @Test
-    fun `page exit cancels active fusion discards proof and rejects late callback`() = runTest {
-        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
-        try {
-            val auth = ConfigLifecycleAuthActions()
-            val fusionFactory = ConfigLifecycleFusionFactory()
-            val fusionManager = FusionAuthManager(
-                factory = fusionFactory,
-                privacyAuthorizationGate = ConfigLifecyclePrivacyGate,
-            )
-            val fixture = fixture(auth, fusionManager)
-            fixture.start(ready(1, capabilities(phone = false, fusion = true)))
+            firstForCleanup?.viewModel?.viewModelScope?.cancel()
+            recreatedForCleanup?.viewModel?.viewModelScope?.cancel()
             runCurrent()
-            fusionManager.start(
-                host = ConfigLifecycleFusionHost,
-                configurationGeneration = 1,
-                purpose = FusionAuthPurpose.LOGIN,
-                serverEnabled = true,
-                token = FusionAuthTokenResponse(
-                    flowId = "2af305ae-82a1-4f87-86b7-1c97c4a8683f",
-                    schemeCode = "scheme-100001",
-                    authToken = "a",
-                    expiresAt = Instant.now().plusSeconds(600).toString(),
-                ),
-            )
-
-            val firstCompletion = ConfigLifecycleFusionCompletion()
-            val listener = fusionFactory.sdk.listener!!
-            listener.onProof("v", firstCompletion)
-            fixture.viewModel.cancelFusionForPageExit()
-            runCurrent()
-
-            assertEquals(listOf(false), firstCompletion.results)
-            assertFalse(fusionManager.hasActiveSession)
-            assertEquals(0, auth.fusionLoginCalls)
-
-            val lateCompletion = ConfigLifecycleFusionCompletion()
-            listener.onProof("l", lateCompletion)
-            runCurrent()
-            assertEquals(listOf(false), lateCompletion.results)
-            assertEquals(0, auth.fusionLoginCalls)
-        } finally {
             Dispatchers.resetMain()
         }
     }
@@ -178,6 +136,40 @@ class AccountRemoteConfigLifecycleTest {
             fixture.viewModel.startWechatLogin()
             runCurrent()
             assertEquals(1, auth.oauthStateCalls)
+
+            fixture.start(ready(2, capabilities(wechat = false)))
+            runCurrent()
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `wechat authorization without a callback times out and can be started again`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val auth = ConfigLifecycleAuthActions()
+            val fixture = fixture(auth)
+            fixture.start(ready(1, capabilities(wechat = true)))
+            runCurrent()
+
+            fixture.viewModel.startWechatLogin()
+            runCurrent()
+            assertEquals(1, auth.oauthStateCalls)
+            assertTrue(fixture.viewModel.state.value.busy)
+
+            advanceTimeBy(90_000L)
+            runCurrent()
+            assertFalse(fixture.viewModel.state.value.busy)
+            assertEquals(AccountAuthStep.CHOOSE, fixture.viewModel.state.value.authStep)
+            assertEquals("微信授权已超时，请重新发起", fixture.viewModel.state.value.message)
+
+            fixture.viewModel.startWechatLogin()
+            runCurrent()
+            assertEquals(2, auth.oauthStateCalls)
+
+            fixture.start(ready(2, capabilities(wechat = false)))
+            runCurrent()
         } finally {
             Dispatchers.resetMain()
         }
@@ -278,6 +270,37 @@ class AccountRemoteConfigLifecycleTest {
     }
 
     @Test
+    fun `qq server side authorization code reaches repository once without becoming UI state`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        var fixtureForCleanup: ConfigLifecycleFixture? = null
+        try {
+            val auth = ConfigLifecycleAuthActions()
+            val fixture = fixture(auth)
+            fixtureForCleanup = fixture
+            fixture.start(ready(1, capabilities(qq = true)))
+            runCurrent()
+            fixture.viewModel.startQqLogin(ConfigLifecycleQqHost())
+            runCurrent()
+            val callback = requireNotNull(fixture.qqFactory.callback)
+
+            callback(QqSdkCallback.Authorized(QQ_AUTHORIZATION_CODE))
+            runCurrent()
+
+            assertEquals(1, auth.qqLoginCalls)
+            assertEquals(QQ_AUTHORIZATION_CODE, auth.lastQqAuthorizationCode)
+            assertFalse(fixture.viewModel.state.value.toString().contains(QQ_AUTHORIZATION_CODE))
+
+            callback(QqSdkCallback.Authorized(QQ_AUTHORIZATION_CODE))
+            runCurrent()
+            assertEquals(1, auth.qqLoginCalls)
+        } finally {
+            fixtureForCleanup?.viewModel?.viewModelScope?.cancel()
+            runCurrent()
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
     fun `qq proof staged during loading is discarded by terminal unavailable`() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         try {
@@ -292,7 +315,7 @@ class AccountRemoteConfigLifecycleTest {
             val observed = async(start = CoroutineStart.UNDISPATCHED) {
                 fixture.qqManager.events.first() as QqOAuthEvent.Authorized
             }
-            fixture.qqFactory.callback?.invoke(QqSdkCallback.Authorized(QQ_TOKEN))
+            fixture.qqFactory.callback?.invoke(QqSdkCallback.Authorized(QQ_AUTHORIZATION_CODE))
             runCurrent()
             val stagedProof = observed.await()
             assertEquals(0, auth.qqLoginCalls)
@@ -309,9 +332,243 @@ class AccountRemoteConfigLifecycleTest {
         }
     }
 
+    @Test
+    fun `qq authorization times out and a late provider callback stays discarded`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        var fixtureForCleanup: ConfigLifecycleFixture? = null
+        try {
+            val auth = ConfigLifecycleAuthActions()
+            val fixture = fixture(auth)
+            fixtureForCleanup = fixture
+            fixture.start(ready(1, capabilities(qq = true)))
+            runCurrent()
+            fixture.viewModel.startQqLogin(ConfigLifecycleQqHost())
+            runCurrent()
+            val lateCallback = requireNotNull(fixture.qqFactory.callback)
+
+            advanceTimeBy(89_999)
+            runCurrent()
+            assertTrue(fixture.viewModel.state.value.busy)
+            assertEquals(AccountAuthStep.QQ_LOGIN, fixture.viewModel.state.value.authStep)
+            assertNull(fixture.viewModel.state.value.message)
+
+            advanceTimeBy(1)
+            runCurrent()
+
+            assertFalse(fixture.viewModel.state.value.busy)
+            assertEquals(AccountAuthStep.CHOOSE, fixture.viewModel.state.value.authStep)
+            assertEquals("QQ 授权已超时，请重新发起", fixture.viewModel.state.value.message)
+            lateCallback(QqSdkCallback.Authorized(QQ_AUTHORIZATION_CODE))
+            runCurrent()
+            assertEquals(0, auth.qqLoginCalls)
+        } finally {
+            fixtureForCleanup?.viewModel?.viewModelScope?.cancel()
+            runCurrent()
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `qq bind callback from a logged out account epoch cannot reach the repository`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        var fixtureForCleanup: ConfigLifecycleFixture? = null
+        try {
+            val auth = ConfigLifecycleAuthActions().apply { restoredSession = testSession() }
+            val fixture = fixture(auth)
+            fixtureForCleanup = fixture
+            fixture.start(ready(1, capabilities(qq = true)))
+            runCurrent()
+            assertEquals(AccountStatus.SIGNED_IN, fixture.viewModel.state.value.status)
+            fixture.viewModel.startQqBind(ConfigLifecycleQqHost())
+            runCurrent()
+            val staleCallback = requireNotNull(fixture.qqFactory.callback)
+
+            fixture.viewModel.logout()
+            runCurrent()
+            staleCallback(QqSdkCallback.Authorized(QQ_AUTHORIZATION_CODE))
+            runCurrent()
+
+            assertEquals(0, auth.qqBindCalls)
+            assertEquals(AccountStatus.GUEST, fixture.viewModel.state.value.status)
+        } finally {
+            fixtureForCleanup?.viewModel?.viewModelScope?.cancel()
+            runCurrent()
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `process recreation never restores a QQ authorization screen without its memory proof`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val fixtures = mutableListOf<ConfigLifecycleFixture>()
+        try {
+            listOf(AccountAuthStep.QQ_LOGIN, AccountAuthStep.BIND_QQ).forEach { step ->
+                val fixture = fixture(
+                    ConfigLifecycleAuthActions(),
+                    SavedStateHandle(mapOf("account.auth.step" to step.name)),
+                )
+                fixtures += fixture
+                assertEquals(AccountAuthStep.CHOOSE, fixture.viewModel.state.value.authStep)
+            }
+        } finally {
+            fixtures.forEach { it.viewModel.viewModelScope.cancel() }
+            runCurrent()
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `signed in foreground refresh reloads identities and sessions`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val emailBinding = testEmailBinding()
+            val session = testSessionSummary()
+            val auth = ConfigLifecycleAuthActions().apply {
+                restoredSession = testSession()
+                identityItems = listOf(emailBinding)
+                sessionItems = listOf(session)
+            }
+            val fixture = fixture(auth)
+            val ready = ready(1, capabilities())
+
+            fixture.start(ready)
+            runCurrent()
+            assertEquals(listOf(emailBinding), fixture.viewModel.state.value.identities)
+            assertEquals(listOf(session), fixture.viewModel.state.value.sessions)
+            assertEquals(1, auth.identitiesCalls)
+            assertEquals(1, auth.sessionsCalls)
+
+            fixture.viewModel.suspendRemoteAccessForForegroundRefresh()
+            assertTrue(fixture.viewModel.state.value.identities.isEmpty())
+            assertTrue(fixture.viewModel.state.value.sessions.isEmpty())
+            fixture.start(ready)
+            runCurrent()
+
+            assertEquals(listOf(emailBinding), fixture.viewModel.state.value.identities)
+            assertEquals(listOf(session), fixture.viewModel.state.value.sessions)
+            assertEquals(2, auth.identitiesCalls)
+            assertEquals(2, auth.sessionsCalls)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `guest restore clears a persisted email bind challenge`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val now = Instant.now()
+            val savedState = SavedStateHandle(
+                mapOf(
+                    "account.auth.step" to AccountAuthStep.BIND_EMAIL.name,
+                    "account.challenge.type" to AuthIdentityType.EMAIL.name,
+                    "account.challenge.purpose" to OtpPurpose.BIND.name,
+                    "account.challenge.id" to EMAIL_CHALLENGE_ID,
+                    "account.challenge.mask" to "u****r@example.com",
+                    "account.challenge.expiresAt" to now.plusSeconds(300).toString(),
+                    "account.challenge.resendAt" to now.plusSeconds(60).toString(),
+                ),
+            )
+            val fixture = fixture(ConfigLifecycleAuthActions(), savedState)
+
+            fixture.start(ready(1, capabilities()))
+            runCurrent()
+
+            assertEquals(AccountStatus.GUEST, fixture.viewModel.state.value.status)
+            assertNull(fixture.viewModel.state.value.challenge)
+            assertEquals(AccountAuthStep.CHOOSE, fixture.viewModel.state.value.authStep)
+            fixture.viewModel.updateOtpTargetDraft(AuthIdentityType.EMAIL, EMAIL_ADDRESS)
+            assertEquals(EMAIL_ADDRESS, fixture.viewModel.state.value.otpTargetDraft)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `failed session restore also clears a persisted email bind challenge`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val now = Instant.now()
+            val savedState = SavedStateHandle(
+                mapOf(
+                    "account.auth.step" to AccountAuthStep.BIND_EMAIL.name,
+                    "account.challenge.type" to AuthIdentityType.EMAIL.name,
+                    "account.challenge.purpose" to OtpPurpose.BIND.name,
+                    "account.challenge.id" to EMAIL_CHALLENGE_ID,
+                    "account.challenge.mask" to "u****r@example.com",
+                    "account.challenge.expiresAt" to now.plusSeconds(300).toString(),
+                    "account.challenge.resendAt" to now.plusSeconds(60).toString(),
+                ),
+            )
+            val auth = ConfigLifecycleAuthActions().apply {
+                restoreOutcome = AuthOutcome.Failure(AuthFailureKind.NETWORK, "账号服务暂不可用")
+            }
+            val fixture = fixture(auth, savedState)
+
+            fixture.start(ready(1, capabilities()))
+            runCurrent()
+
+            assertEquals(AccountStatus.GUEST, fixture.viewModel.state.value.status)
+            assertNull(fixture.viewModel.state.value.challenge)
+            assertEquals(AccountAuthStep.CHOOSE, fixture.viewModel.state.value.authStep)
+            assertEquals("账号服务暂不可用", fixture.viewModel.state.value.message)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `email resend is explicit cooldown bound and expiry clears the proof`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        var fixtureForCleanup: ConfigLifecycleFixture? = null
+        try {
+            val auth = ConfigLifecycleAuthActions()
+            val savedState = SavedStateHandle()
+            val fixture = fixture(auth, savedState)
+            fixtureForCleanup = fixture
+            fixture.start(ready(1, capabilities()))
+            runCurrent()
+            fixture.viewModel.updateOtpTargetDraft(AuthIdentityType.EMAIL, EMAIL_ADDRESS)
+            fixture.viewModel.requestCode(AuthIdentityType.EMAIL, OtpPurpose.LOGIN, EMAIL_ADDRESS)
+            runCurrent()
+            fixture.viewModel.updateOtpCodeDraft("123456")
+            runCurrent()
+
+            val first = requireNotNull(fixture.viewModel.state.value.challenge)
+            assertEquals(1, auth.emailCodeCalls)
+            assertTrue(fixture.viewModel.state.value.otpCanResend)
+            assertTrue(
+                savedState.keys().none { key ->
+                    val value = savedState.get<Any>(key)?.toString().orEmpty()
+                    value.contains(EMAIL_ADDRESS) || value.contains("123456")
+                },
+            )
+            fixture.viewModel.resendCode(first.resendAvailableAt.minusMillis(1))
+            runCurrent()
+            assertEquals(1, auth.emailCodeCalls)
+
+            fixture.viewModel.resendCode(first.resendAvailableAt)
+            runCurrent()
+            assertEquals(2, auth.emailCodeCalls)
+            val resent = requireNotNull(fixture.viewModel.state.value.challenge)
+            fixture.viewModel.updateOtpCodeDraft("123456")
+            fixture.viewModel.refreshOtpChallengeTiming(resent.expiresAt.plusMillis(1))
+
+            assertNull(fixture.viewModel.state.value.challenge)
+            assertEquals(EMAIL_ADDRESS, fixture.viewModel.state.value.otpTargetDraft)
+            assertEquals("", fixture.viewModel.state.value.otpCodeDraft)
+            assertEquals("验证码已过期，请重新获取", fixture.viewModel.state.value.message)
+            assertEquals(2, auth.emailCodeCalls)
+        } finally {
+            fixtureForCleanup?.viewModel?.viewModelScope?.cancel()
+            runCurrent()
+            Dispatchers.resetMain()
+        }
+    }
+
     private fun fixture(
         auth: ConfigLifecycleAuthActions,
-        fusionAuth: FusionAuthManager? = null,
+        savedStateHandle: SavedStateHandle = SavedStateHandle(),
     ): ConfigLifecycleFixture {
         val runtimeGate = com.chishenme.app.feature.config.RuntimeAppVersionGate("0.1.0")
         val wechatFactory = ConfigLifecycleWechatFactory()
@@ -333,7 +590,7 @@ class AccountRemoteConfigLifecycleTest {
                 wechatOAuth = wechatManager,
                 qqOAuth = qqManager,
                 runtimeAppVersionGate = runtimeGate,
-                fusionAuth = fusionAuth,
+                savedStateHandle = savedStateHandle,
             ),
             wechatManager = wechatManager,
             qqManager = qqManager,
@@ -361,26 +618,29 @@ class AccountRemoteConfigLifecycleTest {
 
     private fun capabilities(
         accounts: Boolean = true,
+        registration: Boolean = false,
         phone: Boolean = accounts,
         wechat: Boolean = false,
         qq: Boolean = false,
-        fusion: Boolean = false,
     ) = AuthCapabilities(
         accountsEnabled = accounts,
-        registrationEnabled = false,
+        registrationEnabled = accounts && registration,
         phoneEnabled = accounts && phone,
         wechatEnabled = accounts && wechat,
         emailEnabled = accounts,
         qqEnabled = accounts && qq,
         dataExportEnabled = false,
-        fusionEnabled = accounts && fusion,
     )
 
     companion object {
         val NOW: Instant = Instant.parse("2026-08-21T04:00:00Z")
         const val OAUTH_STATE = "sssssssssssssssssssssssssssssssssssssssssss"
         const val WECHAT_CODE = "private-wechat-authorization-code"
-        const val QQ_TOKEN = "private-qq-access-token"
+        const val QQ_AUTHORIZATION_CODE = "private-qq-authorization-code"
+        const val PHONE_NUMBER = "+8613800138000"
+        const val PHONE_CHALLENGE_ID = "11111111-1111-4111-8111-111111111111"
+        const val EMAIL_ADDRESS = "user@example.com"
+        const val EMAIL_CHALLENGE_ID = "33333333-3333-4333-8333-333333333333"
     }
 }
 
@@ -422,10 +682,20 @@ private data class ConfigLifecycleFixture(
 
 private class ConfigLifecycleAuthActions : AccountAuthActions {
     var restoreCalls = 0
+    var restoredSession: LocalAuthSession? = null
+    var restoreOutcome: AuthOutcome<LocalAuthSession?>? = null
     var oauthStateCalls = 0
     var wechatLoginCalls = 0
     var qqLoginCalls = 0
-    var fusionLoginCalls = 0
+    var qqBindCalls = 0
+    var lastQqAuthorizationCode: String? = null
+    var phoneLoginCalls = 0
+    var lastPhoneNumber: String? = null
+    var emailCodeCalls = 0
+    var identitiesCalls = 0
+    var sessionsCalls = 0
+    var identityItems: List<AuthIdentityBinding> = emptyList()
+    var sessionItems: List<AuthSessionSummary> = emptyList()
     var holdNextRestore = false
     private var restoreContinuation: Continuation<AuthOutcome<LocalAuthSession?>>? = null
 
@@ -434,7 +704,7 @@ private class ConfigLifecycleAuthActions : AccountAuthActions {
 
     override suspend fun restoreSession(): AuthOutcome<LocalAuthSession?> {
         restoreCalls += 1
-        if (!holdNextRestore) return AuthOutcome.Success(null)
+        if (!holdNextRestore) return restoreOutcome ?: AuthOutcome.Success(restoredSession)
         holdNextRestore = false
         return suspendCoroutine { restoreContinuation = it }
     }
@@ -456,7 +726,6 @@ private class ConfigLifecycleAuthActions : AccountAuthActions {
     override suspend fun createOAuthState(
         provider: AuthIdentityType,
         purpose: OAuthPurpose,
-        phoneChallengeId: String?,
     ): AuthOutcome<OAuthStateResponse> {
         oauthStateCalls += 1
         return AuthOutcome.Success(
@@ -479,50 +748,65 @@ private class ConfigLifecycleAuthActions : AccountAuthActions {
 
     override suspend fun loginWithQq(
         oauthState: String,
-        qqAccessToken: String,
+        authorizationCode: String,
     ): AuthOutcome<LocalAuthSession> {
         qqLoginCalls += 1
+        lastQqAuthorizationCode = authorizationCode
         return AuthOutcome.Success(testSession())
     }
 
-    override suspend fun loginWithFusion(
-        flowId: String,
-        verifyToken: String,
-    ): AuthOutcome<LocalAuthSession> {
-        fusionLoginCalls += 1
-        return AuthOutcome.Success(testSession())
+    override suspend fun identities(): AuthOutcome<List<AuthIdentityBinding>> {
+        identitiesCalls += 1
+        return AuthOutcome.Success(identityItems)
     }
 
-    override suspend fun identities(): AuthOutcome<List<AuthIdentityBinding>> =
-        AuthOutcome.Success(emptyList())
-
-    override suspend fun sessions(): AuthOutcome<List<AuthSessionSummary>> =
-        AuthOutcome.Success(emptyList())
+    override suspend fun sessions(): AuthOutcome<List<AuthSessionSummary>> {
+        sessionsCalls += 1
+        return AuthOutcome.Success(sessionItems)
+    }
 
     override suspend fun logout(): AuthOutcome<Unit> = AuthOutcome.Success(Unit)
 
     override suspend fun requestPhoneCode(
         rawPhone: String,
         purpose: OtpPurpose,
-    ): AuthOutcome<AuthCodeChallenge> = error("unused")
+    ): AuthOutcome<AuthCodeChallenge> = AuthOutcome.Success(
+        AuthCodeChallenge(
+            challengeId = AccountRemoteConfigLifecycleTest.PHONE_CHALLENGE_ID,
+            targetType = AuthIdentityType.PHONE,
+            maskedTarget = "+86 138****8000",
+            expiresAt = Instant.now().plusSeconds(300).toString(),
+            resendAvailableAt = Instant.now().plusSeconds(60).toString(),
+        ),
+    )
 
     override suspend fun requestEmailCode(
         rawEmail: String,
         purpose: OtpPurpose,
-    ): AuthOutcome<AuthCodeChallenge> = error("unused")
-
-    override suspend fun registerPhoneWechat(
-        challengeId: String,
-        otpCode: String,
-        oauthState: String,
-        authorizationCode: String,
-    ): AuthOutcome<LocalAuthSession> = error("unused")
+    ): AuthOutcome<AuthCodeChallenge> {
+        emailCodeCalls += 1
+        val now = Instant.now()
+        return AuthOutcome.Success(
+            AuthCodeChallenge(
+                challengeId = AccountRemoteConfigLifecycleTest.EMAIL_CHALLENGE_ID,
+                targetType = AuthIdentityType.EMAIL,
+                maskedTarget = "u****r@example.com",
+                expiresAt = now.plusSeconds(300).toString(),
+                resendAvailableAt = now.plusSeconds(60).toString(),
+            ),
+        )
+    }
 
     override suspend fun loginWithOtp(
         type: AuthIdentityType,
         challengeId: String,
         otpCode: String,
-    ): AuthOutcome<LocalAuthSession> = error("unused")
+        phoneNumber: String?,
+    ): AuthOutcome<LocalAuthSession> {
+        phoneLoginCalls += 1
+        lastPhoneNumber = phoneNumber
+        return AuthOutcome.Success(testSession())
+    }
 
     override suspend fun bindWithOtp(
         type: AuthIdentityType,
@@ -532,7 +816,16 @@ private class ConfigLifecycleAuthActions : AccountAuthActions {
 
     override suspend fun bindWithQq(
         oauthState: String,
-        qqAccessToken: String,
+        authorizationCode: String,
+    ): AuthOutcome<AuthIdentityBinding> {
+        qqBindCalls += 1
+        lastQqAuthorizationCode = authorizationCode
+        return AuthOutcome.Success(testQqBinding())
+    }
+
+    override suspend fun bindWithWechat(
+        oauthState: String,
+        authorizationCode: String,
     ): AuthOutcome<AuthIdentityBinding> = error("unused")
 
     override suspend fun unbindIdentity(bindingId: String): AuthOutcome<Unit> = error("unused")
@@ -597,59 +890,37 @@ private class ConfigLifecycleQqHost : QqLoginHost {
     override fun launch(session: QqSdkSession): Boolean = true
 }
 
-private object ConfigLifecyclePrivacyGate : PrivacyAuthorizationGate {
-    override suspend fun isAccepted(): Boolean = true
-
-    override fun revoke() = Unit
-
-    override fun allowAfterDurableAcceptance(): Boolean = true
-}
-
-private class ConfigLifecycleFusionFactory : FusionAuthSdkFactory {
-    override val available: Boolean = true
-    val sdk = ConfigLifecycleFusionSdk()
-
-    override fun create(): FusionAuthSdk = sdk
-}
-
-private class ConfigLifecycleFusionSdk : FusionAuthSdk {
-    var listener: FusionAuthSdkListener? = null
-
-    override fun start(
-        activity: Activity,
-        schemeCode: String,
-        authToken: String,
-        listener: FusionAuthSdkListener,
-    ): Boolean = error("ConfigLifecycleFusionHost bypasses Activity")
-
-    override fun cancel() = Unit
-}
-
-private object ConfigLifecycleFusionHost : FusionAuthHost {
-    override val isAvailable: Boolean = true
-
-    override fun launch(
-        sdk: FusionAuthSdk,
-        schemeCode: String,
-        authToken: String,
-        listener: FusionAuthSdkListener,
-    ): Boolean {
-        (sdk as ConfigLifecycleFusionSdk).listener = listener
-        return true
-    }
-}
-
-private class ConfigLifecycleFusionCompletion : FusionAuthProofCompletion {
-    val results = mutableListOf<Boolean>()
-
-    override fun complete(success: Boolean) {
-        results += success
-    }
-}
-
 private fun testSession() = LocalAuthSession(
     userId = "11111111-1111-4111-8111-111111111111",
     sessionId = "22222222-2222-4222-8222-222222222222",
     accessTokenExpiresAt = Instant.parse("2026-08-21T05:00:00Z"),
     refreshTokenExpiresAt = Instant.parse("2026-08-22T04:00:00Z"),
+)
+
+private fun testEmailBinding() = AuthIdentityBinding(
+    bindingId = "33333333-3333-4333-8333-333333333333",
+    type = AuthIdentityType.EMAIL,
+    maskedValue = "u****r@example.com",
+    boundAt = "2026-08-21T04:00:00Z",
+    primary = false,
+    canUnbind = true,
+)
+
+private fun testQqBinding() = AuthIdentityBinding(
+    bindingId = "44444444-4444-4444-8444-444444444444",
+    type = AuthIdentityType.QQ,
+    maskedValue = "QQ 账号",
+    boundAt = "2026-08-21T04:00:00Z",
+    primary = false,
+    canUnbind = true,
+)
+
+private fun testSessionSummary() = AuthSessionSummary(
+    sessionId = "22222222-2222-4222-8222-222222222222",
+    deviceLabel = "Android 设备",
+    platform = "ANDROID",
+    current = true,
+    createdAt = "2026-08-21T04:00:00Z",
+    lastActiveAt = "2026-08-21T04:00:00Z",
+    expiresAt = "2026-08-22T04:00:00Z",
 )

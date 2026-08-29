@@ -53,6 +53,63 @@ describe("database safety configuration", () => {
 		expect(config.enabled).toBe(true);
 		expect(config.connectionString).toBe(runtimeUrl);
 		expect(config.ssl).toBe(false);
+		expect(config.authSchemaTransitionMode).toBe("none");
+	});
+
+	it("allows only the explicit accounts-disabled legacy phone drain bridge", () => {
+		expect(
+			loadDatabaseConfig(
+				{
+					DATABASE_ENABLED: "true",
+					DATABASE_URL: runtimeUrl,
+					DATABASE_SSL_MODE: "disable",
+					ACCOUNTS_ENABLED: "false",
+					AUTH_SCHEMA_TRANSITION_MODE: "legacy_phone_drain",
+				},
+				"test",
+			).authSchemaTransitionMode,
+		).toBe("legacy_phone_drain");
+		expect(() =>
+			loadDatabaseConfig(
+				{
+					DATABASE_ENABLED: "true",
+					DATABASE_URL: runtimeUrl,
+					ACCOUNTS_ENABLED: "true",
+					AUTH_SCHEMA_TRANSITION_MODE: "legacy_phone_drain",
+				},
+				"test",
+			),
+		).toThrow("必须关闭 ACCOUNTS_ENABLED");
+		for (const invalid of ["legacy", "phone_drain", "NONE", " none "]) {
+			expect(() =>
+				loadDatabaseConfig({ AUTH_SCHEMA_TRANSITION_MODE: invalid }, "test"),
+			).toThrow("只允许");
+		}
+	});
+
+	it("allows the exact WeChat alias bridge only while WeChat is disabled", () => {
+		expect(
+			loadDatabaseConfig(
+				{
+					DATABASE_ENABLED: "true",
+					DATABASE_URL: runtimeUrl,
+					AUTH_SCHEMA_TRANSITION_MODE: "wechat_union_aliases_pending",
+					WECHAT_AUTH_ENABLED: "false",
+				},
+				"test",
+			).authSchemaTransitionMode,
+		).toBe("wechat_union_aliases_pending");
+		expect(() =>
+			loadDatabaseConfig(
+				{
+					DATABASE_ENABLED: "true",
+					DATABASE_URL: runtimeUrl,
+					AUTH_SCHEMA_TRANSITION_MODE: "wechat_union_aliases_pending",
+					WECHAT_AUTH_ENABLED: "true",
+				},
+				"test",
+			),
+		).toThrow("必须关闭 WECHAT_AUTH_ENABLED");
 	});
 
 	it("requires a direct postgresql URL and certificate-verifying TLS in production", () => {

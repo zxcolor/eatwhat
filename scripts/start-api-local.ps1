@@ -72,11 +72,12 @@ $allowedKeys = [System.Collections.Generic.HashSet[string]]::new(
     'QWEN_API_KEY',
     'QWEN_MODEL',
     'QWEN_TIMEOUT_MS',
+    'AUTH_SCHEMA_TRANSITION_MODE',
     'PHONE_AUTH_ENABLED',
-    'FUSION_AUTH_ENABLED',
     'EMAIL_AUTH_ENABLED',
     'WECHAT_AUTH_ENABLED',
     'QQ_AUTH_ENABLED',
+    'QQ_UNION_ID_ENABLED',
     'AUTH_HASH_ACTIVE_VERSION',
     'AUTH_HASH_KEYS_JSON',
     'AUTH_OTP_PEPPER_ACTIVE_VERSION',
@@ -93,26 +94,25 @@ $allowedKeys = [System.Collections.Generic.HashSet[string]]::new(
     'ALIBABA_CLOUD_ECS_METADATA_DISABLED',
     'ALIYUN_CREDENTIAL_TIMEOUT_MS',
     'ALIYUN_CREDENTIAL_ALLOWED_PROVIDER',
-    'ALIYUN_SMS_SIGN_NAME',
-    'ALIYUN_SMS_TEMPLATE_CODE',
-    'ALIYUN_SMS_TIMEOUT_MS',
-    'ALIYUN_FUSION_SCHEME_CODE',
-    'ALIYUN_FUSION_PACKAGE_NAME',
-    'ALIYUN_FUSION_PACKAGE_SIGN',
-    'ALIYUN_FUSION_TOKEN_TTL_SECONDS',
-    'ALIYUN_FUSION_TIMEOUT_MS',
+    'ALIYUN_PNVS_SIGN_NAME',
+    'ALIYUN_PNVS_TEMPLATE_CODE',
+    'ALIYUN_PNVS_TIMEOUT_MS',
     'SMTP_HOST',
     'SMTP_PORT',
     'SMTP_SECURE',
     'SMTP_USERNAME',
     'SMTP_PASSWORD',
     'SMTP_FROM_ADDRESS',
+    'SMTP_REPLY_TO',
     'SMTP_FROM_NAME',
     'SMTP_TIMEOUT_MS',
     'WECHAT_APP_ID',
     'WECHAT_APP_SECRET',
+    'WECHAT_OPEN_PLATFORM_REALM_ID',
     'WECHAT_AUTH_TIMEOUT_MS',
     'QQ_APP_ID',
+    'QQ_APP_KEY',
+    'QQ_OPEN_PLATFORM_REALM_ID',
     'QQ_AUTH_TIMEOUT_MS'
 ) | ForEach-Object { [void]$allowedKeys.Add($_) }
 
@@ -128,6 +128,7 @@ $secretKeys = [System.Collections.Generic.HashSet[string]]::new(
     'AUTH_HASH_KEYS_JSON',
     'AUTH_OTP_PEPPER_KEYS_JSON',
     'WECHAT_APP_SECRET',
+    'QQ_APP_KEY',
     'SMTP_PASSWORD'
 ) |
     ForEach-Object { [void]$secretKeys.Add($_) }
@@ -211,17 +212,19 @@ function Test-SecretEnabledForRuntime {
                 $Entries['ACCOUNTS_ENABLED'] -ceq 'true'
         }
         'AUTH_OTP_PEPPER_KEYS_JSON' {
-            $phoneEnabled = $Entries.Contains('PHONE_AUTH_ENABLED') -and
-                $Entries['PHONE_AUTH_ENABLED'] -ceq 'true'
             $emailEnabled = $Entries.Contains('EMAIL_AUTH_ENABLED') -and
                 $Entries['EMAIL_AUTH_ENABLED'] -ceq 'true'
             return $Entries.Contains('ACCOUNTS_ENABLED') -and
                 $Entries['ACCOUNTS_ENABLED'] -ceq 'true' -and
-                ($phoneEnabled -or $emailEnabled)
+                $emailEnabled
         }
         'WECHAT_APP_SECRET' {
             return $Entries.Contains('WECHAT_AUTH_ENABLED') -and
                 $Entries['WECHAT_AUTH_ENABLED'] -ceq 'true'
+        }
+        'QQ_APP_KEY' {
+            return $Entries.Contains('QQ_AUTH_ENABLED') -and
+                $Entries['QQ_AUTH_ENABLED'] -ceq 'true'
         }
         'SMTP_PASSWORD' {
             return $Entries.Contains('EMAIL_AUTH_ENABLED') -and
@@ -253,10 +256,8 @@ function New-RuntimeChildEnvironment {
     }
     $phoneAuthEnabled = $Entries.Contains('PHONE_AUTH_ENABLED') -and
         $Entries['PHONE_AUTH_ENABLED'] -ceq 'true'
-    $fusionAuthEnabled = $Entries.Contains('FUSION_AUTH_ENABLED') -and
-        $Entries['FUSION_AUTH_ENABLED'] -ceq 'true'
     foreach ($key in $approvedInheritedSecretKeys) {
-        if (-not ($phoneAuthEnabled -or $fusionAuthEnabled)) {
+        if (-not $phoneAuthEnabled) {
             continue
         }
         $inherited = [Environment]::GetEnvironmentVariable($key, 'Process')
@@ -372,6 +373,35 @@ try {
             [string]::IsNullOrWhiteSpace($entries['QWEN_API_KEY']))) {
         throw 'QWEN_ENABLED=true 时必须在同一私有文件中填写 QWEN_API_KEY。'
     }
+    $schemaTransitionMode = if ($entries.Contains('AUTH_SCHEMA_TRANSITION_MODE')) {
+        [string]$entries['AUTH_SCHEMA_TRANSITION_MODE']
+    } else {
+        'none'
+    }
+    if ($schemaTransitionMode -cne 'none' -and
+        $schemaTransitionMode -cne 'legacy_phone_drain' -and
+        $schemaTransitionMode -cne 'wechat_union_aliases_pending') {
+        throw 'AUTH_SCHEMA_TRANSITION_MODE 只允许 none、legacy_phone_drain 或 wechat_union_aliases_pending。'
+    }
+    if ($schemaTransitionMode -ceq 'wechat_union_aliases_pending' -and
+        $entries.Contains('WECHAT_AUTH_ENABLED') -and
+        $entries['WECHAT_AUTH_ENABLED'] -cne 'false') {
+        throw 'wechat_union_aliases_pending 要求 WECHAT_AUTH_ENABLED=false。'
+    }
+    if ($schemaTransitionMode -ceq 'legacy_phone_drain') {
+        foreach ($disabledSwitch in @(
+            'ACCOUNTS_ENABLED',
+            'PHONE_AUTH_ENABLED',
+            'EMAIL_AUTH_ENABLED',
+            'WECHAT_AUTH_ENABLED',
+            'QQ_AUTH_ENABLED',
+            'QQ_UNION_ID_ENABLED'
+        )) {
+            if ($entries.Contains($disabledSwitch) -and $entries[$disabledSwitch] -cne 'false') {
+                throw "legacy_phone_drain 要求 $disabledSwitch=false。"
+            }
+        }
+    }
     if ($entries.Contains('ACCOUNTS_ENABLED') -and $entries['ACCOUNTS_ENABLED'] -eq 'true') {
         if (-not $entries.Contains('DATABASE_ENABLED') -or
             $entries['DATABASE_ENABLED'] -ne 'true') {
@@ -379,10 +409,8 @@ try {
         }
         $phoneAuthEnabled = $entries.Contains('PHONE_AUTH_ENABLED') -and
             $entries['PHONE_AUTH_ENABLED'] -eq 'true'
-        $fusionAuthEnabled = $entries.Contains('FUSION_AUTH_ENABLED') -and
-            $entries['FUSION_AUTH_ENABLED'] -eq 'true'
-        if (-not ($phoneAuthEnabled -or $fusionAuthEnabled)) {
-            throw 'ACCOUNTS_ENABLED=true 时 PHONE_AUTH_ENABLED 与 FUSION_AUTH_ENABLED 至少一个必须为 true。'
+        if (-not $phoneAuthEnabled) {
+            throw 'ACCOUNTS_ENABLED=true 时必须启用 PHONE_AUTH_ENABLED。'
         }
         foreach ($requiredValue in @(
             'DATABASE_URL',
@@ -399,7 +427,8 @@ try {
         if ($wechatAuthEnabled) {
             foreach ($requiredWechatValue in @(
                 'WECHAT_APP_ID',
-                'WECHAT_APP_SECRET'
+                'WECHAT_APP_SECRET',
+                'WECHAT_OPEN_PLATFORM_REALM_ID'
             )) {
                 if (-not (Test-ConfiguredValue -Entries $entries -Key $requiredWechatValue)) {
                     throw "WECHAT_AUTH_ENABLED=true 时必须在私有文件或受控进程环境中填写 $requiredWechatValue。"
@@ -408,34 +437,23 @@ try {
         }
         $emailAuthEnabled = $entries.Contains('EMAIL_AUTH_ENABLED') -and
             $entries['EMAIL_AUTH_ENABLED'] -eq 'true'
-        if ($phoneAuthEnabled -or $emailAuthEnabled) {
+        if ($emailAuthEnabled) {
             foreach ($requiredOtpValue in @(
                 'AUTH_OTP_PEPPER_ACTIVE_VERSION',
                 'AUTH_OTP_PEPPER_KEYS_JSON'
             )) {
                 if (-not (Test-ConfiguredValue -Entries $entries -Key $requiredOtpValue)) {
-                    throw "手机号或邮箱验证码启用时必须在私有文件或受控进程环境中填写 $requiredOtpValue。"
+                    throw "邮箱验证码启用时必须在私有文件或受控进程环境中填写 $requiredOtpValue。"
                 }
             }
         }
         if ($phoneAuthEnabled) {
             foreach ($requiredPhoneValue in @(
-                'ALIYUN_SMS_SIGN_NAME',
-                'ALIYUN_SMS_TEMPLATE_CODE'
+                'ALIYUN_PNVS_SIGN_NAME',
+                'ALIYUN_PNVS_TEMPLATE_CODE'
             )) {
                 if (-not (Test-ConfiguredValue -Entries $entries -Key $requiredPhoneValue)) {
                     throw "PHONE_AUTH_ENABLED=true 时必须在私有文件或受控进程环境中填写 $requiredPhoneValue。"
-                }
-            }
-        }
-        if ($fusionAuthEnabled) {
-            foreach ($requiredFusionValue in @(
-                'ALIYUN_FUSION_SCHEME_CODE',
-                'ALIYUN_FUSION_PACKAGE_NAME',
-                'ALIYUN_FUSION_PACKAGE_SIGN'
-            )) {
-                if (-not (Test-ConfiguredValue -Entries $entries -Key $requiredFusionValue)) {
-                    throw "FUSION_AUTH_ENABLED=true 时必须在私有文件中填写 $requiredFusionValue。"
                 }
             }
         }
@@ -445,17 +463,33 @@ try {
             'SMTP_HOST',
             'SMTP_USERNAME',
             'SMTP_PASSWORD',
-            'SMTP_FROM_ADDRESS'
+            'SMTP_FROM_ADDRESS',
+            'SMTP_REPLY_TO'
         )) {
             if (-not (Test-ConfiguredValue -Entries $entries -Key $requiredSmtpValue)) {
                 throw "EMAIL_AUTH_ENABLED=true 时必须在私有文件或受控进程环境中填写 $requiredSmtpValue。"
             }
         }
     }
-    if ($entries.Contains('QQ_AUTH_ENABLED') -and $entries['QQ_AUTH_ENABLED'] -eq 'true' -and
-        (-not $entries.Contains('QQ_APP_ID') -or
-            [string]::IsNullOrWhiteSpace($entries['QQ_APP_ID']))) {
-        throw 'QQ_AUTH_ENABLED=true 时必须在同一私有文件中填写 QQ_APP_ID。'
+    if ($entries.Contains('QQ_AUTH_ENABLED') -and $entries['QQ_AUTH_ENABLED'] -eq 'true') {
+        foreach ($requiredQqValue in @('QQ_APP_ID', 'QQ_APP_KEY')) {
+            if (-not (Test-ConfiguredValue -Entries $entries -Key $requiredQqValue)) {
+                throw "QQ_AUTH_ENABLED=true 时必须在私有文件或受控进程环境中填写 $requiredQqValue。"
+            }
+        }
+    }
+    if ($entries.Contains('QQ_UNION_ID_ENABLED') -and
+        $entries['QQ_UNION_ID_ENABLED'] -eq 'true' -and
+        (-not $entries.Contains('QQ_AUTH_ENABLED') -or
+            $entries['QQ_AUTH_ENABLED'] -ne 'true')) {
+        throw 'QQ_UNION_ID_ENABLED=true 时必须同时启用 QQ_AUTH_ENABLED。'
+    }
+    if ($entries.Contains('QQ_UNION_ID_ENABLED') -and
+        $entries['QQ_UNION_ID_ENABLED'] -eq 'true' -and
+        (-not $entries.Contains('QQ_OPEN_PLATFORM_REALM_ID') -or
+            $entries['QQ_OPEN_PLATFORM_REALM_ID'] -cnotmatch
+                '^[a-z0-9][a-z0-9._-]{0,63}$')) {
+        throw 'QQ_UNION_ID_ENABLED=true 时必须填写稳定的小写 QQ_OPEN_PLATFORM_REALM_ID。'
     }
 
     if ($ValidateOnly) {

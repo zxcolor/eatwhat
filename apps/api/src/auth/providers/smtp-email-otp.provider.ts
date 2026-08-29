@@ -43,7 +43,8 @@ export async function createVerifiedSmtpTransportClient(
 		config.host === null ||
 		config.username === null ||
 		config.password === null ||
-		config.fromAddress === null
+		config.fromAddress === null ||
+		config.replyToAddress === null
 	) {
 		throw new Error(SAFE_SMTP_STARTUP_FAILURE);
 	}
@@ -97,7 +98,11 @@ export class SmtpEmailOtpDeliveryProvider implements OtpDeliveryProvider {
 	) {}
 
 	async send(request: OtpDeliveryRequest): Promise<OtpDeliveryReceipt> {
-		if (!this.config.enabled || this.config.fromAddress === null) {
+		if (
+			!this.config.enabled ||
+			this.config.fromAddress === null ||
+			this.config.replyToAddress === null
+		) {
 			throw new OtpDeliveryUnavailableError("DISABLED");
 		}
 		validateOtpDeliveryRequest(request, this.channel);
@@ -117,6 +122,7 @@ export class SmtpEmailOtpDeliveryProvider implements OtpDeliveryProvider {
 					address: this.config.fromAddress,
 				},
 				to: [{ address: request.destination }],
+				replyTo: [{ address: this.config.replyToAddress }],
 				subject: "吃什么验证码",
 				text: `你的验证码是 ${request.code}，${remainingMinutes} 分钟内有效。请勿向任何人透露。`,
 				disableFileAccess: true,

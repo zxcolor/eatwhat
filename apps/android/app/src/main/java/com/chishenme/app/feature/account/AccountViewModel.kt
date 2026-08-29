@@ -1,12 +1,9 @@
 package com.chishenme.app.feature.account
 
 import android.app.Activity
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.chishenme.app.auth.fusion.FusionAuthEvent
-import com.chishenme.app.auth.fusion.FusionAuthManager
-import com.chishenme.app.auth.fusion.FusionAuthStartResult
-import com.chishenme.app.auth.fusion.toFusionAuthHost
 import com.chishenme.app.auth.qq.QqOAuthEvent
 import com.chishenme.app.auth.qq.QqOAuthFailure
 import com.chishenme.app.auth.qq.QqLoginHost
@@ -21,6 +18,7 @@ import com.chishenme.app.data.AccountAuthActions
 import com.chishenme.app.data.AccountExportActions
 import com.chishenme.app.data.AccountExportFailureKind
 import com.chishenme.app.data.AccountExportOutcome
+import com.chishenme.app.data.AuthFailureKind
 import com.chishenme.app.data.AuthOutcome
 import com.chishenme.app.data.LocalAuthSession
 import com.chishenme.app.data.remote.AccountExportStatus
@@ -30,15 +28,13 @@ import com.chishenme.app.data.remote.AuthCodeChallenge
 import com.chishenme.app.data.remote.AuthIdentityBinding
 import com.chishenme.app.data.remote.AuthIdentityType
 import com.chishenme.app.data.remote.AuthSessionSummary
-import com.chishenme.app.data.remote.FusionAuthPurpose
-import com.chishenme.app.data.remote.FusionRegistrationPhoneProof
 import com.chishenme.app.data.remote.OAuthPurpose
 import com.chishenme.app.data.remote.OtpPurpose
 import com.chishenme.app.feature.config.RemoteFeatureConfigState
 import com.chishenme.app.feature.config.RuntimeAppVersionGate
 import dagger.hilt.android.lifecycle.HiltViewModel
+import java.time.Duration
 import java.time.Instant
-import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -52,6 +48,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 enum class AccountStatus { CHECKING, GUEST, SIGNED_IN }
+enum class AccountAuthStep { CHOOSE, OTP_LOGIN, PHONE_REGISTER, WECHAT_LOGIN, QQ_LOGIN, BIND_EMAIL, BIND_WECHAT, BIND_QQ }
 
 data class PendingOtpChallenge(
     val type: AuthIdentityType,
@@ -59,6 +56,7 @@ data class PendingOtpChallenge(
     val challengeId: String,
     val maskedTarget: String,
     val expiresAt: Instant,
+    val resendAvailableAt: Instant,
 )
 
 data class AccountUiState(
@@ -74,9 +72,21 @@ data class AccountUiState(
     val includeBehaviorHistory: Boolean = true,
     val wechatClientConfigured: Boolean = false,
     val qqClientConfigured: Boolean = false,
-    val fusionClientConfigured: Boolean = false,
+    val authStep: AccountAuthStep = AccountAuthStep.CHOOSE,
     val localSessionMaterialPresent: Boolean = false,
-)
+    /** Input drafts stay in process memory and are never copied to SavedStateHandle or disk. */
+    val otpInputType: AuthIdentityType? = null,
+    val otpTargetDraft: String = "",
+    val otpCodeDraft: String = "",
+    val otpSecondsUntilResend: Long = 0,
+    val otpSecondsUntilExpiry: Long = 0,
+    /** True only while the raw target is still held in this ViewModel process. */
+    val otpCanResend: Boolean = false,
+) {
+    override fun toString(): String =
+        "AccountUiState(status=$status, busy=$busy, challenge=$challenge, " +
+            "authStep=$authStep, otpInputType=$otpInputType, otpDrafts=<redacted>)"
+}
 
 @HiltViewModel
 class AccountViewModel @Inject constructor(
@@ -85,24 +95,26 @@ class AccountViewModel @Inject constructor(
     private val wechatOAuth: WechatOAuthManager,
     private val qqOAuth: QqOAuthManager,
     private val runtimeAppVersionGate: RuntimeAppVersionGate,
-    private val fusionAuth: FusionAuthManager? = null,
+    private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(
         AccountUiState(
+            challenge = restoreSavedChallenge(savedStateHandle),
             wechatClientConfigured = wechatOAuth.clientConfigured,
             qqClientConfigured = qqOAuth.clientConfigured,
-            fusionClientConfigured = fusionAuth?.clientAvailable == true,
+            authStep = restoreSavedStep(savedStateHandle),
         ),
     )
     val state: StateFlow<AccountUiState> = mutableState.asStateFlow()
     private var pendingWechatAction: PendingWechatAction? = null
+    private var wechatAuthorizationTimeoutJob: Job? = null
     private var pendingQqAction: PendingQqAction? = null
+    private var qqAuthorizationTimeoutJob: Job? = null
     private var stagedWechatEvent: WechatOAuthEvent? = null
     private var stagedQqEvent: QqOAuthEvent? = null
-    private var stagedFusionEvent: FusionAuthEvent? = null
-    private var pendingFusionRegistrationProof: PendingFusionPhoneProof? = null
-    private var pendingFusionRegistrationSessionId: String? = null
-    private var fusionSceneTimeoutJob: Job? = null
+    /** Raw phone/email stays process-memory only; SavedStateHandle stores no personal target. */
+    private var pendingOtpTarget: String? = null
+    private var otpChallengeTimerJob: Job? = null
     private var remoteActionJob: Job? = null
     private var logoutJob: Job? = null
     private var dataRightsJob: Job? = null
@@ -118,19 +130,17 @@ class AccountViewModel @Inject constructor(
     private var activeRuntimeLease: RuntimeAppVersionGate.RemoteAccessLease? = null
     private var exportJob: Job? = null
     private var exportAccessGeneration = 0L
-    private var externalAuthorizationGeneration = 0L
 
     init {
+        mutableState.value.challenge?.let(::scheduleOtpChallengeTimer)
         viewModelScope.launch {
             wechatOAuth.events.collect(::handleWechatEvent)
         }
         viewModelScope.launch {
             qqOAuth.events.collect(::handleQqEvent)
         }
-        fusionAuth?.let { manager ->
-            viewModelScope.launch {
-                manager.events.collect(::handleFusionEvent)
-            }
+        viewModelScope.launch {
+            state.collect(::saveNonSensitiveNavigationState)
         }
         viewModelScope.launch {
             runtimeAppVersionGate.state.collect { gate ->
@@ -196,20 +206,6 @@ class AccountViewModel @Inject constructor(
      * lease; the process-wide gate owns configuration generation allocation.
      */
     fun suspendRemoteAccessForForegroundRefresh() {
-        // Opening the vendor-owned Fusion scene stops the account Activity even
-        // though the provider callback still has to be verified through this
-        // ViewModel before the scene can continue. Keep only that already-issued,
-        // still-current lease alive; a new config generation, privacy revocation,
-        // page exit, or any other ON_STOP path retains the normal fail-closed flow.
-        val fusionGeneration = fusionAuth?.activeConfigurationGeneration
-        if (
-            fusionGeneration != null &&
-            fusionGeneration == latestConfigGeneration &&
-            configPhase == AccountConfigPhase.READY &&
-            activeRuntimeLease?.let(runtimeAppVersionGate::isRemoteAccessCurrent) == true
-        ) {
-            return
-        }
         val observedGeneration = runtimeAppVersionGate.currentState.observedConfigurationGeneration ?: 0L
         val generation = maxOf(latestConfigGeneration, observedGeneration)
         enterConfigLoading(generation)
@@ -223,7 +219,6 @@ class AccountViewModel @Inject constructor(
             return
         }
         latestConfigGeneration = generation
-        fusionAuth?.cancelForConfigurationChange(generation)
         configPhase = AccountConfigPhase.LOADING
         activeCapabilities = null
         activeRuntimeLease = null
@@ -233,7 +228,6 @@ class AccountViewModel @Inject constructor(
 
     private fun enterConfigReady(generation: Long, capabilities: AuthCapabilities?) {
         if (generation < latestConfigGeneration) return
-        fusionAuth?.cancelForConfigurationChange(generation)
         val runtimeLease = runtimeAppVersionGate.acquireRemoteAccessLease(generation)
         if (runtimeLease == null) {
             enterConfigLoading(generation)
@@ -260,12 +254,22 @@ class AccountViewModel @Inject constructor(
         deletionExplicitlyDisabled = capabilities?.accountsEnabled != true
         updateExportCapability(accountsEnabled && capabilities?.dataExportEnabled == true)
         if (!accountsEnabled) {
+            pendingOtpTarget = null
+            otpChallengeTimerJob?.cancel()
+            otpChallengeTimerJob = null
             clearExternalAuthorization()
             mutableState.update {
                 it.copy(
                     status = if (it.status == AccountStatus.CHECKING) AccountStatus.GUEST else it.status,
                     busy = false,
                     challenge = null,
+                    authStep = AccountAuthStep.CHOOSE,
+                    otpInputType = null,
+                    otpTargetDraft = "",
+                    otpCodeDraft = "",
+                    otpSecondsUntilResend = 0,
+                    otpSecondsUntilExpiry = 0,
+                    otpCanResend = false,
                     identities = emptyList(),
                     sessions = emptyList(),
                 )
@@ -274,12 +278,12 @@ class AccountViewModel @Inject constructor(
         }
 
         discardAuthorizationsDisabledByLatestConfig()
+        reconcileOtpChallengeForStatus(mutableState.value.status)
         val resumedAuthorization = resumeStagedAuthorization()
         if (resumedAuthorization) return
         if (
             pendingWechatAction != null ||
-            pendingQqAction != null ||
-            fusionAuthHasPendingWork()
+            pendingQqAction != null
         ) {
             mutableState.update { it.copy(busy = true) }
             return
@@ -288,13 +292,14 @@ class AccountViewModel @Inject constructor(
             mutableState.value.status != AccountStatus.SIGNED_IN &&
             logoutJob?.isCompleted != false
         ) {
-            restore()
-        } else if (
-            mutableState.value.status == AccountStatus.SIGNED_IN &&
-            mutableState.value.dataExportEnabled &&
-            !mutableState.value.busy
-        ) {
-            refreshExport(showMessage = false)
+            restoreTrustedSession()
+        } else if (mutableState.value.status == AccountStatus.SIGNED_IN) {
+            mutableState.update {
+                it.copy(busy = logoutInProgress || dataRightsInProgress)
+            }
+            if (!mutableState.value.busy) {
+                refreshSecurityData(allowCurrentAction = true)
+            }
         }
     }
 
@@ -311,12 +316,22 @@ class AccountViewModel @Inject constructor(
         activeRuntimeLease = null
         deletionExplicitlyDisabled = true
         updateExportCapability(false)
+        pendingOtpTarget = null
+        otpChallengeTimerJob?.cancel()
+        otpChallengeTimerJob = null
         clearExternalAuthorization()
         mutableState.update {
             it.copy(
                 status = if (it.status == AccountStatus.CHECKING) AccountStatus.GUEST else it.status,
                 busy = false,
                 challenge = null,
+                authStep = AccountAuthStep.CHOOSE,
+                otpInputType = null,
+                otpTargetDraft = "",
+                otpCodeDraft = "",
+                otpSecondsUntilResend = 0,
+                otpSecondsUntilExpiry = 0,
+                otpCanResend = false,
                 identities = emptyList(),
                 sessions = emptyList(),
             )
@@ -358,13 +373,27 @@ class AccountViewModel @Inject constructor(
         updateExportCapability(false)
         mutableState.update {
             it.copy(
+                // Remote actions remain fail-closed through the revoked lease and
+                // LOADING phase. Preserving an OTP/OAuth context is not active work:
+                // local logout and account deletion must remain reachable.
                 busy = logoutInProgress || dataRightsInProgress,
-                challenge = null,
+                challenge = if (preserveExternalAuthorization) it.challenge else null,
+                otpInputType = if (preserveExternalAuthorization) it.otpInputType else null,
+                otpTargetDraft = if (preserveExternalAuthorization) it.otpTargetDraft else "",
+                otpCodeDraft = if (preserveExternalAuthorization) it.otpCodeDraft else "",
+                otpSecondsUntilResend = if (preserveExternalAuthorization) it.otpSecondsUntilResend else 0,
+                otpSecondsUntilExpiry = if (preserveExternalAuthorization) it.otpSecondsUntilExpiry else 0,
+                otpCanResend = preserveExternalAuthorization && it.otpCanResend,
                 identities = emptyList(),
                 sessions = emptyList(),
             )
         }
-        if (!preserveExternalAuthorization) clearExternalAuthorization()
+        if (!preserveExternalAuthorization) {
+            pendingOtpTarget = null
+            otpChallengeTimerJob?.cancel()
+            otpChallengeTimerJob = null
+            clearExternalAuthorization()
+        }
     }
 
     private fun launchRemoteAction(
@@ -407,8 +436,10 @@ class AccountViewModel @Inject constructor(
         }
     }
 
-    fun restore() {
-        launchRemoteAction { generation ->
+    private fun restoreTrustedSession() {
+        // The trusted READY transition is the only caller allowed to replace the
+        // temporary loading lock with a session restore. User actions remain blocked.
+        launchRemoteAction(allowBusy = true) { generation ->
             updateRemoteState(generation) {
                 it.copy(status = AccountStatus.CHECKING, busy = true, message = null)
             }
@@ -417,17 +448,29 @@ class AccountViewModel @Inject constructor(
             when (val outcome = repository.restoreSession()) {
                 is AuthOutcome.Success -> {
                     updateRemoteState(generation) {
-                        it.copy(
-                            status = if (outcome.value == null) AccountStatus.GUEST else AccountStatus.SIGNED_IN,
-                            busy = false,
+                        val restoredStatus = if (outcome.value == null) {
+                            AccountStatus.GUEST
+                        } else {
+                            AccountStatus.SIGNED_IN
+                        }
+                        it.copy(status = restoredStatus, busy = false)
+                    }
+                    if (remoteAccessIsCurrent(generation)) {
+                        reconcileOtpChallengeForStatus(
+                            if (outcome.value == null) AccountStatus.GUEST else AccountStatus.SIGNED_IN,
                         )
                     }
                     if (remoteAccessIsCurrent(generation) && outcome.value != null) {
                         refreshSecurityData(allowCurrentAction = true)
                     }
                 }
-                is AuthOutcome.Failure -> updateRemoteState(generation) {
-                    it.copy(status = AccountStatus.GUEST, busy = false, message = outcome.message)
+                is AuthOutcome.Failure -> {
+                    updateRemoteState(generation) {
+                        it.copy(status = AccountStatus.GUEST, busy = false, message = outcome.message)
+                    }
+                    if (remoteAccessIsCurrent(generation)) {
+                        reconcileOtpChallengeForStatus(AccountStatus.GUEST)
+                    }
                 }
             }
         }
@@ -443,11 +486,21 @@ class AccountViewModel @Inject constructor(
         deletionExplicitlyDisabled = false
         dataRightsInProgress = true
         val accountEpoch = localAccountEpoch
+        pendingOtpTarget = null
+        otpChallengeTimerJob?.cancel()
+        otpChallengeTimerJob = null
         mutableState.update {
             it.copy(
                 status = AccountStatus.CHECKING,
                 busy = true,
                 challenge = null,
+                authStep = AccountAuthStep.CHOOSE,
+                otpInputType = null,
+                otpTargetDraft = "",
+                otpCodeDraft = "",
+                otpSecondsUntilResend = 0,
+                otpSecondsUntilExpiry = 0,
+                otpCanResend = false,
                 identities = emptyList(),
                 sessions = emptyList(),
                 dataExportEnabled = false,
@@ -512,11 +565,118 @@ class AccountViewModel @Inject constructor(
         }
     }
 
+    fun selectOtpInputType(type: AuthIdentityType) {
+        if (type !in setOf(AuthIdentityType.PHONE, AuthIdentityType.EMAIL)) return
+        mutableState.update {
+            if (it.challenge != null || it.otpInputType == type) {
+                it
+            } else {
+                it.copy(
+                    otpInputType = type,
+                    otpTargetDraft = "",
+                    otpCodeDraft = "",
+                )
+            }
+        }
+    }
+
+    fun updateOtpTargetDraft(type: AuthIdentityType, rawTarget: String) {
+        if (type !in setOf(AuthIdentityType.PHONE, AuthIdentityType.EMAIL)) return
+        val sanitized = when (type) {
+            AuthIdentityType.PHONE -> sanitizePhoneDraft(rawTarget)
+            AuthIdentityType.EMAIL -> rawTarget.take(254)
+            else -> return
+        }
+        mutableState.update {
+            if (it.challenge != null) {
+                it
+            } else {
+                it.copy(
+                    otpInputType = type,
+                    otpTargetDraft = sanitized,
+                    otpCodeDraft = "",
+                )
+            }
+        }
+    }
+
+    fun updateOtpCodeDraft(rawCode: String) {
+        val code = rawCode.filter(Char::isDigit).take(6)
+        mutableState.update {
+            if (it.challenge == null) it else it.copy(otpCodeDraft = code)
+        }
+    }
+
     fun requestCode(type: AuthIdentityType, purpose: OtpPurpose, target: String) {
-        if (!otpCapabilityIsReady(type, purpose)) return
+        if (mutableState.value.challenge != null || !otpCapabilityIsReady(type, purpose)) return
+        requestCodeInternal(type, purpose, target, resendRequestedAt = null)
+    }
+
+    fun resendCode() = resendCode(Instant.now())
+
+    internal fun resendCode(now: Instant) {
+        val snapshot = mutableState.value
+        val challenge = snapshot.challenge ?: return
+        if (snapshot.busy || !otpCapabilityIsReady(challenge.type, challenge.purpose)) return
+        if (!challenge.expiresAt.isAfter(now)) {
+            expireOtpChallenge(challenge)
+            return
+        }
+        if (challenge.resendAvailableAt.isAfter(now)) {
+            refreshOtpChallengeTiming(now)
+            return
+        }
+        val target = pendingOtpTarget
+        if (target == null) {
+            clearChallenge(
+                message = if (challenge.type == AuthIdentityType.EMAIL) {
+                    "为保护邮箱，App 重启后请重新输入邮箱并获取验证码"
+                } else {
+                    "为保护手机号，App 重启后请重新输入手机号并获取验证码"
+                },
+            )
+            return
+        }
+        requestCodeInternal(challenge.type, challenge.purpose, target, resendRequestedAt = now)
+    }
+
+    private fun requestCodeInternal(
+        type: AuthIdentityType,
+        purpose: OtpPurpose,
+        target: String,
+        resendRequestedAt: Instant?,
+    ) {
         launchRemoteAction { generation ->
+            if (resendRequestedAt == null) pendingOtpTarget = null
             updateRemoteState(generation) {
-                it.copy(busy = true, challenge = null, message = null)
+                val retainedChallenge = if (resendRequestedAt == null) {
+                    null
+                } else {
+                    it.challenge?.copy(
+                        resendAvailableAt = resendRequestedAt.plusSeconds(RESEND_RETRY_COOLDOWN_SECONDS),
+                    )
+                }
+                it.copy(
+                    busy = true,
+                    challenge = retainedChallenge,
+                    authStep = purpose.toAuthStep(),
+                    otpInputType = type,
+                    otpCodeDraft = "",
+                    otpSecondsUntilResend = if (resendRequestedAt == null) {
+                        0
+                    } else {
+                        RESEND_RETRY_COOLDOWN_SECONDS
+                    },
+                    otpSecondsUntilExpiry = if (
+                        resendRequestedAt != null && retainedChallenge != null
+                    ) {
+                        secondsUntil(resendRequestedAt, retainedChallenge.expiresAt)
+                    } else {
+                        0
+                    },
+                    otpCanResend = resendRequestedAt != null && pendingOtpTarget != null,
+                    message = null,
+                )
             }
             val outcome = when (type) {
                 AuthIdentityType.PHONE -> repository.requestPhoneCode(target, purpose)
@@ -527,15 +687,41 @@ class AccountViewModel @Inject constructor(
                 )
             }
             when (outcome) {
-                is AuthOutcome.Success -> updateRemoteState(generation) {
-                    it.copy(
-                        busy = false,
-                        challenge = outcome.value.toPending(purpose),
-                        message = "验证码已发送至 ${outcome.value.maskedTarget}",
-                    )
+                is AuthOutcome.Success -> {
+                    if (!remoteAccessIsCurrent(generation)) return@launchRemoteAction
+                    pendingOtpTarget = target.trim()
+                    val pending = outcome.value.toPending(purpose)
+                    val now = Instant.now()
+                    updateRemoteState(generation) {
+                        it.copy(
+                            busy = false,
+                            challenge = pending,
+                            otpTargetDraft = "",
+                            otpCodeDraft = "",
+                            otpSecondsUntilResend = secondsUntil(now, pending.resendAvailableAt),
+                            otpSecondsUntilExpiry = secondsUntil(now, pending.expiresAt),
+                            otpCanResend = true,
+                            message = "验证码已发送至 ${outcome.value.maskedTarget}",
+                        )
+                    }
+                    if (remoteAccessIsCurrent(generation)) scheduleOtpChallengeTimer(pending)
                 }
                 is AuthOutcome.Failure -> updateRemoteState(generation) {
-                    it.copy(busy = false, message = outcome.message)
+                    it.copy(
+                        busy = false,
+                        message = if (
+                            resendRequestedAt != null &&
+                            outcome.kind in setOf(
+                                AuthFailureKind.NETWORK,
+                                AuthFailureKind.TIMEOUT,
+                                AuthFailureKind.UNKNOWN,
+                            )
+                        ) {
+                            "发送状态暂不确定，请稍候后手动重试；App 不会自动重发"
+                        } else {
+                            outcome.message
+                        },
+                    )
                 }
             }
         }
@@ -543,7 +729,18 @@ class AccountViewModel @Inject constructor(
 
     fun submitLoginCode(otpCode: String) {
         val challenge = mutableState.value.challenge
-        if (challenge?.purpose != OtpPurpose.LOGIN || !otpCapabilityIsReady(challenge.type, challenge.purpose)) return
+        if (
+            challenge?.purpose !in setOf(OtpPurpose.LOGIN, OtpPurpose.REGISTER) ||
+            challenge == null ||
+            !otpCapabilityIsReady(challenge.type, challenge.purpose)
+        ) return
+        val phoneNumber = pendingOtpTarget?.takeIf { challenge.type == AuthIdentityType.PHONE }
+        if (challenge.type == AuthIdentityType.PHONE && phoneNumber == null) {
+            mutableState.update {
+                it.copy(message = "为保护手机号，App 重启后需重新发送验证码")
+            }
+            return
+        }
         launchRemoteAction { generation ->
             updateRemoteState(generation) { it.copy(busy = true, message = null) }
             cancelExportJob()
@@ -552,11 +749,22 @@ class AccountViewModel @Inject constructor(
                     challenge.type,
                     challenge.challengeId,
                     otpCode.trim(),
+                    phoneNumber,
                 )
             ) {
-                is AuthOutcome.Success -> signedIn(outcome.value, generation)
+                is AuthOutcome.Success -> signedIn(
+                    outcome.value,
+                    generation,
+                    message = if (challenge.type == AuthIdentityType.PHONE) {
+                        "手机号验证成功，已登录"
+                    } else "登录成功",
+                )
                 is AuthOutcome.Failure -> updateRemoteState(generation) {
-                    it.copy(busy = false, message = outcome.message)
+                    it.copy(
+                        busy = false,
+                        otpCodeDraft = "",
+                        message = outcome.message,
+                    )
                 }
             }
         }
@@ -575,15 +783,29 @@ class AccountViewModel @Inject constructor(
                 )
             ) {
                 is AuthOutcome.Success -> {
+                    pendingOtpTarget = null
+                    otpChallengeTimerJob?.cancel()
+                    otpChallengeTimerJob = null
                     updateRemoteState(generation) {
-                        it.copy(busy = false, challenge = null, message = "身份已安全绑定")
+                        it.copy(
+                            busy = false,
+                            challenge = null,
+                            authStep = AccountAuthStep.CHOOSE,
+                            otpInputType = null,
+                            otpTargetDraft = "",
+                            otpCodeDraft = "",
+                            otpSecondsUntilResend = 0,
+                            otpSecondsUntilExpiry = 0,
+                            otpCanResend = false,
+                            message = "身份已安全绑定",
+                        )
                     }
                     if (remoteAccessIsCurrent(generation)) {
                         refreshSecurityData(allowCurrentAction = true)
                     }
                 }
                 is AuthOutcome.Failure -> updateRemoteState(generation) {
-                    it.copy(busy = false, message = outcome.message)
+                    it.copy(busy = false, otpCodeDraft = "", message = outcome.message)
                 }
             }
         }
@@ -591,48 +813,9 @@ class AccountViewModel @Inject constructor(
 
     fun startWechatLogin() = beginWechatAuthorization(OAuthPurpose.LOGIN)
 
-    fun startFusionLogin(activity: Activity) = beginFusionAuthorization(
-        activity = activity,
-        purpose = FusionAuthPurpose.LOGIN,
-    )
-
-    fun startFusionRegistration(activity: Activity) = beginFusionAuthorization(
-        activity = activity,
-        purpose = FusionAuthPurpose.REGISTER,
-    )
-
-    fun reportFusionPermissionDenied() {
-        mutableState.update {
-            it.copy(message = "需要电话状态权限才能由运营商完成本机号码验证")
-        }
-    }
-
-    /** Page disposal must invalidate both an active SDK scene and a staged phone proof. */
-    fun cancelFusionForPageExit() {
-        rejectFusionEvent()
-        if (pendingWechatAction?.fusionPhoneProof != null) rejectWechatEvent()
-    }
-
     fun startQqLogin(activity: Activity) = beginQqAuthorization(activity, OAuthPurpose.LOGIN)
 
     internal fun startQqLogin(host: QqLoginHost) = beginQqAuthorization(host, OAuthPurpose.LOGIN)
-
-    fun submitPhoneWechatRegistration(otpCode: String) {
-        val challenge = mutableState.value.challenge
-        if (
-            challenge?.purpose != OtpPurpose.REGISTER ||
-            challenge.type != AuthIdentityType.PHONE ||
-            !otpCode.trim().matches(OTP_CODE_PATTERN)
-        ) {
-            mutableState.update { it.copy(message = "请先完成手机号验证码申请并输入 6 位验证码") }
-            return
-        }
-        beginWechatAuthorization(
-            purpose = OAuthPurpose.REGISTER,
-            phoneChallengeId = challenge.challengeId,
-            phoneOtpCode = otpCode.trim(),
-        )
-    }
 
     fun startQqBind(activity: Activity) {
         if (mutableState.value.status != AccountStatus.SIGNED_IN || !qqCapabilityIsReady()) return
@@ -642,6 +825,11 @@ class AccountViewModel @Inject constructor(
     internal fun startQqBind(host: QqLoginHost) {
         if (mutableState.value.status != AccountStatus.SIGNED_IN || !qqCapabilityIsReady()) return
         beginQqAuthorization(host, OAuthPurpose.BIND)
+    }
+
+    fun startWechatBind() {
+        if (mutableState.value.status != AccountStatus.SIGNED_IN || !wechatCapabilityIsReady()) return
+        beginWechatAuthorization(OAuthPurpose.BIND)
     }
 
     fun refreshSecurityData() = refreshSecurityData(allowCurrentAction = false)
@@ -674,6 +862,16 @@ class AccountViewModel @Inject constructor(
                     },
                     message = firstFailure?.message,
                 )
+            }
+            if (
+                remoteAccessIsCurrent(generation) &&
+                identities is AuthOutcome.Success &&
+                identities.value.any { it.type == AuthIdentityType.EMAIL }
+            ) {
+                val challenge = mutableState.value.challenge
+                if (challenge?.type == AuthIdentityType.EMAIL && challenge.purpose == OtpPurpose.BIND) {
+                    clearChallenge()
+                }
             }
             if (
                 remoteAccessIsCurrent(generation) &&
@@ -801,6 +999,9 @@ class AccountViewModel @Inject constructor(
         dataRightsJob?.cancel()
         dataRightsJob = null
         dataRightsInProgress = false
+        pendingOtpTarget = null
+        otpChallengeTimerJob?.cancel()
+        otpChallengeTimerJob = null
         clearExternalAuthorization()
         val exportCapability = mutableState.value.dataExportEnabled
         mutableState.value = AccountUiState(
@@ -852,6 +1053,9 @@ class AccountViewModel @Inject constructor(
             cancelExportJob()
             when (val outcome = repository.deleteAccount()) {
                 is AuthOutcome.Success -> if (accountEpoch == localAccountEpoch) {
+                    pendingOtpTarget = null
+                    otpChallengeTimerJob?.cancel()
+                    otpChallengeTimerJob = null
                     mutableState.value = AccountUiState(
                         status = AccountStatus.GUEST,
                         message = "账号已停用，个人信息将按公示期限清理",
@@ -877,8 +1081,25 @@ class AccountViewModel @Inject constructor(
         }
     }
 
-    fun clearChallenge() {
-        mutableState.update { it.copy(challenge = null) }
+    fun clearChallenge() = clearChallenge(message = null)
+
+    private fun clearChallenge(message: String?) {
+        pendingOtpTarget = null
+        otpChallengeTimerJob?.cancel()
+        otpChallengeTimerJob = null
+        mutableState.update {
+            it.copy(
+                challenge = null,
+                authStep = AccountAuthStep.CHOOSE,
+                otpInputType = null,
+                otpTargetDraft = "",
+                otpCodeDraft = "",
+                otpSecondsUntilResend = 0,
+                otpSecondsUntilExpiry = 0,
+                otpCanResend = false,
+                message = message ?: it.message,
+            )
+        }
     }
 
     fun consumeMessage() {
@@ -925,9 +1146,13 @@ class AccountViewModel @Inject constructor(
     private suspend fun signedIn(
         @Suppress("UNUSED_PARAMETER") session: LocalAuthSession,
         generation: Long,
+        message: String = "登录成功",
     ) {
         if (!remoteAccessIsCurrent(generation)) return
         cancelExportJob()
+        pendingOtpTarget = null
+        otpChallengeTimerJob?.cancel()
+        otpChallengeTimerJob = null
         updateRemoteState(generation) {
             it.copy(
                 status = AccountStatus.SIGNED_IN,
@@ -938,7 +1163,14 @@ class AccountViewModel @Inject constructor(
                 export = null,
                 exportBusy = false,
                 includeBehaviorHistory = true,
-                message = "登录成功",
+                authStep = AccountAuthStep.CHOOSE,
+                otpInputType = null,
+                otpTargetDraft = "",
+                otpCodeDraft = "",
+                otpSecondsUntilResend = 0,
+                otpSecondsUntilExpiry = 0,
+                otpCanResend = false,
+                message = message,
             )
         }
         if (remoteAccessIsCurrent(generation)) {
@@ -946,127 +1178,33 @@ class AccountViewModel @Inject constructor(
         }
     }
 
-    private fun beginFusionAuthorization(
-        activity: Activity,
-        purpose: FusionAuthPurpose,
-    ) {
-        val manager = fusionAuth ?: return
-        if (!fusionPurposeIsReady(purpose) || manager.hasActiveSession) return
-        launchRemoteAction { generation ->
-            updateRemoteState(generation) { it.copy(busy = true, message = null) }
-            when (val token = repository.requestFusionToken(purpose)) {
-                is AuthOutcome.Failure -> updateRemoteState(generation) {
-                    it.copy(busy = false, message = token.message)
-                }
-                is AuthOutcome.Success -> {
-                    if (!remoteAccessIsCurrent(generation) || !fusionPurposeIsReady(purpose)) {
-                        updateRemoteState(generation) { it.copy(busy = false) }
-                        return@launchRemoteAction
-                    }
-                    when (
-                        val start = manager.start(
-                            host = activity.toFusionAuthHost(),
-                            configurationGeneration = latestConfigGeneration,
-                            purpose = purpose,
-                            serverEnabled = activeCapabilities?.fusionEnabled == true,
-                            token = token.value,
-                        )
-                    ) {
-                        is FusionAuthStartResult.Started ->
-                            scheduleFusionSceneTimeout(start.sessionId)
-                        is FusionAuthStartResult.Rejected -> updateRemoteState(generation) {
-                            it.copy(busy = false, message = start.userMessage())
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     private fun beginWechatAuthorization(
         purpose: OAuthPurpose,
-        phoneChallengeId: String? = null,
-        phoneOtpCode: String? = null,
-        fusionPhoneProof: PendingFusionPhoneProof? = null,
         allowBusy: Boolean = false,
     ): Boolean {
-        if (
-            !wechatPurposeIsReady(
-                purpose,
-                fusionRegistration = fusionPhoneProof != null,
-            ) || pendingWechatAction != null
-        ) {
-            fusionPhoneProof?.discard()
-            return false
-        }
-        val registrationFactorsAreValid = when (purpose) {
-            OAuthPurpose.REGISTER -> {
-                val hasSmsProof = phoneChallengeId != null && phoneOtpCode != null
-                val hasFusionProof = fusionPhoneProof != null
-                hasSmsProof.xor(hasFusionProof) &&
-                    (hasFusionProof || phoneChallengeId != null && phoneOtpCode != null)
-            }
-            OAuthPurpose.LOGIN, OAuthPurpose.BIND ->
-                phoneChallengeId == null && phoneOtpCode == null && fusionPhoneProof == null
-        }
-        if (!registrationFactorsAreValid) {
-            fusionPhoneProof?.discard()
-            return false
-        }
+        if (!wechatPurposeIsReady(purpose) || pendingWechatAction != null) return false
         val launched = launchRemoteAction(allowBusy = allowBusy) { generation ->
-            updateRemoteState(generation) { it.copy(busy = true, message = null) }
-            val fusionProofId = fusionPhoneProof?.idForOAuthState(
-                configurationGeneration = latestConfigGeneration,
-                authorizationGeneration = externalAuthorizationGeneration,
+            updateRemoteState(generation) {
+                it.copy(busy = true, authStep = purpose.toWechatStep(), message = null)
+            }
+            val stateOutcome = repository.createOAuthState(
+                provider = AuthIdentityType.WECHAT,
+                purpose = purpose,
             )
-            if (fusionPhoneProof != null && fusionProofId == null) {
-                fusionPhoneProof.discard()
-                updateRemoteState(generation) {
-                    it.copy(busy = false, message = "手机号验证证明已失效，请重新验证")
-                }
-                return@launchRemoteAction
-            }
-            val stateOutcome = if (fusionProofId != null) {
-                repository.createWechatRegistrationStateForFusion(fusionProofId)
-            } else {
-                repository.createOAuthState(
-                    provider = AuthIdentityType.WECHAT,
-                    purpose = purpose,
-                    phoneChallengeId = phoneChallengeId,
-                )
-            }
             when (stateOutcome) {
-                is AuthOutcome.Failure -> {
-                    fusionPhoneProof?.discard()
-                    updateRemoteState(generation) {
-                        it.copy(busy = false, message = stateOutcome.message)
-                    }
+                is AuthOutcome.Failure -> updateRemoteState(generation) {
+                    it.copy(busy = false, message = stateOutcome.message)
                 }
                 is AuthOutcome.Success -> {
-                    if (
-                        !remoteAccessIsCurrent(generation) ||
-                        !wechatPurposeIsReady(
-                            purpose,
-                            fusionRegistration = fusionPhoneProof != null,
-                        )
-                    ) {
-                        fusionPhoneProof?.discard()
-                        return@launchRemoteAction
-                    }
+                    if (!remoteAccessIsCurrent(generation) || !wechatPurposeIsReady(purpose)) return@launchRemoteAction
                     val expiresAt = runCatching { Instant.parse(stateOutcome.value.expiresAt) }.getOrNull()
                     if (expiresAt == null) {
-                        fusionPhoneProof?.discard()
                         updateRemoteState(generation) {
                             it.copy(busy = false, message = "微信授权状态未通过安全校验")
                         }
                         return@launchRemoteAction
                     }
-                    val action = PendingWechatAction(
-                        purpose = purpose,
-                        phoneChallengeId = phoneChallengeId,
-                        phoneOtpCode = phoneOtpCode,
-                        fusionPhoneProof = fusionPhoneProof,
-                    )
+                    val action = PendingWechatAction(purpose)
                     pendingWechatAction = action
                     when (
                         val start = try {
@@ -1078,15 +1216,15 @@ class AccountViewModel @Inject constructor(
                         } catch (error: CancellationException) {
                             if (pendingWechatAction === action) {
                                 pendingWechatAction = null
-                                action.discardFusionProof()
                             }
                             throw error
                         }
                     ) {
-                        WechatOAuthStartResult.Started -> Unit
+                        WechatOAuthStartResult.Started -> {
+                            scheduleWechatAuthorizationTimeout(action)
+                        }
                         is WechatOAuthStartResult.Failed -> {
                             pendingWechatAction = null
-                            action.discardFusionProof()
                             updateRemoteState(generation) {
                                 it.copy(busy = false, message = start.reason.userMessage())
                             }
@@ -1095,26 +1233,7 @@ class AccountViewModel @Inject constructor(
                 }
             }
         }
-        if (!launched) fusionPhoneProof?.discard()
         return launched
-    }
-
-    private fun scheduleFusionSceneTimeout(sessionId: String) {
-        fusionSceneTimeoutJob?.cancel()
-        fusionSceneTimeoutJob = viewModelScope.launch {
-            delay(FUSION_SCENE_TIMEOUT_MILLIS)
-            val manager = fusionAuth
-            val isCurrent = manager?.hasActiveSession == true &&
-                manager.activeSessionId == sessionId
-            if (!isCurrent) return@launch
-            pendingFusionRegistrationProof?.discard()
-            pendingFusionRegistrationProof = null
-            pendingFusionRegistrationSessionId = null
-            manager.cancel()
-            mutableState.update {
-                it.copy(busy = false, message = "手机号一键验证已超时，请重新发起")
-            }
-        }
     }
 
     private fun beginQqAuthorization(
@@ -1132,7 +1251,9 @@ class AccountViewModel @Inject constructor(
             pendingQqAction != null
         ) return
         launchRemoteAction { generation ->
-            updateRemoteState(generation) { it.copy(busy = true, message = null) }
+            updateRemoteState(generation) {
+                it.copy(busy = true, authStep = purpose.toQqStep(), message = null)
+            }
             when (
                 val stateOutcome = repository.createOAuthState(
                     provider = AuthIdentityType.QQ,
@@ -1153,7 +1274,7 @@ class AccountViewModel @Inject constructor(
                         }
                         return@launchRemoteAction
                     }
-                    val action = PendingQqAction(purpose)
+                    val action = PendingQqAction(purpose, localAccountEpoch)
                     pendingQqAction = action
                     when (
                         val start = try {
@@ -1168,7 +1289,7 @@ class AccountViewModel @Inject constructor(
                             throw error
                         }
                     ) {
-                        QqOAuthStartResult.Started -> Unit
+                        QqOAuthStartResult.Started -> scheduleQqAuthorizationTimeout(action)
                         is QqOAuthStartResult.Failed -> {
                             pendingQqAction = null
                             updateRemoteState(generation) {
@@ -1182,6 +1303,7 @@ class AccountViewModel @Inject constructor(
     }
 
     private fun handleWechatEvent(event: WechatOAuthEvent) {
+        cancelWechatAuthorizationTimeout()
         if (event is WechatOAuthEvent.Failed && event.reason == WechatOAuthFailure.PRIVACY_REQUIRED) {
             revokeRemoteActions(preserveExternalAuthorization = false)
             return
@@ -1209,6 +1331,7 @@ class AccountViewModel @Inject constructor(
     }
 
     private fun handleQqEvent(event: QqOAuthEvent) {
+        cancelQqAuthorizationTimeout()
         if (event is QqOAuthEvent.Failed && event.reason == QqOAuthFailure.PRIVACY_REQUIRED) {
             revokeRemoteActions(preserveExternalAuthorization = false)
             return
@@ -1235,41 +1358,6 @@ class AccountViewModel @Inject constructor(
         }
     }
 
-    private fun handleFusionEvent(event: FusionAuthEvent) {
-        if (event is FusionAuthEvent.PrivacyRevoked) {
-            clearExternalAuthorization()
-            return
-        }
-        if (event.configurationGeneration != latestConfigGeneration) {
-            rejectFusionEvent(event)
-            return
-        }
-        if (!runtimeAppVersionGate.currentState.remoteFeaturesAllowed) {
-            if (runtimeAppVersionGate.currentState.status ==
-                RuntimeAppVersionGate.Status.UPDATE_REQUIRED
-            ) {
-                rejectFusionEvent(event)
-            } else {
-                stageFusionEvent(event)
-            }
-            return
-        }
-        when (configPhase) {
-            AccountConfigPhase.LOADING -> stageFusionEvent(event)
-            AccountConfigPhase.READY -> {
-                val purpose = (event as? FusionAuthEvent.ProofReady)?.purpose
-                if (purpose == null || fusionPurposeIsReady(purpose)) {
-                    consumeFusionEvent(event)
-                } else {
-                    rejectFusionEvent(event)
-                }
-            }
-            AccountConfigPhase.UNAVAILABLE,
-            AccountConfigPhase.INCOMPATIBLE,
-            -> rejectFusionEvent(event)
-        }
-    }
-
     private fun stageWechatEvent(event: WechatOAuthEvent) {
         if (stagedWechatEvent == null) {
             stagedWechatEvent = event
@@ -1288,16 +1376,6 @@ class AccountViewModel @Inject constructor(
         mutableState.update { it.copy(busy = false) }
     }
 
-    private fun stageFusionEvent(event: FusionAuthEvent) {
-        if (stagedFusionEvent == null) {
-            stagedFusionEvent = event
-        } else if (event is FusionAuthEvent.ProofReady) {
-            event.verifyToken.discard()
-            fusionAuth?.completeProof(event.proofId, false)
-        }
-        mutableState.update { it.copy(busy = false) }
-    }
-
     private fun resumeStagedAuthorization(): Boolean {
         stagedWechatEvent?.let { event ->
             stagedWechatEvent = null
@@ -1309,131 +1387,12 @@ class AccountViewModel @Inject constructor(
             handleQqEvent(event)
             return true
         }
-        stagedFusionEvent?.let { event ->
-            stagedFusionEvent = null
-            handleFusionEvent(event)
-            return true
-        }
         return false
     }
-
-    private fun consumeFusionEvent(event: FusionAuthEvent) {
-        when (event) {
-            FusionAuthEvent.PrivacyRevoked -> clearExternalAuthorization()
-            is FusionAuthEvent.SceneCompleted -> {
-                fusionSceneTimeoutJob?.cancel()
-                fusionSceneTimeoutJob = null
-                if (event.purpose != FusionAuthPurpose.REGISTER) return
-                val proof = pendingFusionRegistrationProof
-                    .takeIf { pendingFusionRegistrationSessionId == event.sessionId }
-                pendingFusionRegistrationProof = null
-                pendingFusionRegistrationSessionId = null
-                if (proof == null) {
-                    mutableState.update {
-                        it.copy(busy = false, message = "手机号注册流程已失效，请重新开始")
-                    }
-                    return
-                }
-                if (
-                    !beginWechatAuthorization(
-                        purpose = OAuthPurpose.REGISTER,
-                        fusionPhoneProof = proof,
-                        allowBusy = true,
-                    )
-                ) {
-                    proof.discard()
-                    mutableState.update {
-                        it.copy(busy = false, message = "暂时无法继续微信授权，请重新开始注册")
-                    }
-                }
-            }
-            is FusionAuthEvent.Failed -> {
-                fusionSceneTimeoutJob?.cancel()
-                fusionSceneTimeoutJob = null
-                pendingFusionRegistrationProof?.discard()
-                pendingFusionRegistrationProof = null
-                pendingFusionRegistrationSessionId = null
-                mutableState.update {
-                    it.copy(busy = false, message = "手机号一键验证未完成，请重试")
-                }
-            }
-            is FusionAuthEvent.ProofReady -> {
-                if (!fusionPurposeIsReady(event.purpose)) {
-                    rejectFusionEvent(event)
-                    return
-                }
-                val launched = launchRemoteAction(allowBusy = true) { generation ->
-                    updateRemoteState(generation) { it.copy(busy = true, message = null) }
-                    val verifyToken = event.verifyToken.consume()
-                    if (verifyToken == null) {
-                        fusionAuth?.completeProof(event.proofId, false)
-                        updateRemoteState(generation) {
-                            it.copy(busy = false, message = "手机号一键验证结果已使用，请重新验证")
-                        }
-                        return@launchRemoteAction
-                    }
-                    when (event.purpose) {
-                        FusionAuthPurpose.LOGIN -> {
-                            val outcome = repository.loginWithFusion(event.flowId, verifyToken)
-                            fusionAuth?.completeProof(
-                                proofId = event.proofId,
-                                success = outcome is AuthOutcome.Success,
-                            )
-                            when (outcome) {
-                                is AuthOutcome.Success -> signedIn(outcome.value, generation)
-                                is AuthOutcome.Failure -> updateRemoteState(generation) {
-                                    it.copy(busy = false, message = outcome.message)
-                                }
-                            }
-                        }
-                        FusionAuthPurpose.REGISTER -> {
-                            when (
-                                val outcome = repository.verifyFusionForRegistration(
-                                    event.flowId,
-                                    verifyToken,
-                                )
-                            ) {
-                                is AuthOutcome.Failure -> {
-                                    fusionAuth?.completeProof(event.proofId, false)
-                                    updateRemoteState(generation) {
-                                        it.copy(busy = false, message = outcome.message)
-                                    }
-                                }
-                                is AuthOutcome.Success -> {
-                                    val phoneProof = PendingFusionPhoneProof.from(
-                                        response = outcome.value,
-                                        configurationGeneration = latestConfigGeneration,
-                                        authorizationGeneration = externalAuthorizationGeneration,
-                                    )
-                                    if (phoneProof == null) {
-                                        fusionAuth?.completeProof(event.proofId, false)
-                                        updateRemoteState(generation) {
-                                            it.copy(
-                                                busy = false,
-                                                message = "手机号验证证明未通过安全校验",
-                                            )
-                                        }
-                                        return@launchRemoteAction
-                                    }
-                                    // The phone provider scene is closed before WeChat is opened.
-                                    pendingFusionRegistrationProof?.discard()
-                                    pendingFusionRegistrationProof = phoneProof
-                                    pendingFusionRegistrationSessionId = event.sessionId
-                                    fusionAuth?.completeProof(event.proofId, true)
-                                }
-                            }
-                        }
-                    }
-                }
-                if (!launched) rejectFusionEvent(event)
-            }
-        }
-    }
-
     private fun consumeWechatEvent(event: WechatOAuthEvent) {
         when (event) {
             is WechatOAuthEvent.Failed -> {
-                pendingWechatAction.also { pendingWechatAction = null }?.discardFusionProof()
+                pendingWechatAction = null
                 mutableState.update {
                     it.copy(busy = false, message = event.reason.userMessage())
                 }
@@ -1443,10 +1402,7 @@ class AccountViewModel @Inject constructor(
                 if (
                     action == null ||
                     action.purpose != event.purpose ||
-                    !wechatPurposeIsReady(
-                        event.purpose,
-                        fusionRegistration = action?.fusionPhoneProof != null,
-                    )
+                    !wechatPurposeIsReady(event.purpose)
                 ) {
                     event.discardProof()
                     mutableState.update {
@@ -1472,68 +1428,23 @@ class AccountViewModel @Inject constructor(
                                 }
                             }
                         }
-                        OAuthPurpose.REGISTER -> {
-                            val fusionPhoneProof = action.fusionPhoneProof
-                            if (fusionPhoneProof != null) {
-                                val phoneProofId = fusionPhoneProof.consume(
-                                    configurationGeneration = latestConfigGeneration,
-                                    authorizationGeneration = externalAuthorizationGeneration,
-                                )
-                                if (phoneProofId == null) {
-                                    event.discardProof()
+                        OAuthPurpose.BIND -> {
+                            val outcome = event.consumeProof { state, authorizationCode ->
+                                repository.bindWithWechat(state, authorizationCode)
+                            }
+                            when (outcome) {
+                                is AuthOutcome.Success -> {
                                     updateRemoteState(generation) {
                                         it.copy(
                                             busy = false,
-                                            message = "手机号验证证明已失效，请重新开始注册",
+                                            authStep = AccountAuthStep.CHOOSE,
+                                            message = "微信身份已安全绑定",
                                         )
                                     }
-                                    return@launchRemoteAction
-                                }
-                                val outcome = event.consumeProof { state, authorizationCode ->
-                                    cancelExportJob()
-                                    repository.registerFusionWechat(
-                                        phoneProofId = phoneProofId,
-                                        oauthState = state,
-                                        authorizationCode = authorizationCode,
-                                    )
-                                }
-                                when (outcome) {
-                                    is AuthOutcome.Success -> signedIn(outcome.value, generation)
-                                    is AuthOutcome.Failure -> updateRemoteState(generation) {
-                                        it.copy(busy = false, message = outcome.message)
-                                    }
-                                    null -> updateRemoteState(generation) {
-                                        it.copy(
-                                            busy = false,
-                                            message = "微信授权流程已使用，请重新发起",
-                                        )
+                                    if (remoteAccessIsCurrent(generation)) {
+                                        refreshSecurityData(allowCurrentAction = true)
                                     }
                                 }
-                                return@launchRemoteAction
-                            }
-                            val challengeId = action.phoneChallengeId
-                            val otpCode = action.phoneOtpCode
-                            if (challengeId == null || otpCode == null) {
-                                event.discardProof()
-                                updateRemoteState(generation) {
-                                    it.copy(
-                                        busy = false,
-                                        message = "手机号与微信注册流程已失效，请重新开始",
-                                    )
-                                }
-                                return@launchRemoteAction
-                            }
-                            val outcome = event.consumeProof { state, authorizationCode ->
-                                cancelExportJob()
-                                repository.registerPhoneWechat(
-                                    challengeId = challengeId,
-                                    otpCode = otpCode,
-                                    oauthState = state,
-                                    authorizationCode = authorizationCode,
-                                )
-                            }
-                            when (outcome) {
-                                is AuthOutcome.Success -> signedIn(outcome.value, generation)
                                 is AuthOutcome.Failure -> updateRemoteState(generation) {
                                     it.copy(busy = false, message = outcome.message)
                                 }
@@ -1542,10 +1453,10 @@ class AccountViewModel @Inject constructor(
                                 }
                             }
                         }
-                        OAuthPurpose.BIND -> {
+                        OAuthPurpose.REGISTER -> {
                             event.discardProof()
                             updateRemoteState(generation) {
-                                it.copy(busy = false, message = "Android 1.0 不支持绑定微信")
+                                it.copy(busy = false, message = "微信不能用于创建新账号")
                             }
                         }
                     }
@@ -1568,6 +1479,7 @@ class AccountViewModel @Inject constructor(
                 if (
                     action == null ||
                     action.purpose != event.purpose ||
+                    action.accountEpoch != localAccountEpoch ||
                     !qqCapabilityIsReady()
                 ) {
                     rejectQqEvent(event)
@@ -1577,9 +1489,9 @@ class AccountViewModel @Inject constructor(
                     updateRemoteState(generation) { it.copy(busy = true, message = null) }
                     when (event.purpose) {
                         OAuthPurpose.LOGIN -> {
-                            val outcome = event.consumeProof { state, accessToken ->
+                            val outcome = event.consumeProof { state, authorizationCode ->
                                 cancelExportJob()
-                                repository.loginWithQq(state, accessToken)
+                                repository.loginWithQq(state, authorizationCode)
                             }
                             when (outcome) {
                                 is AuthOutcome.Success -> signedIn(outcome.value, generation)
@@ -1592,8 +1504,8 @@ class AccountViewModel @Inject constructor(
                             }
                         }
                         OAuthPurpose.BIND -> {
-                            val outcome = event.consumeProof { state, accessToken ->
-                                repository.bindWithQq(state, accessToken)
+                            val outcome = event.consumeProof { state, authorizationCode ->
+                                repository.bindWithQq(state, authorizationCode)
                             }
                             when (outcome) {
                                 is AuthOutcome.Success -> {
@@ -1626,15 +1538,17 @@ class AccountViewModel @Inject constructor(
     }
 
     private fun rejectWechatEvent(event: WechatOAuthEvent? = null) {
+        cancelWechatAuthorizationTimeout()
         if (event is WechatOAuthEvent.Authorized) event.discardProof()
         (stagedWechatEvent as? WechatOAuthEvent.Authorized)?.discardProof()
-        pendingWechatAction.also { pendingWechatAction = null }?.discardFusionProof()
+        pendingWechatAction = null
         stagedWechatEvent = null
         wechatOAuth.cancelAuthorization()
         mutableState.update { it.copy(busy = false) }
     }
 
     private fun rejectQqEvent(event: QqOAuthEvent? = null) {
+        cancelQqAuthorizationTimeout()
         if (event is QqOAuthEvent.Authorized) event.discardProof()
         (stagedQqEvent as? QqOAuthEvent.Authorized)?.discardProof()
         pendingQqAction = null
@@ -1643,53 +1557,80 @@ class AccountViewModel @Inject constructor(
         mutableState.update { it.copy(busy = false) }
     }
 
-    private fun rejectFusionEvent(event: FusionAuthEvent? = null) {
-        fusionSceneTimeoutJob?.cancel()
-        fusionSceneTimeoutJob = null
-        pendingFusionRegistrationProof?.discard()
-        pendingFusionRegistrationProof = null
-        pendingFusionRegistrationSessionId = null
-        if (event is FusionAuthEvent.ProofReady) {
-            event.verifyToken.discard()
-            fusionAuth?.completeProof(event.proofId, false)
-        }
-        (stagedFusionEvent as? FusionAuthEvent.ProofReady)?.let { staged ->
-            staged.verifyToken.discard()
-            fusionAuth?.completeProof(staged.proofId, false)
-        }
-        stagedFusionEvent = null
-        fusionAuth?.cancel()
-        mutableState.update { it.copy(busy = false) }
-    }
-
     private fun clearExternalAuthorization() {
-        externalAuthorizationGeneration += 1
         rejectWechatEvent()
         rejectQqEvent()
-        rejectFusionEvent()
+    }
+
+    private fun scheduleWechatAuthorizationTimeout(action: PendingWechatAction) {
+        cancelWechatAuthorizationTimeout()
+        val launched = viewModelScope.launch {
+            delay(WECHAT_CALLBACK_TIMEOUT_MILLIS)
+            if (pendingWechatAction !== action) return@launch
+            (stagedWechatEvent as? WechatOAuthEvent.Authorized)?.discardProof()
+            stagedWechatEvent = null
+            pendingWechatAction = null
+            wechatOAuth.cancelAuthorization()
+            mutableState.update {
+                it.copy(
+                    busy = false,
+                    authStep = AccountAuthStep.CHOOSE,
+                    message = "微信授权已超时，请重新发起",
+                )
+            }
+        }
+        wechatAuthorizationTimeoutJob = launched
+        launched.invokeOnCompletion {
+            if (wechatAuthorizationTimeoutJob === launched) {
+                wechatAuthorizationTimeoutJob = null
+            }
+        }
+    }
+
+    private fun cancelWechatAuthorizationTimeout() {
+        wechatAuthorizationTimeoutJob?.cancel()
+        wechatAuthorizationTimeoutJob = null
+    }
+
+    private fun scheduleQqAuthorizationTimeout(action: PendingQqAction) {
+        cancelQqAuthorizationTimeout()
+        val launched = viewModelScope.launch {
+            delay(QQ_CALLBACK_TIMEOUT_MILLIS)
+            if (pendingQqAction !== action) return@launch
+            (stagedQqEvent as? QqOAuthEvent.Authorized)?.discardProof()
+            stagedQqEvent = null
+            pendingQqAction = null
+            qqOAuth.cancelAuthorization()
+            mutableState.update {
+                it.copy(
+                    busy = false,
+                    authStep = AccountAuthStep.CHOOSE,
+                    message = "QQ 授权已超时，请重新发起",
+                )
+            }
+        }
+        qqAuthorizationTimeoutJob = launched
+        launched.invokeOnCompletion {
+            if (qqAuthorizationTimeoutJob === launched) {
+                qqAuthorizationTimeoutJob = null
+            }
+        }
+    }
+
+    private fun cancelQqAuthorizationTimeout() {
+        qqAuthorizationTimeoutJob?.cancel()
+        qqAuthorizationTimeoutJob = null
     }
 
     private fun discardAuthorizationsDisabledByLatestConfig() {
         val wechatPurpose = pendingWechatAction?.purpose
         if (
             !wechatCapabilityIsReady() ||
-            wechatPurpose != null && !wechatPurposeIsReady(
-                wechatPurpose,
-                fusionRegistration = pendingWechatAction?.fusionPhoneProof != null,
-            )
+            wechatPurpose != null && !wechatPurposeIsReady(wechatPurpose)
         ) {
             rejectWechatEvent()
         }
         if (!qqCapabilityIsReady()) rejectQqEvent()
-        val fusionPurpose =
-            (stagedFusionEvent as? FusionAuthEvent.ProofReady)?.purpose ?:
-                fusionAuth?.activePurpose
-        if (
-            fusionAuthHasPendingWork() &&
-            (fusionPurpose == null || !fusionPurposeIsReady(fusionPurpose))
-        ) {
-            rejectFusionEvent()
-        }
     }
 
     private fun authenticatedMutation(
@@ -1716,21 +1657,18 @@ class AccountViewModel @Inject constructor(
     }
 
     override fun onCleared() {
-        // Challenges and messages are deliberately memory-only and disappear
-        // with this navigation-scoped ViewModel.
-        pendingWechatAction.also { pendingWechatAction = null }?.discardFusionProof()
+        // OAuth state/code proofs and raw OTP targets remain memory-only.
+        pendingWechatAction = null
+        cancelWechatAuthorizationTimeout()
         pendingQqAction = null
+        cancelQqAuthorizationTimeout()
         (stagedWechatEvent as? WechatOAuthEvent.Authorized)?.discardProof()
         stagedWechatEvent = null
         (stagedQqEvent as? QqOAuthEvent.Authorized)?.discardProof()
         stagedQqEvent = null
-        (stagedFusionEvent as? FusionAuthEvent.ProofReady)?.verifyToken?.discard()
-        stagedFusionEvent = null
-        pendingFusionRegistrationProof?.discard()
-        pendingFusionRegistrationProof = null
-        pendingFusionRegistrationSessionId = null
-        fusionSceneTimeoutJob?.cancel()
-        fusionSceneTimeoutJob = null
+        pendingOtpTarget = null
+        otpChallengeTimerJob?.cancel()
+        otpChallengeTimerJob = null
         remoteAccessGeneration += 1
         remoteActionJob?.cancel()
         remoteActionJob = null
@@ -1742,12 +1680,10 @@ class AccountViewModel @Inject constructor(
         exportJob = null
         wechatOAuth.cancelAuthorization()
         qqOAuth.cancelAuthorization()
-        fusionAuth?.cancel()
         mutableState.value = AccountUiState(
             status = AccountStatus.GUEST,
             wechatClientConfigured = wechatOAuth.clientConfigured,
             qqClientConfigured = qqOAuth.clientConfigured,
-            fusionClientConfigured = fusionAuth?.clientAvailable == true,
         )
         super.onCleared()
     }
@@ -1830,7 +1766,95 @@ class AccountViewModel @Inject constructor(
             challengeId = challengeId,
             maskedTarget = maskedTarget,
             expiresAt = Instant.parse(expiresAt),
+            resendAvailableAt = Instant.parse(resendAvailableAt),
         )
+
+    private fun scheduleOtpChallengeTimer(challenge: PendingOtpChallenge) {
+        otpChallengeTimerJob?.cancel()
+        var observedNow = Instant.now()
+        refreshOtpChallengeTiming(observedNow)
+        if (mutableState.value.challenge?.challengeId != challenge.challengeId) return
+        val launched = viewModelScope.launch {
+            while (mutableState.value.challenge?.challengeId == challenge.challengeId) {
+                delay(OTP_CHALLENGE_TICK_MILLIS)
+                val minimumNextTick = observedNow.plusMillis(OTP_CHALLENGE_TICK_MILLIS)
+                val wallClockNow = Instant.now()
+                observedNow = if (wallClockNow.isAfter(minimumNextTick)) wallClockNow else minimumNextTick
+                if (!refreshOtpChallengeTiming(observedNow)) return@launch
+            }
+        }
+        otpChallengeTimerJob = launched
+        launched.invokeOnCompletion {
+            if (otpChallengeTimerJob === launched) otpChallengeTimerJob = null
+        }
+    }
+
+    internal fun refreshOtpChallengeTiming(now: Instant): Boolean {
+        val challenge = mutableState.value.challenge ?: return false
+        if (!challenge.expiresAt.isAfter(now)) {
+            expireOtpChallenge(challenge)
+            return false
+        }
+        mutableState.update { current ->
+            if (current.challenge?.challengeId != challenge.challengeId) {
+                current
+            } else {
+                current.copy(
+                    otpSecondsUntilResend = secondsUntil(now, challenge.resendAvailableAt),
+                    otpSecondsUntilExpiry = secondsUntil(now, challenge.expiresAt),
+                )
+            }
+        }
+        return true
+    }
+
+    private fun expireOtpChallenge(challenge: PendingOtpChallenge) {
+        if (mutableState.value.challenge?.challengeId != challenge.challengeId) return
+        val rememberedTarget = pendingOtpTarget
+        pendingOtpTarget = null
+        mutableState.update { current ->
+            if (current.challenge?.challengeId != challenge.challengeId) {
+                current
+            } else {
+                current.copy(
+                    challenge = null,
+                    otpInputType = challenge.type,
+                    otpTargetDraft = rememberedTarget.orEmpty(),
+                    otpCodeDraft = "",
+                    otpSecondsUntilResend = 0,
+                    otpSecondsUntilExpiry = 0,
+                    otpCanResend = false,
+                    message = "验证码已过期，请重新获取",
+                )
+            }
+        }
+    }
+
+    private fun reconcileOtpChallengeForStatus(status: AccountStatus) {
+        val challenge = mutableState.value.challenge ?: return
+        val capabilities = activeCapabilities
+        val providerEnabled = when (challenge.type) {
+            AuthIdentityType.PHONE -> capabilities?.phoneEnabled == true
+            AuthIdentityType.EMAIL -> capabilities?.emailEnabled == true
+            else -> false
+        }
+        val statusCompatible = when (status) {
+            AccountStatus.CHECKING -> true
+            AccountStatus.GUEST ->
+                challenge.purpose in setOf(OtpPurpose.LOGIN, OtpPurpose.REGISTER) &&
+                    (challenge.type == AuthIdentityType.PHONE ||
+                        challenge.type == AuthIdentityType.EMAIL && challenge.purpose == OtpPurpose.LOGIN)
+            AccountStatus.SIGNED_IN ->
+                challenge.type == AuthIdentityType.EMAIL && challenge.purpose == OtpPurpose.BIND
+        }
+        if (!providerEnabled || !statusCompatible) clearChallenge()
+    }
+
+    private fun secondsUntil(now: Instant, deadline: Instant): Long {
+        val millis = Duration.between(now, deadline).toMillis()
+        if (millis <= 0L) return 0L
+        return (millis + 999L) / 1_000L
+    }
 
     private fun otpCapabilityIsReady(type: AuthIdentityType, purpose: OtpPurpose): Boolean {
         val capabilities = activeCapabilities ?: return false
@@ -1842,9 +1866,11 @@ class AccountViewModel @Inject constructor(
         }
         if (!providerEnabled) return false
         return when (purpose) {
-            OtpPurpose.LOGIN -> true
+            OtpPurpose.LOGIN -> mutableState.value.status == AccountStatus.GUEST
             OtpPurpose.REGISTER ->
-                type == AuthIdentityType.PHONE && capabilities.registrationEnabled
+                type == AuthIdentityType.PHONE &&
+                    capabilities.registrationEnabled &&
+                    mutableState.value.status == AccountStatus.GUEST
             OtpPurpose.BIND ->
                 type == AuthIdentityType.EMAIL &&
                     mutableState.value.status == AccountStatus.SIGNED_IN
@@ -1854,117 +1880,27 @@ class AccountViewModel @Inject constructor(
     private fun wechatCapabilityIsReady(): Boolean =
         accountsAccessIsReady() && activeCapabilities?.wechatEnabled == true
 
-    private fun wechatPurposeIsReady(
-        purpose: OAuthPurpose,
-        fusionRegistration: Boolean = false,
-    ): Boolean {
+    private fun wechatPurposeIsReady(purpose: OAuthPurpose): Boolean {
         val capabilities = activeCapabilities ?: return false
         if (!wechatCapabilityIsReady()) return false
         return when (purpose) {
-            OAuthPurpose.LOGIN -> true
-            OAuthPurpose.BIND -> false
-            OAuthPurpose.REGISTER ->
-                capabilities.registrationEnabled &&
-                    ((fusionRegistration && capabilities.fusionEnabled) || capabilities.phoneEnabled)
+            OAuthPurpose.LOGIN -> mutableState.value.status == AccountStatus.GUEST
+            OAuthPurpose.BIND -> mutableState.value.status == AccountStatus.SIGNED_IN
+            OAuthPurpose.REGISTER -> false
         }
     }
-
-    private fun fusionPurposeIsReady(purpose: FusionAuthPurpose): Boolean {
-        val capabilities = activeCapabilities ?: return false
-        if (
-            !accountsAccessIsReady() ||
-            mutableState.value.status != AccountStatus.GUEST ||
-            capabilities.fusionEnabled != true ||
-            fusionAuth?.clientAvailable != true
-        ) {
-            return false
-        }
-        return when (purpose) {
-            FusionAuthPurpose.LOGIN -> true
-            FusionAuthPurpose.REGISTER ->
-                capabilities.registrationEnabled &&
-                    capabilities.wechatEnabled &&
-                    mutableState.value.wechatClientConfigured
-        }
-    }
-
-    private fun fusionAuthHasPendingWork(): Boolean =
-        fusionAuth?.hasActiveSession == true || stagedFusionEvent != null
 
     private fun qqCapabilityIsReady(): Boolean =
         accountsAccessIsReady() && activeCapabilities?.qqEnabled == true
 
-    private class PendingWechatAction(
-        val purpose: OAuthPurpose,
-        val phoneChallengeId: String?,
-        val phoneOtpCode: String?,
-        val fusionPhoneProof: PendingFusionPhoneProof? = null,
-    ) {
-        fun discardFusionProof() = fusionPhoneProof?.discard()
-
+    private class PendingWechatAction(val purpose: OAuthPurpose) {
         override fun toString(): String = "PendingWechatAction(purpose=$purpose)"
     }
 
-    private class PendingFusionPhoneProof private constructor(
-        proofId: String,
-        private val expiresAt: Instant,
-        private val configurationGeneration: Long,
-        private val authorizationGeneration: Long,
+    private class PendingQqAction(
+        val purpose: OAuthPurpose,
+        val accountEpoch: Long,
     ) {
-        private val proofId = AtomicReference(proofId)
-
-        fun idForOAuthState(
-            configurationGeneration: Long,
-            authorizationGeneration: Long,
-        ): String? = proofId.get()?.takeIf {
-            isCurrent(configurationGeneration, authorizationGeneration)
-        }
-
-        fun consume(
-            configurationGeneration: Long,
-            authorizationGeneration: Long,
-        ): String? {
-            if (!isCurrent(configurationGeneration, authorizationGeneration)) {
-                discard()
-                return null
-            }
-            return proofId.getAndSet(null)
-        }
-
-        fun discard() {
-            proofId.set(null)
-        }
-
-        private fun isCurrent(
-            configurationGeneration: Long,
-            authorizationGeneration: Long,
-        ): Boolean =
-            this.configurationGeneration == configurationGeneration &&
-                this.authorizationGeneration == authorizationGeneration &&
-                expiresAt.isAfter(Instant.now())
-
-        override fun toString(): String = "PendingFusionPhoneProof(REDACTED)"
-
-        companion object {
-            fun from(
-                response: FusionRegistrationPhoneProof,
-                configurationGeneration: Long,
-                authorizationGeneration: Long,
-            ): PendingFusionPhoneProof? {
-                val expiresAt = runCatching { Instant.parse(response.expiresAt) }.getOrNull()
-                    ?: return null
-                if (!expiresAt.isAfter(Instant.now())) return null
-                return PendingFusionPhoneProof(
-                    proofId = response.proofId,
-                    expiresAt = expiresAt,
-                    configurationGeneration = configurationGeneration,
-                    authorizationGeneration = authorizationGeneration,
-                )
-            }
-        }
-    }
-
-    private class PendingQqAction(val purpose: OAuthPurpose) {
         override fun toString(): String = "PendingQqAction(purpose=$purpose)"
     }
 
@@ -2006,22 +1942,121 @@ class AccountViewModel @Inject constructor(
         -> "暂时无法完成 QQ 授权，请稍后重试"
     }
 
-    private fun FusionAuthStartResult.Rejected.userMessage(): String = when (this) {
-        FusionAuthStartResult.Rejected.PRIVACY_REQUIRED ->
-            "请先同意隐私政策后再使用手机号一键验证"
-        FusionAuthStartResult.Rejected.SERVER_DISABLED,
-        FusionAuthStartResult.Rejected.CLIENT_UNAVAILABLE,
-        -> "当前安装包暂未开放手机号一键验证"
-        FusionAuthStartResult.Rejected.INVALID_TOKEN -> "手机号验证凭证已失效，请重试"
-        FusionAuthStartResult.Rejected.HOST_UNAVAILABLE -> "当前页面暂时无法启动手机号验证，请重试"
-        FusionAuthStartResult.Rejected.BUSY -> "已有手机号验证正在进行，请稍候"
-        FusionAuthStartResult.Rejected.SDK_FAILURE -> "暂时无法启动手机号一键验证，请稍后重试"
+    private fun OtpPurpose.toAuthStep(): AccountAuthStep = when (this) {
+        OtpPurpose.LOGIN -> AccountAuthStep.OTP_LOGIN
+        OtpPurpose.REGISTER -> AccountAuthStep.PHONE_REGISTER
+        OtpPurpose.BIND -> AccountAuthStep.BIND_EMAIL
     }
 
-	private companion object {
-		val OTP_CODE_PATTERN = Regex("^\\d{6}$")
-		const val FUSION_SCENE_TIMEOUT_MILLIS = 90_000L
-	}
+    private fun OAuthPurpose.toWechatStep(): AccountAuthStep = when (this) {
+        OAuthPurpose.LOGIN -> AccountAuthStep.WECHAT_LOGIN
+        OAuthPurpose.BIND -> AccountAuthStep.BIND_WECHAT
+        OAuthPurpose.REGISTER -> AccountAuthStep.CHOOSE
+    }
+
+    private fun OAuthPurpose.toQqStep(): AccountAuthStep = when (this) {
+        OAuthPurpose.LOGIN -> AccountAuthStep.QQ_LOGIN
+        OAuthPurpose.BIND -> AccountAuthStep.BIND_QQ
+        OAuthPurpose.REGISTER -> AccountAuthStep.CHOOSE
+    }
+
+    private fun sanitizePhoneDraft(rawPhone: String): String {
+        val filtered = rawPhone.filter { it.isDigit() || it == '+' }
+        return if (filtered.startsWith('+')) {
+            "+" + filtered.drop(1).filter(Char::isDigit).take(13)
+        } else {
+            filtered.filter(Char::isDigit).take(11)
+        }
+    }
+
+    private fun saveNonSensitiveNavigationState(state: AccountUiState) {
+        savedStateHandle[SAVED_AUTH_STEP] = state.authStep.name
+        val challenge = state.challenge
+        if (challenge == null) {
+            SAVED_CHALLENGE_KEYS.forEach { key -> savedStateHandle.remove<String>(key) }
+            return
+        }
+        savedStateHandle[SAVED_CHALLENGE_TYPE] = challenge.type.name
+        savedStateHandle[SAVED_CHALLENGE_PURPOSE] = challenge.purpose.name
+        savedStateHandle[SAVED_CHALLENGE_ID] = challenge.challengeId
+        savedStateHandle[SAVED_CHALLENGE_MASK] = challenge.maskedTarget
+        savedStateHandle[SAVED_CHALLENGE_EXPIRES_AT] = challenge.expiresAt.toString()
+        savedStateHandle[SAVED_CHALLENGE_RESEND_AT] = challenge.resendAvailableAt.toString()
+    }
+
+    private companion object {
+        const val SAVED_AUTH_STEP = "account.auth.step"
+        const val SAVED_CHALLENGE_TYPE = "account.challenge.type"
+        const val SAVED_CHALLENGE_PURPOSE = "account.challenge.purpose"
+        const val SAVED_CHALLENGE_ID = "account.challenge.id"
+        const val SAVED_CHALLENGE_MASK = "account.challenge.mask"
+        const val SAVED_CHALLENGE_EXPIRES_AT = "account.challenge.expiresAt"
+        const val SAVED_CHALLENGE_RESEND_AT = "account.challenge.resendAt"
+        val SAVED_CHALLENGE_KEYS = listOf(
+            SAVED_CHALLENGE_TYPE,
+            SAVED_CHALLENGE_PURPOSE,
+            SAVED_CHALLENGE_ID,
+            SAVED_CHALLENGE_MASK,
+            SAVED_CHALLENGE_EXPIRES_AT,
+            SAVED_CHALLENGE_RESEND_AT,
+        )
+
+        fun restoreSavedStep(handle: SavedStateHandle): AccountAuthStep =
+            handle.get<String>(SAVED_AUTH_STEP)
+                ?.let { runCatching { AccountAuthStep.valueOf(it) }.getOrNull() }
+                ?.takeUnless {
+                    it == AccountAuthStep.WECHAT_LOGIN ||
+                        it == AccountAuthStep.BIND_WECHAT ||
+                        it == AccountAuthStep.QQ_LOGIN ||
+                        it == AccountAuthStep.BIND_QQ
+                }
+                ?: AccountAuthStep.CHOOSE
+
+        const val WECHAT_CALLBACK_TIMEOUT_MILLIS = 90_000L
+        const val QQ_CALLBACK_TIMEOUT_MILLIS = 90_000L
+        const val OTP_CHALLENGE_TICK_MILLIS = 1_000L
+        const val RESEND_RETRY_COOLDOWN_SECONDS = 60L
+
+        fun restoreSavedChallenge(handle: SavedStateHandle): PendingOtpChallenge? {
+            val type = handle.get<String>(SAVED_CHALLENGE_TYPE)
+                ?.let { runCatching { AuthIdentityType.valueOf(it) }.getOrNull() }
+                ?: return null
+            val purpose = handle.get<String>(SAVED_CHALLENGE_PURPOSE)
+                ?.let { runCatching { OtpPurpose.valueOf(it) }.getOrNull() }
+                ?: return null
+            val challengeId = handle.get<String>(SAVED_CHALLENGE_ID)
+                ?.takeIf { it.matches(CANONICAL_V4_UUID) }
+                ?: return null
+            val maskedTarget = handle.get<String>(SAVED_CHALLENGE_MASK)
+                ?.takeIf { it.length in 3..254 && !it.any(Char::isISOControl) }
+                ?: return null
+            val expiresAt = handle.get<String>(SAVED_CHALLENGE_EXPIRES_AT)
+                ?.let { runCatching { Instant.parse(it) }.getOrNull() }
+                ?.takeIf { it.isAfter(Instant.now()) }
+                ?: return null
+            val resendAvailableAt = handle.get<String>(SAVED_CHALLENGE_RESEND_AT)
+                ?.let { runCatching { Instant.parse(it) }.getOrNull() }
+                ?.takeUnless { it.isAfter(expiresAt) }
+                ?: return null
+            val supportedCombination = when (type) {
+                AuthIdentityType.PHONE -> purpose in setOf(OtpPurpose.LOGIN, OtpPurpose.REGISTER)
+                AuthIdentityType.EMAIL -> purpose in setOf(OtpPurpose.LOGIN, OtpPurpose.BIND)
+                else -> false
+            }
+            if (!supportedCombination) return null
+            return PendingOtpChallenge(
+                type = type,
+                purpose = purpose,
+                challengeId = challengeId,
+                maskedTarget = maskedTarget,
+                expiresAt = expiresAt,
+                resendAvailableAt = resendAvailableAt,
+            )
+        }
+
+        val CANONICAL_V4_UUID =
+            Regex("^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
+    }
 
     private enum class AccountConfigPhase { LOADING, READY, UNAVAILABLE, INCOMPATIBLE }
 }

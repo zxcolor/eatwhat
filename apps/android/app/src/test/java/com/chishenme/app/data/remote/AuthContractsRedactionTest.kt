@@ -6,49 +6,87 @@ import org.junit.Test
 
 class AuthContractsRedactionTest {
     @Test
-    fun `fusion DTO string representations never expose raw tokens or proofs`() {
-        val authToken = "private-fusion-auth-token"
-        val verifyToken = "private-fusion-verify-token"
-        val proofId = "private-fusion-phone-proof"
+    fun `phone challenge request string never exposes phone or installation id`() {
+        val phone = "+8613800138000"
+        val installationId = "33333333-3333-4333-8333-333333333333"
+
+        val rendered =
+            PhoneCodeRequest(
+                phoneNumber = phone,
+                purpose = OtpPurpose.REGISTER,
+                installationId = installationId,
+            ).toString()
+
+        assertFalse(rendered.contains(phone))
+        assertFalse(rendered.contains(installationId))
+        assertTrue(rendered.contains("REDACTED"))
+        assertTrue(rendered.contains("REGISTER"))
+    }
+
+    @Test
+    fun `phone and OAuth DTO string representations never expose credentials or phone`() {
+        val phone = "+8613800138000"
+        val otp = "123456"
         val oauthState = "private-wechat-oauth-state"
         val authorizationCode = "private-wechat-authorization-code"
 
-        val values = listOf(
-            FusionAuthTokenResponse(
-                flowId = "2af305ae-82a1-4f87-86b7-1c97c4a8683f",
-                schemeCode = "scheme-100001",
-                authToken = authToken,
-                expiresAt = "2026-08-26T04:10:00Z",
-            ).toString(),
-            FusionRegistrationVerifyRequest(
-                flowId = "2af305ae-82a1-4f87-86b7-1c97c4a8683f",
-                verifyToken = verifyToken,
-                installationId = "33333333-3333-4333-8333-333333333333",
-            ).toString(),
-            FusionRegistrationPhoneProof(
-                proofId = proofId,
-                expiresAt = "2026-08-26T04:10:00Z",
-            ).toString(),
+        val rendered =
             AuthLoginRequest(
-                method = AuthLoginMethod.PHONE_FUSION,
+                method = AuthLoginMethod.PHONE,
                 device = device(),
-                flowId = "2af305ae-82a1-4f87-86b7-1c97c4a8683f",
-                verifyToken = verifyToken,
-            ).toString(),
-            RegisterFusionWechatRequest(
-                phoneProofId = proofId,
-                wechatOAuthState = oauthState,
-                wechatAuthorizationCode = authorizationCode,
-                device = device(),
-            ).toString(),
-        )
+                challengeId = "2af305ae-82a1-4f87-86b7-1c97c4a8683f",
+                otpCode = otp,
+                phoneNumber = phone,
+                oauthState = oauthState,
+                authorizationCode = authorizationCode,
+            ).toString()
 
-        values.forEach { rendered ->
-            listOf(authToken, verifyToken, proofId, oauthState, authorizationCode).forEach { secret ->
-                assertFalse(rendered.contains(secret))
-            }
-            assertTrue(rendered.contains("REDACTED"))
+        listOf(phone, otp, oauthState, authorizationCode).forEach { secret ->
+            assertFalse(rendered.contains(secret))
         }
+        assertTrue(rendered.contains("REDACTED"))
+    }
+
+    @Test
+    fun `WeChat state binding and device DTO strings redact every proof value`() {
+        val installationId = "33333333-3333-4333-8333-333333333333"
+        val oauthState = "private-wechat-oauth-state"
+        val authorizationCode = "private-wechat-authorization-code"
+        val refreshToken = "private-refresh-token"
+        val challengeId = "2af305ae-82a1-4f87-86b7-1c97c4a8683f"
+        val otpCode = "123456"
+        val rendered = listOf(
+            device().toString(),
+            OAuthStateRequest(
+                provider = AuthIdentityType.WECHAT,
+                purpose = OAuthPurpose.LOGIN,
+                installationId = installationId,
+            ).toString(),
+            OAuthStateResponse(
+                provider = AuthIdentityType.WECHAT,
+                purpose = OAuthPurpose.LOGIN,
+                state = oauthState,
+                expiresAt = "2026-08-21T04:05:00Z",
+            ).toString(),
+            BindIdentityRequest(
+                type = AuthIdentityType.WECHAT,
+                challengeId = challengeId,
+                otpCode = otpCode,
+                oauthState = oauthState,
+                authorizationCode = authorizationCode,
+            ).toString(),
+            RefreshSessionRequest(refreshToken, installationId).toString(),
+        ).joinToString("\n")
+
+        listOf(
+            installationId,
+            oauthState,
+            authorizationCode,
+            refreshToken,
+            challengeId,
+            otpCode,
+        ).forEach { secret -> assertFalse(rendered.contains(secret)) }
+        assertTrue(rendered.contains("REDACTED"))
     }
 
     private fun device() = AuthDeviceContext(

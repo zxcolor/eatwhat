@@ -9,10 +9,16 @@ import { AppModule } from "../app.module.js";
 import { configureHttpRuntime } from "../common/http-runtime-security.js";
 import { SafeExceptionFilter } from "../common/safe-exception.filter.js";
 import { APP_CONFIG, loadAppConfig } from "../config/app-config.js";
+import { AuthController } from "./auth.controller.js";
+import { AuthService } from "./auth.service.js";
+import { AuthAvailabilityGuard } from "./auth-availability.guard.js";
+import { AuthRateLimitInterceptor } from "./auth-rate-limit.interceptor.js";
 
 describe("disabled account HTTP boundary", () => {
 	let app: INestApplication;
 	let baseUrl: string;
+	let retiredApp: INestApplication;
+	let retiredBaseUrl: string;
 
 	beforeAll(async () => {
 		const module = await Test.createTestingModule({ imports: [AppModule] })
@@ -32,20 +38,39 @@ describe("disabled account HTTP boundary", () => {
 		configureHttpRuntime(app, app.get(APP_CONFIG));
 		await app.listen(0, "127.0.0.1");
 		baseUrl = await app.getUrl();
+
+		const retiredModule = await Test.createTestingModule({
+			controllers: [AuthController],
+			providers: [
+				{ provide: AuthService, useValue: {} },
+				{ provide: APP_CONFIG, useValue: { auth: { enabled: true } } },
+				{
+					provide: AuthAvailabilityGuard,
+					useValue: { canActivate: () => true },
+				},
+				{
+					provide: AuthRateLimitInterceptor,
+					useValue: {
+						intercept: (_context: unknown, next: { handle(): unknown }) =>
+							next.handle(),
+					},
+				},
+			],
+		}).compile();
+		retiredApp = retiredModule.createNestApplication();
+		await retiredApp.listen(0, "127.0.0.1");
+		retiredBaseUrl = await retiredApp.getUrl();
 	});
 
 	afterAll(async () => {
 		await app.close();
+		if (retiredApp !== undefined) await retiredApp.close();
 	});
 
 	it.each([
 		["POST", "/v1/auth/phone/request-code"],
-		["POST", "/v1/auth/phone/fusion-token"],
-		["POST", "/v1/auth/phone/fusion-verify"],
 		["POST", "/v1/auth/email/request-code"],
 		["POST", "/v1/auth/oauth/state"],
-		["POST", "/v1/auth/register/phone-wechat"],
-		["POST", "/v1/auth/register/fusion-wechat"],
 		["POST", "/v1/auth/login"],
 		["POST", "/v1/auth/refresh"],
 		["POST", "/v1/auth/logout"],
@@ -89,6 +114,20 @@ describe("disabled account HTTP boundary", () => {
 		},
 	);
 
+	it.each([
+		["POST", "/v1/auth/phone/fusion-token"],
+		["POST", "/v1/auth/phone/fusion-verify"],
+		["POST", "/v1/auth/register/phone-wechat"],
+		["POST", "/v1/auth/register/fusion-wechat"],
+	] as const)("%s %s stays retired", async (method, path) => {
+		const response = await fetch(`${retiredBaseUrl}${path}`, {
+			method,
+			headers: { "content-type": "application/json" },
+			body: "{}",
+		});
+		expect(response.status).toBe(404);
+	});
+
 	it("leaves existing public capabilities operational", async () => {
 		const [health, config] = await Promise.all([
 			fetch(`${baseUrl}/health`),
@@ -102,7 +141,6 @@ describe("disabled account HTTP boundary", () => {
 				accountsEnabled: false,
 				registrationEnabled: false,
 				phoneEnabled: false,
-				fusionEnabled: false,
 				wechatEnabled: false,
 				emailEnabled: false,
 				qqEnabled: false,

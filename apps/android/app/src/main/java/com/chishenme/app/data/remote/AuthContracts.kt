@@ -12,10 +12,7 @@ enum class OtpPurpose { REGISTER, LOGIN, BIND }
 enum class OAuthPurpose { REGISTER, LOGIN, BIND }
 
 @Serializable
-enum class FusionAuthPurpose { LOGIN, REGISTER }
-
-@Serializable
-enum class AuthLoginMethod { PHONE, EMAIL, PHONE_FUSION, WECHAT, QQ }
+enum class AuthLoginMethod { PHONE, EMAIL, WECHAT, QQ }
 
 @Serializable
 data class AuthDeviceContext(
@@ -23,21 +20,31 @@ data class AuthDeviceContext(
     val label: String,
     val platform: String = "ANDROID",
     val appVersion: String,
-)
+) {
+    override fun toString(): String =
+        "AuthDeviceContext(installationId=REDACTED, label=$label, " +
+            "platform=$platform, appVersion=$appVersion)"
+}
 
 @Serializable
 data class PhoneCodeRequest(
     val phoneNumber: String,
     val purpose: OtpPurpose,
     val installationId: String,
-)
+) {
+    override fun toString(): String =
+        "PhoneCodeRequest(phoneNumber=REDACTED, purpose=$purpose, installationId=REDACTED)"
+}
 
 @Serializable
 data class EmailCodeRequest(
     val email: String,
     val purpose: OtpPurpose,
     val installationId: String,
-)
+) {
+    override fun toString(): String =
+        "EmailCodeRequest(email=REDACTED, purpose=$purpose, installationId=REDACTED)"
+}
 
 @Serializable
 data class AuthCodeChallenge(
@@ -49,51 +56,14 @@ data class AuthCodeChallenge(
 )
 
 @Serializable
-data class FusionAuthTokenRequest(
-    val purpose: FusionAuthPurpose,
-    val installationId: String,
-)
-
-@Serializable
-data class FusionAuthTokenResponse(
-    val flowId: String,
-    val schemeCode: String,
-    val authToken: String,
-    val expiresAt: String,
-) {
-    override fun toString(): String =
-        "FusionAuthTokenResponse(flowId=$flowId, schemeCode=$schemeCode, " +
-            "authToken=REDACTED, expiresAt=$expiresAt)"
-}
-
-@Serializable
-data class FusionRegistrationVerifyRequest(
-    val flowId: String,
-    val verifyToken: String,
-    val installationId: String,
-) {
-    override fun toString(): String =
-        "FusionRegistrationVerifyRequest(flowId=$flowId, verifyToken=REDACTED, " +
-            "installationId=$installationId)"
-}
-
-@Serializable
-data class FusionRegistrationPhoneProof(
-    val proofId: String,
-    val expiresAt: String,
-) {
-    override fun toString(): String =
-        "FusionRegistrationPhoneProof(proofId=REDACTED, expiresAt=$expiresAt)"
-}
-
-@Serializable
 data class OAuthStateRequest(
     val provider: AuthIdentityType,
     val purpose: OAuthPurpose,
     val installationId: String,
-    val phoneChallengeId: String? = null,
-    val phoneProofId: String? = null,
-)
+) {
+    override fun toString(): String =
+        "OAuthStateRequest(provider=$provider, purpose=$purpose, installationId=REDACTED)"
+}
 
 @Serializable
 data class OAuthStateResponse(
@@ -101,28 +71,10 @@ data class OAuthStateResponse(
     val purpose: OAuthPurpose,
     val state: String,
     val expiresAt: String,
-)
-
-@Serializable
-data class RegisterPhoneWechatRequest(
-    val phoneChallengeId: String,
-    val phoneOtpCode: String,
-    val wechatOAuthState: String,
-    val wechatAuthorizationCode: String,
-    val device: AuthDeviceContext,
-)
-
-@Serializable
-data class RegisterFusionWechatRequest(
-    val phoneProofId: String,
-    val wechatOAuthState: String,
-    val wechatAuthorizationCode: String,
-    val device: AuthDeviceContext,
 ) {
     override fun toString(): String =
-        "RegisterFusionWechatRequest(phoneProofId=REDACTED, " +
-            "wechatOAuthState=REDACTED, wechatAuthorizationCode=REDACTED, " +
-            "device=$device)"
+        "OAuthStateResponse(provider=$provider, purpose=$purpose, state=REDACTED, " +
+            "expiresAt=$expiresAt)"
 }
 
 /**
@@ -136,18 +88,15 @@ data class AuthLoginRequest(
     val device: AuthDeviceContext,
     val challengeId: String? = null,
     val otpCode: String? = null,
-    val flowId: String? = null,
-    val verifyToken: String? = null,
+    val phoneNumber: String? = null,
     val oauthState: String? = null,
     val authorizationCode: String? = null,
-    val accessToken: String? = null,
 ) {
     override fun toString(): String =
         "AuthLoginRequest(method=$method, device=$device, challengeId=$challengeId, " +
-            "otpCode=${otpCode.redacted()}, flowId=$flowId, " +
-            "verifyToken=${verifyToken.redacted()}, oauthState=${oauthState.redacted()}, " +
-            "authorizationCode=${authorizationCode.redacted()}, " +
-            "accessToken=${accessToken.redacted()})"
+            "otpCode=${otpCode.redacted()}, phoneNumber=${phoneNumber.redacted()}, " +
+            "oauthState=${oauthState.redacted()}, " +
+            "authorizationCode=${authorizationCode.redacted()})"
 
     private fun String?.redacted(): String? = if (this == null) null else "REDACTED"
 }
@@ -161,13 +110,18 @@ data class AuthTokenResponse(
     val accessTokenExpiresAt: String,
     val refreshToken: String,
     val refreshTokenExpiresAt: String,
-)
+) {
+    override fun toString(): String = "AuthTokenResponse(REDACTED)"
+}
 
 @Serializable
 data class RefreshSessionRequest(
     val refreshToken: String,
     val installationId: String,
-)
+) {
+    override fun toString(): String =
+        "RefreshSessionRequest(refreshToken=REDACTED, installationId=REDACTED)"
+}
 
 @Serializable
 data class LogoutResponse(
@@ -196,7 +150,19 @@ data class BindIdentityRequest(
     val challengeId: String? = null,
     val otpCode: String? = null,
     val oauthState: String? = null,
-    val accessToken: String? = null,
+    val authorizationCode: String? = null,
+) {
+    override fun toString(): String =
+        "BindIdentityRequest(type=$type, challengeId=${challengeId.redacted()}, " +
+            "otpCode=${otpCode.redacted()}, oauthState=${oauthState.redacted()}, " +
+            "authorizationCode=${authorizationCode.redacted()})"
+}
+
+@Serializable
+internal data class AuthErrorResponse(
+    val requestId: String,
+    val code: String,
+    val message: String,
 )
 
 @Serializable
@@ -260,9 +226,6 @@ data class AuthCapabilities(
      * public feature configuration.
      */
     val dataExportEnabled: Boolean = false,
-    /**
-     * Absent on an older service response means the provider is disabled. The
-     * client also requires an Alpha build that contains the pinned local AAR.
-     */
-    val fusionEnabled: Boolean = false,
 )
+
+private fun String?.redacted(): String? = if (this == null) null else "REDACTED"

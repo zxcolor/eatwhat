@@ -1,4 +1,5 @@
 import com.chishenme.buildlogic.ReleaseApiUrlPolicy
+import com.chishenme.buildlogic.ReleaseTaskRequestPolicy
 import com.chishenme.buildlogic.QqAppIdPolicy
 import java.io.File
 import java.security.KeyStore
@@ -6,7 +7,6 @@ import java.security.MessageDigest
 import java.security.cert.X509Certificate
 import java.util.Arrays
 import java.util.Properties
-import java.util.zip.ZipFile
 
 plugins {
     id("com.android.application")
@@ -202,52 +202,6 @@ val alphaStoreFile = alphaStoreFileRaw?.let { configuredPath ->
     }
 }
 
-// The official Fusion Authentication binary is prepared locally from the
-// integrity-pinned Alibaba Cloud archive and is never committed. Only Alpha can
-// package it; every other variant compiles an explicit no-op implementation.
-val fusionAuthArtifacts = linkedMapOf(
-    "fusionauth-1.2.15-online-release.aar" to
-        "706653407DCD94C9214AA4277E14476723672E27AA998ADBF9E612EC038857FC",
-    "umeng-common-9.5.6.aar" to
-        "89C22AD4D6F761ABB14FB79CB0BE051C2DD5C59ADD655B808E2A9511FD7D40E4",
-    "umeng-asms-v1.8.0.aar" to
-        "35021A4A64B12568F6804193E05D197420BE577622C6ED402FF7B736CE17E324",
-).mapKeys { (fileName, _) -> rootProject.file(".local/fusion-auth/$fileName") }
-val presentFusionAuthArtifacts = fusionAuthArtifacts.keys.filter(File::isFile)
-if (presentFusionAuthArtifacts.isNotEmpty() && presentFusionAuthArtifacts.size != fusionAuthArtifacts.size) {
-    throw GradleException(
-        "融合认证本地 AAR 不完整；必须由 prepare-fusion-auth-sdk.ps1 校验并完整准备全部三件 AAR",
-    )
-}
-fusionAuthArtifacts.forEach { (artifact, expectedSha256) ->
-    if (artifact.isFile) {
-        val actualSha256 = MessageDigest.getInstance("SHA-256")
-            .digest(artifact.readBytes())
-            .toLowerHex()
-            .uppercase()
-        if (actualSha256 != expectedSha256) {
-            throw GradleException("融合认证本地 AAR 哈希不匹配：${artifact.name}")
-        }
-    }
-}
-val hasCompleteFusionAuthSdk = fusionAuthArtifacts.keys.all(File::isFile)
-val requireFusionAuthSdkRaw = providers.gradleProperty("CHISHENME_REQUIRE_FUSION_SDK")
-    .orElse("false")
-    .get()
-    .trim()
-if (requireFusionAuthSdkRaw !in setOf("true", "false")) {
-    throw GradleException("CHISHENME_REQUIRE_FUSION_SDK 只能为 true 或 false")
-}
-val requireFusionAuthSdk = requireFusionAuthSdkRaw == "true"
-if (requireFusionAuthSdk && !hasCompleteFusionAuthSdk) {
-    throw GradleException(
-        "[FUSION_SDK_MISSING] 本次要求构建可测 Fusion Alpha，但三件本地 AAR 未完整准备",
-    )
-}
-// Ordinary Alpha/CI remains a deterministic no-op build. Only an explicit
-// require gate may compile and package the three pinned local binaries.
-val includeFusionAuthSdk = requireFusionAuthSdk && hasCompleteFusionAuthSdk
-
 android {
     namespace = "com.chishenme.app"
     compileSdk = 36
@@ -284,8 +238,8 @@ android {
         applicationId = "com.chishenme.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.1.2-alpha01"
+        versionCode = 4
+        versionName = "0.1.3-alpha01"
 
         // WeChat AppID is a public application identifier, not a provider
         // secret. An empty value is intentional: every variant then fails
@@ -390,15 +344,7 @@ android {
     // ordinary cloud-connected Debug APK. Reuse only the package-correct WeChat
     // callback source; the component remains disabled because fixture AppIDs are empty.
     testBuildType = "fixture"
-    sourceSets.getByName("debug").java.srcDir("src/noFusion/java")
-    sourceSets.getByName("fixture").java.srcDirs("src/debug/java", "src/noFusion/java")
-    sourceSets.getByName("release").java.srcDir("src/noFusion/java")
-    sourceSets.getByName("alpha").java.srcDir(
-        if (includeFusionAuthSdk) "src/alphaFusion/java" else "src/noFusion/java",
-    )
-    if (includeFusionAuthSdk) {
-        sourceSets.getByName("alpha").manifest.srcFile("src/alphaFusion/AndroidManifest.xml")
-    }
+    sourceSets.getByName("fixture").java.srcDir("src/debug/java")
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -423,221 +369,11 @@ android {
     }
 }
 
-fun registerFusionManifestBoundaryTask(
-    taskName: String,
-    variant: String,
-    expectFusion: Boolean,
-) = tasks.register(taskName) {
-    val variantTitle = variant.replaceFirstChar(Char::uppercaseChar)
-    val mergedManifest = layout.buildDirectory.file(
-        "intermediates/merged_manifest/$variant/process${variantTitle}MainManifest/AndroidManifest.xml",
-    )
-    dependsOn("process${variantTitle}MainManifest")
-    inputs.file(mergedManifest)
-    doLast {
-        if (expectFusion != includeFusionAuthSdk) {
-            throw GradleException(
-                if (expectFusion) {
-                    "Fusion Manifest 门禁只能在显式 CHISHENME_REQUIRE_FUSION_SDK=true 时运行"
-                } else {
-                    "no-op Manifest 门禁不得用于显式 Fusion 构建"
-                },
-            )
-        }
-        val manifest = mergedManifest.get().asFile.readText(Charsets.UTF_8)
-        val fusionOnlyPermissions = listOf(
-            "android.permission.READ_PHONE_STATE",
-            "com.google.android.gms.permission.AD_ID",
-            "android.permission.CHANGE_WIFI_STATE",
-            "android.permission.RECEIVE_USER_PRESENT",
-            "android.permission.ACCESS_WIFI_STATE",
-            "android.permission.CHANGE_NETWORK_STATE",
-        )
-        val protocolAction = "com.fusion.auth"
-        val protocolActivity = "com.chishenme.app.auth.fusion.FusionProtocolActivity"
-        val vendorMarkers = listOf(
-            "com.alicom.fusion.auth",
-            "com.mobile.auth.gatewayauth",
-        )
-        if (!expectFusion) {
-            val forbidden = listOf(
-                protocolAction,
-                protocolActivity,
-            ) + fusionOnlyPermissions + vendorMarkers
-            forbidden.forEach { marker ->
-                if (manifest.contains(marker)) {
-                    throw GradleException("$variant no-op Manifest 意外包含 Fusion 标记：$marker")
-                }
-            }
-            return@doLast
-        }
-
-        (fusionOnlyPermissions + listOf(protocolAction, protocolActivity))
-            .forEach { marker ->
-                if (!manifest.contains(marker)) {
-                    throw GradleException("Fusion Alpha Manifest 缺少必需标记：$marker")
-                }
-            }
-        vendorMarkers.forEach { marker ->
-            if (!manifest.contains(marker)) {
-                throw GradleException("Fusion Alpha Manifest 未合并真实供应商组件：$marker")
-            }
-        }
-        val vendorActivities = listOf(
-            "com.alicom.fusion.auth.numberauth.FusionNumberAuthActivity",
-            "com.alicom.fusion.auth.smsauth.FusionSmsActivity",
-            "com.alicom.fusion.auth.upsms.AlicomFusionUpSmsActivity",
-            "com.alicom.fusion.auth.graphauth.FusionGraphAuthActivity",
-            "com.mobile.auth.gatewayauth.LoginAuthActivity",
-            "com.mobile.auth.gatewayauth.PrivacyDialogActivity",
-        )
-        vendorActivities.forEach { activityName ->
-            val secureVendorActivity = Regex(
-                """(?s)<activity(?=[^>]*android:name="${Regex.escape(activityName)}")(?=[^>]*android:exported="false")[^>]*/?>""",
-            )
-            if (!secureVendorActivity.containsMatchIn(manifest)) {
-                throw GradleException("Fusion 供应商 Activity 必须保持 exported=false：$activityName")
-            }
-        }
-        val secureProtocolActivity = Regex(
-            """(?s)<activity[^>]*android:name="$protocolActivity"[^>]*android:exported="false"[^>]*>.*?<action android:name="$protocolAction"\s*/>.*?</activity>""",
-        )
-        if (!secureProtocolActivity.containsMatchIn(manifest)) {
-            throw GradleException("Fusion 协议 Activity 必须为 exported=false 并持有固定 action")
-        }
-    }
-}
-
-fun registerNoFusionPackageBoundaryTask(
-    taskName: String,
-    variant: String,
-) = tasks.register(taskName) {
-    val variantTitle = variant.replaceFirstChar(Char::uppercaseChar)
-    dependsOn("assemble$variantTitle")
-    doLast {
-        if (includeFusionAuthSdk) {
-            throw GradleException("no-op APK 门禁不得用于显式 Fusion 构建")
-        }
-        val outputDirectory = layout.buildDirectory.dir("outputs/apk/$variant").get().asFile
-        val apk = outputDirectory.listFiles()
-            ?.filter { it.isFile && it.extension.equals("apk", ignoreCase = true) }
-            ?.singleOrNull()
-            ?: throw GradleException("$variant APK 数量不是 1，无法验证 Fusion no-op 边界")
-        ZipFile(apk).use { zip ->
-            val forbidden = zip.entries().asSequence().map { it.name }.filter { entry ->
-                entry.contains("libpns-") ||
-                    entry.contains("libumeng-spy.so") ||
-                    entry.contains("alicom", ignoreCase = true)
-            }.toList()
-            if (forbidden.isNotEmpty()) {
-                throw GradleException("$variant no-op APK 意外包含 Fusion/Umeng 产物：$forbidden")
-            }
-        }
-    }
-}
-
-val verifyNoFusionDebugManifest = registerFusionManifestBoundaryTask(
-    "verifyNoFusionDebugManifest",
-    "debug",
-    expectFusion = false,
-)
-val verifyNoFusionFixtureManifest = registerFusionManifestBoundaryTask(
-    "verifyNoFusionFixtureManifest",
-    "fixture",
-    expectFusion = false,
-)
-val verifyNoFusionReleaseManifest = registerFusionManifestBoundaryTask(
-    "verifyNoFusionReleaseManifest",
-    "release",
-    expectFusion = false,
-)
-val verifyNoFusionAlphaManifest = registerFusionManifestBoundaryTask(
-    "verifyNoFusionAlphaManifest",
-    "alpha",
-    expectFusion = false,
-)
-val verifyFusionAlphaManifest = registerFusionManifestBoundaryTask(
-    "verifyFusionAlphaManifest",
-    "alpha",
-    expectFusion = true,
-)
-val verifyNoFusionDebugPackage = registerNoFusionPackageBoundaryTask(
-    "verifyNoFusionDebugPackage",
-    "debug",
-)
-val verifyNoFusionFixturePackage = registerNoFusionPackageBoundaryTask(
-    "verifyNoFusionFixturePackage",
-    "fixture",
-)
-val verifyNoFusionAlphaPackage = registerNoFusionPackageBoundaryTask(
-    "verifyNoFusionAlphaPackage",
-    "alpha",
-)
-
-val verifyNoFusionVariantConfiguration = tasks.register("verifyNoFusionVariantConfiguration") {
-    doLast {
-        if (includeFusionAuthSdk) {
-            throw GradleException("no-op variant 配置门禁不得用于显式 Fusion 构建")
-        }
-        val noFusionSource = file("src/noFusion/java").canonicalFile
-        listOf("debug", "fixture", "release", "alpha").forEach { variant ->
-            val sources = android.sourceSets.getByName(variant).java.srcDirs.map(File::getCanonicalFile)
-            if (noFusionSource !in sources) {
-                throw GradleException("$variant 未绑定 noFusion 源集")
-            }
-            if (sources.any { it.path.contains("src${File.separator}alphaFusion") }) {
-                throw GradleException("$variant no-op 配置意外绑定 alphaFusion 源集")
-            }
-        }
-    }
-}
-
-val verifyFusionAlphaPackage = tasks.register("verifyFusionAlphaPackage") {
-    dependsOn("assembleAlpha", verifyFusionAlphaManifest)
-    doLast {
-        if (!includeFusionAuthSdk) {
-            throw GradleException(
-                "Fusion Alpha 包门禁需要 -PCHISHENME_REQUIRE_FUSION_SDK=true",
-            )
-        }
-        val outputDirectory = layout.buildDirectory.dir("outputs/apk/alpha").get().asFile
-        val apk = outputDirectory.listFiles()
-            ?.filter { it.isFile && it.extension.equals("apk", ignoreCase = true) }
-            ?.singleOrNull()
-            ?: throw GradleException("Fusion Alpha APK 数量不是 1")
-        ZipFile(apk).use { zip ->
-            val names = zip.entries().asSequence().map { it.name }.toSet()
-            val nativeLibraries = listOf(
-                "libpns-1.2.15-OnlineRelease_alijtca_plus.so",
-                "libpns-2.14.21-LogOnlineStandardCuumRelease_alijtca_plus.so",
-                "libumeng-spy.so",
-            )
-            listOf("arm64-v8a", "armeabi-v7a").forEach { abi ->
-                nativeLibraries.forEach { library ->
-                    val expected = "lib/$abi/$library"
-                    if (expected !in names) {
-                        throw GradleException("Fusion Alpha APK 缺少 $expected")
-                    }
-                }
-            }
-            nativeLibraries.forEach { library ->
-                if ("lib/x86_64/$library" in names) {
-                    throw GradleException("当前钉住 SDK 的 x86_64 ABI 假设已变化，需重新审计")
-                }
-            }
-        }
-    }
-}
-
-// Merging a release Manifest does not consume signing material, but AGP routes
-// processReleaseMainManifest through preReleaseBuild. Permit that single,
-// explicitly requested verification task to reach the merger without a
-// keystore. Any invocation that also asks for assemble/bundle/package (or any
-// other task) remains subject to the normal fail-closed signing check.
-val releaseManifestOnlyVerificationRequested = gradle.startParameter.taskNames.isNotEmpty() &&
-    gradle.startParameter.taskNames.all { requestedTask ->
-        requestedTask.substringAfterLast(':') == "verifyNoFusionReleaseManifest"
-    }
+// AGP routes the Manifest merger through preReleaseBuild even though that task
+// does not read a keystore. Exempt only an invocation made up exclusively of
+// the exact Manifest task; adding assemble/bundle/package keeps signing fail-closed.
+val releaseManifestOnlyVerificationRequested =
+    ReleaseTaskRequestPolicy.isManifestOnlyVerification(gradle.startParameter.taskNames)
 
 val validateReleaseConfiguration = tasks.register("validateReleaseConfiguration") {
     group = "verification"
@@ -652,7 +388,9 @@ val validateReleaseConfiguration = tasks.register("validateReleaseConfiguration"
             )
         }
         if (!hasReleaseSigning && !releaseManifestOnlyVerificationRequested) {
-            throw GradleException("Release 构建缺少 CHISHENME_RELEASE_* 签名环境变量")
+            throw GradleException(
+                "[RELEASE_SIGNING_MISSING] Release 构建缺少 CHISHENME_RELEASE_* 签名环境变量",
+            )
         }
         if (!releaseManifestOnlyVerificationRequested && !file(releaseStoreFile.get()).isFile) {
             throw GradleException("Release 签名文件不存在")
@@ -662,7 +400,7 @@ val validateReleaseConfiguration = tasks.register("validateReleaseConfiguration"
 
 val validateAlphaConfiguration = tasks.register("validateAlphaConfiguration") {
     group = "verification"
-    description = "Fails closed when the Alpha endpoint or fixed signing identity is unavailable."
+    description = "Fails closed when the Alpha endpoint, fixed signer, WeChat AppID, or QQ AppID is unavailable."
     doLast {
         val rawUrl = alphaApiUrl.orNull?.trim()
             ?: throw GradleException(
@@ -721,6 +459,18 @@ val validateAlphaConfiguration = tasks.register("validateAlphaConfiguration") {
             Arrays.fill(storePasswordChars, '\u0000')
             Arrays.fill(keyPasswordChars, '\u0000')
         }
+        if (alphaWechatAppId.isEmpty()) {
+            throw GradleException(
+                "[ALPHA_WECHAT_APP_ID_MISSING] Alpha 构建必须通过 " +
+                    "-PCHISHENME_ALPHA_WECHAT_APP_ID 配置已登记的微信 AppID",
+            )
+        }
+        if (alphaQqAppId.isEmpty()) {
+            throw GradleException(
+                "[ALPHA_QQ_APP_ID_MISSING] Alpha 构建必须通过 " +
+                    "-PCHISHENME_ALPHA_QQ_APP_ID 配置已登记的 QQ AppID",
+            )
+        }
     }
 }
 
@@ -743,11 +493,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.0")
-    implementation("androidx.lifecycle:lifecycle-process:2.9.0")
     implementation("androidx.activity:activity-compose:1.10.1")
-    // Required explicitly by the official Fusion Authentication AAR's Activity
-    // hierarchy. Do not depend on a demo application's transitive classpath.
-    implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("androidx.navigation:navigation-compose:2.9.0")
 
     implementation(composeBom)
@@ -781,10 +527,6 @@ dependencies {
     // repository. This exact official Lite JAR is integrity-pinned in
     // apps/android/THIRD_PARTY_ARTIFACTS.md.
     implementation(files("libs/open_sdk_3.5.19_r9483ffc7_lite.jar"))
-
-    if (includeFusionAuthSdk) {
-        add("alphaImplementation", files(fusionAuthArtifacts.keys))
-    }
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")

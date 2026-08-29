@@ -35,8 +35,8 @@
 - GitHub CI 已配置独立 `postgis/postgis:17-3.5-alpine` job，从空库迁移、重复迁移、权限失败回滚、runtime 正反例、授权过期/并发撤销、retention dry-run/execute 和 API startup schema verify。ECS 已真实完成 PostGIS 3.5 扩展、版本化迁移、角色授予和 API 启动基线，但这不等于整套 CI 负例、retention execute 或备份恢复矩阵都已在 ECS 重跑。
 - ECS 当前采用宝塔 Nginx `80/443` → `127.0.0.1:13001` → API 的活动拓扑，PostgreSQL 仅在内部 Docker 网络提供 `postgres.internal:5432`。`https://api.unfinished-era.com` 的独立 DNS、Let's Encrypt 证书、vhost 和续期 hook 已激活；`/health/ready` 为 200，`AMAP_ENABLED=true`，真实地点搜索与推荐在隔离、活动容器和公网三层通过。原 WordPress 文件、宝塔数据库、证书和恢复点均保留，主站 vhost SHA-256 仍为 `215a48d7e2c5e43493e89f6ed27f6fa304e7b6b9782a1c72cab3420476b0888e`。
 - ECS 发布工具已收口为无 Secret 的不可变 bundle、固定 `SHA256SUMS` 和服务器侧 `preflight-deployment.sh`；共享 Secret、PostgreSQL 外部卷与 release 分离。仓库还提供固定 root-only 目录的数据库备份、备份复核和仅恢复到全新隔离数据库的脚本；本轮 schema 10 迁移前已真实生成并复核 `/opt/chi-shen-me/backups/postgres/20260827T042434Z`，但没有对生产库执行恢复。该同机备份不等于异机副本、ECS 快照、隔离恢复演练或生产回滚已经完成。
-- Android 已接固定版本微信 OpenSDK：AppID 缺失时关闭；仅在隐私同意后由用户点击初始化；服务端 state 在进程内单次消费并校验 purpose/有效期，回调不记录 code/state/错误原文。Android 1.0 的身份矩阵固定为 PHONE REGISTER/LOGIN、EMAIL LOGIN/BIND、WECHAT REGISTER/LOGIN、QQ LOGIN/BIND；手机号/微信绑定和全部恢复流程在 UI、repository、SDK coordinator、共享契约与 API 边界均不可达。隐私撤回先同步封锁认证代际并清理微信/QQ 授权状态，迟到登录、注册或刷新响应不得写回 Keystore。QQ 登录已有账号与登录后绑定接入腾讯官方下载的固定 Lite SDK；真实 AppID、包名、签名、平台资质与登记回调仍须在腾讯平台验收，未满足时入口 fail closed，QQ 仍不能创建账号。
-- 阿里云融合认证的供应商中立契约、服务端 provider、一次性 flow/proof、跨 key 版本防重放、`0010_fusion_phone_auth.sql`、可选三 AAR Alpha source set、客户端隐私/取消/进入后台/迟到回调门禁，以及 root-only 候选 Secret 更新与 12 小时排空脚本已形成工程候选。账号总开关、手机通道和微信通道现已拆分：`ACCOUNTS_ENABLED=true`、`FUSION_AUTH_ENABLED=true`、`WECHAT_AUTH_ENABLED=false` 的候选不要求或复制微信 AppID/Secret，只能登录已有绑定账号；公开 `registrationEnabled=false` 且真实注册端点失败关闭。2026-08-27 已在复核 root-only 备份后把生产 PostgreSQL 迁移到 schema 10，重新应用角色授权并通过 Fusion 表、函数与最小权限 SQL 审计；当前活动 release 是同一旧 API 镜像的认证关闭桥接版本，三条认证入口继续返回 503。当前分支又完成共享契约 71 / 71、API 83 个文件 720 / 720、API runtime smoke、lint/typecheck/生产构建、普通 no-Fusion 全变体和完整 `verify.ps1`，并以显式参数完成三 AAR Fusion Alpha 的 Manifest、ABI、R8、签名与 APK 打包门禁。最终 Fusion API 镜像、真实供应商 token/verify 和真机链路尚未激活，不能把桥接迁移表述为手机号认证已经开放。
+- Android 已接固定版本微信 OpenSDK：AppID 缺失时关闭；仅在隐私同意后由用户点击初始化；服务端 state 单次消费并校验 purpose/有效期，回调不记录 code/state/错误原文。当前固定身份政策是 `PHONE_ONLY`：手机验证码成功可直接创建账号和会话；微信、QQ、邮箱只登录已绑定身份；登录后可绑定微信。隐私撤回先同步封锁认证代际并清理 OAuth 状态，迟到登录、绑定或刷新响应不得写回 Keystore。
+- 本分支正在把手机主链迁移为阿里云号码认证短信的纯服务端 `SendSmsVerifyCode` / `CheckSmsVerifyCode`：供应商动态生成验证码、`ReturnVerifyCode=false`，并增加同 challenge 数据库 lease、失败释放、成功消费和原子建号。Android 已删除号码认证供应商 SDK/source set/专属权限与旧入口；ECS 候选改用 `ALIYUN_PNVS_*`、最小 RAM 动作、动态 QQ/SMTP/微信字段及失败回滚。0010→0011 另有一次性 `legacy_phone_drain` 停号 bridge：只容忍完整 schema 或仅缺精确 0011，首次激活期间保留旧 `api.env` 以便回旧 API；迁移后失败只回停号 bridge，恢复旧 Fusion 需要迁移前数据库备份。0010 Fusion 表只为完成 24 小时历史数据清理而暂留，maintenance 仅获两项专用清理函数，不能据此认证。工程改造尚未等于生产部署或真实短信验收；当前活动 release 的账号能力仍关闭。
 - 账号数据导出的 Android 与服务端安全链路已经实现：客户端可选择行为历史范围、恢复/刷新任务并通过系统文档选择器流式下载和校验；服务端包含鉴权、幂等任务、隔离 worker、私有 OSS 工件、短时下载、长度/SHA-256 校验及内存/并发/超时边界。当前实现不等于生产可用，真实阿里云 RDS、OSS 与 RAM 角色/权限组合仍未完成端到端验收。
 - 支持反馈的共享契约、加密持久化、幂等与限流链路已经实现。公开配置只有在反馈服务完成数据库、双密钥环和历史密钥覆盖启动检查后才宣告 `supportFeedbackEnabled=true`；任一条件缺失、检查失败或服务关闭时都 fail closed，Android 设置页不提供提交入口，ViewModel 也不会触达反馈 API。
 - Android 已实现进程级最低版本门禁：只有可信且兼容的远程配置才能开放普通接口；首次配置不可用且尚未确认更新要求时，游客只能取得关闭 AI 的规则推荐 lease，结果仅可展示或换一批，不能进入详情、执行出站动作或上报事件。一旦确认需要更新，加载失败、配置暂不可用或不兼容响应都不能把旧导航图或游客回退短暂恢复。锁定态仅放行配置复查、必要的 refresh、退出登录、账号注销和本机隐私撤回；已有会话的数据权利入口独立于普通账号产品入口。配置刷新代际由进程级单调门禁统一分配，旧 Activity/ViewModel 的晚到配置响应不能倒退代际或发布 UI；代际变化还会撤销推荐、地点搜索、账号、收藏与反馈的在途结果，旧推荐详情、动作和事件会话随即失效。运行中从强制更新恢复到可信兼容配置时会清除旧 `transientMessage` 与 `formError`，避免更新 Snackbar 重新遮挡主操作，但不会复活旧结果会话。
@@ -54,13 +54,13 @@
   门禁会复核地址策略并检查同一地址已进入 Debug/Alpha `BuildConfig` 与 APK DEX，同时证明 Fixture 只含固定回环地址且 AndroidTest 只指向 Fixture；还会核对 Alpha 固定证书摘要、唯一 signer、v2 签名以及与 Debug 测试证书隔离。它不会发起公网探测。DNS、TLS、独立 API vhost 与 `/health/ready` 已由独立公网 smoke 验收，关闭 Wi-Fi 真机与最终 Release 的独立签名仍不能由构建门禁替代。
 - `scripts/start-api-local.ps1` 可从已忽略的 `.env.local` 注入服务端配置并隐藏密钥值；构建子进程不继承运行时 Secret，API 子进程只接收明确白名单字段。邮件验证码使用标准 SMTP，阿里云只负责短信；仓库内所有中文 PowerShell 脚本均以 UTF-8 BOM 保存，并由验证脚本检查 Windows PowerShell 5.1 兼容性。
 - `pnpm dev:api` 现在先按项目 TypeScript 配置生成带 Nest 装饰器元数据的编译产物，再监听源码并以 Node 运行 `dist`；独立运行时冒烟测试会在随机本机端口验证健康、配置和地点搜索，防止以后退回会破坏依赖注入的直接 esbuild/tsx 执行路径。
-- 已落地 [`openapi.v1.json`](./openapi.v1.json) 作为 OpenAPI 3.1 v1 单一文档源，当前包含 42 个 path、47 个 operation，其中健康探针 2 个、普通 `/v1` 36 个、隔离管理员 `/admin/v1` 9 个；收藏、私有反馈与融合认证已纳入契约。自动化测试会校验 JSON、本地引用、路由/方法/状态码、Zod input/output、Bearer、安全错误、通用来源代码、请求作用域 `resultToken`、精确坐标只进入推荐 POST body，以及管理员 passkey/RBAC 契约隔离。账号和管理员路由在服务能力、数据库角色或原子事务未具备时统一 fail closed，不把文档存在冒充功能可用；客户端代码生成仍未接入。
+- 已落地 [`openapi.v1.json`](./openapi.v1.json) 作为 OpenAPI 3.1 v1 单一文档源；生成门禁会校验 JSON、本地引用、controller 路由/方法/状态码、Zod input/output、Bearer、安全错误和管理员 passkey/RBAC 隔离。账号契约正在同步为 PHONE_ONLY，生成产物必须在接口收束后重新生成，不能把旧文档或路由存在冒充功能可用。
 
 ## 尚未声称完成
 
 - 高德商业授权、App 备案、商标核查、算法/等保判断以及应用商店审核。
-- 真实阿里云短信、标准 SMTP 邮件、微信、QQ 的供应商凭据、平台资质、包名/签名登记以及账号注册绑定和冲突场景的外部环境验收；客户端与服务端流程代码已实现不代表平台审核或真实投递已经通过。
-- 阿里云融合认证的最终 ECS API 镜像与 Fusion-only Secret 激活、RAM 最小权限/IMDSv2 运行时复核、正式方案/全局策略和短信/图形降级节点、真实 token/verify 的成功/失败/超时/防重放 smoke，以及三个固定 AAR 在 ARM64 且插有中国大陆 SIM 的真机矩阵。生产 PostgreSQL schema 10、角色授权与备份复核已经完成，但还需要在最终 release 激活后复查 flow 排空与回滚。微信材料不是已有账号 Fusion 登录的前置条件，但在微信资质与真实回调未完成时注册 capability 和注册端点必须保持关闭。上述任一剩余 Fusion 项未完成前必须保持 Fusion capability 关闭，工程代码和定向测试不能表述为供应商链路已完成或可发布。
+- 真实阿里云号码认证短信、标准 SMTP 邮件、微信、QQ 的供应商凭据、平台资质、包名/签名登记以及账号绑定/冲突场景的外部环境验收；客户端与服务端代码存在不代表平台审核或真实投递通过。
+- 最终 ECS API 镜像、RAM 最小权限/IMDSv2、当前可用签名与配套模板、真实发送/校验的成功/失败/限流/超时/并发/重放 smoke，以及 ARM64 + 中国大陆 SIM 真机的后台切换与页面恢复。SMTP 当前 DMARC 为 `false`，在 Alpha 记录为非阻断缺口，对外发布前必须完成。
 - 可交互地图选点、任意地址自由编辑和逆地理编码；全国地点关键词搜索已经完成，内置手动测试点仍作为拒绝定位、无网或上游不可用时的回退。
 - ECS 自托管 PostgreSQL 17/PostGIS 3.5 的 bootstrap、迁移、实际角色名（`api_runtime`、`schema_migrator`、`retention_worker`、`admin_api_runtime`、`data_export_worker`）和基础 API 启动已完成；GitHub PostGIS 完整负例矩阵、RDS/OSS/RAM/SLS/EMAS、导出 worker、保留期 execute、异机备份恢复和 RAM 角色隔离仍待真实环境验收。
 - 跨设备收藏、跨设备历史、账号注销和备份滚动清除的真实环境验收；本机白名单决策历史已经完成，账号导出代码链路已完成但仍受上述 RDS/OSS/RAM 门禁约束。
@@ -80,6 +80,6 @@
 
 ## 下一里程碑
 
-1. 登录主线：既有短信/邮箱 Android/API v1 合成设备闭环已完成；Fusion 当前完成工程候选、无微信 Secret 的 Fusion-only 配置夹具、生产 PostgreSQL schema 10/角色审计、完整 no-Fusion 自动化及显式三 AAR Alpha 构建门禁。下一步必须从当前 HEAD 产出并激活最终 API 镜像，完成 RAM/IMDSv2 与正式方案的真实 token/verify smoke，再做三 AAR 的 ARM64 + 中国大陆 SIM 真机联调；注册继续单独等待微信资质与真实回调，未具备时保持 `registrationEnabled=false` 并让注册端点实际失败关闭，不伪造外部验收。
+1. 登录主线：完成 PHONE_ONLY 契约/API/数据库/Android/ECS 改造和完整门禁后，才从当前 HEAD 产出候选镜像；先复核 RAM/IMDSv2、控制台当前签名/模板和失败关闭，再做真实短信发送/校验及 ARM64 + 中国大陆 SIM 真机闭环。微信/QQ/邮箱保持“仅已绑定登录”，未具备真实材料和验收时各自关闭，不伪造外部验收。
 2. 高德主线：ECS root-only 凭据、固定出口 IP 白名单、readiness、真实地点搜索/推荐、release 切换、独立 API 子域与公网 HTTPS 已通过。下一步只做关闭 Wi-Fi 的外部真机、弱网/配额/故障恢复和授权边界复验；Key/私钥继续不得写入 Android、仓库、APK、日志、报告或聊天记录。
 3. 除登录与高德之外的 Android 1.0/后续功能开发暂缓；现有成果和发布门禁继续保留，不在这两条主线推进期间顺带扩展。

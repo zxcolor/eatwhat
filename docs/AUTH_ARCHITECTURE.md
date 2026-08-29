@@ -1,365 +1,241 @@
 # 「吃什么」账号与身份接入架构
 
-状态：Android 1.0 实施基线。本文区分已经可以在本地完成的工程能力，以及必须等待平台资质、密钥和正式环境才能启用的外部能力。
+## 1. 固定产品规则
 
-## 1. 产品规则
+当前账号策略固定为 `PHONE_ONLY`，不提供运行时策略开关：
 
-- 游客无需登录即可完成核心推荐。
-- 新账号只能由“已验证手机号 + 已完成微信授权”共同创建。
-- 已有账号可以通过手机号或微信登录。
-- 邮箱和 QQ 不能创建账号，只能在登录后的现有账号中验证绑定；绑定成功后才可用于登录。
-- 同一个手机号、微信、QQ 或邮箱已经属于另一账号时，必须返回冲突并由用户人工处理，禁止静默合并。
-- 登录不是开启定位、AI、埋点或第三方 SDK 的隐式同意。
-- 所有第三方 SDK 只能在用户完成隐私同意并主动点击对应入口后初始化。
-- AppSecret、AppKey、短信和邮件服务密钥只存在于服务端密钥管理系统，不进入 Android、日志、错误响应、远程配置或仓库。
-
-## 2. 约束分层
-
-### 2.1 不可绕过的安全与合规约束
-
-- 服务端是账号归属的唯一裁决方；Android 回调不能直接声明“已经登录”或“已经绑定”。
-- 验证码只保存带服务端 pepper 的密码学哈希、用途、有效期、尝试次数和发送状态，不保存明文。
-- OAuth 临时 code、access token、refresh token、手机号、邮箱和第三方标识不得写入普通应用日志。
-- 访问令牌短期有效；刷新令牌每次使用都轮换。旧令牌再次出现时撤销整个令牌家族，并要求重新登录。
-- 数据库只保存 App 自有令牌的哈希，不保存可直接使用的 App 明文令牌。
-- 微信和 QQ 身份使用“平台 + 应用作用域标识”的唯一键，不能假定不同 App 的 `openid` 相同。
-- 用户在 App 内可以查看登录设备、退出其他设备、解绑非主身份、导出数据和注销账号。
-- 注销立即撤销所有会话；滚动备份内可恢复的个人信息按既定 30 天窗口清除。
-
-### 2.2 可以按评测调整的实现选择
-
-- 短信与邮件供应商可以替换，账号领域不依赖阿里云字段或错误码。
-- 微信、QQ Android SDK 只负责获得平台回调材料；页面、账号状态和后端接口保持供应商中立。
-- 内测期可以使用数据库事务和进程内限流；多实例公开部署前必须把验证码发送、验证和会话风控迁移到共享原子存储或数据库原子语句。
-- Android 本地令牌使用 Android Keystore 生成的 AES-GCM 密钥加密；密文可存入私有偏好存储，但密钥不可导出。
-
-## 3. 官方资料核对与采用方式
-
-### 3.1 微信移动应用登录
-
-微信开放平台当前说明移动应用登录基于 OAuth 2.0 `authorization_code` 模式：移动端 SDK 拉起微信，用户授权后 App 获得临时 `code`，再由拥有 AppID 与 AppSecret 的服务端换取平台凭证。登录作用域为 `snsapi_userinfo`，`state` 应用于请求/回调关联和 CSRF 防护。
-
-工程采用：
-
-1. 自有服务端在用户主动点击后签发绑定 installation、provider、purpose 与有效期的一次性随机 `state`；Android 只在内存中短期保存。
-2. 微信 SDK 回调必须同时满足成功状态、存在 code、state 常量时间比较通过。
-3. Android 只把临时 code 和已验证 state 交给「吃什么」后端。
-4. 后端通过独立 `WechatIdentityProvider` 适配器调用微信官方 HTTPS 接口，核对 HTTP 状态、微信错误码、AppID 作用域和返回字段。
-5. 后端提取应用作用域 `openid`，在符合 UnionID 使用条件时可保存 `unionid` 作为受限辅助冲突信号；不能用客户端提交的第三方标识决定账号归属。
-6. 平台 access token 只在完成本次身份核验所需的最短生命周期内使用，不返回 Android，不作为「吃什么」会话令牌。
-
-官方资料：
-
-- [移动应用微信登录开发指南](https://developers.weixin.qq.com/doc/oplatform/Mobile_App/WeChat_Login/Development_Guide.html)
-- [微信 Android 接入指南](https://developers.weixin.qq.com/doc/oplatform/Mobile_App/Access_Guide/Android.html)
-- [微信 Open SDK 开发者合规使用指南](https://developers.weixin.qq.com/doc/oplatform/Mobile_App/Access_Guide/Android.html#%E5%90%88%E8%A7%84%E6%8C%87%E5%8D%97)
-
-文档示例中的动态依赖 `+` 不进入工程。Maven Central 元数据在 2026-08-20 核对到 `com.tencent.mm.opensdk:wechat-sdk-android:6.8.40`（元数据更新时间 2026-07-17）；接入时固定该版本并记录校验值，发布前仍要重新核对安全公告、依赖内容、依赖锁和 SBOM。
-
-### 3.2 QQ 移动应用登录
-
-QQ 互联官方 Android 页面要求先注册并审核移动应用，使用 AppID 初始化 SDK；登录回调包含 OpenID 与 AccessToken。官方页面同时要求在调用 SDK 前由宿主 App 确认隐私授权，并显式通知 SDK。
-
-工程采用：
-
-1. QQ 入口只在登录账号后用于绑定，或在账号已经绑定 QQ 时用于登录，绝不用于创建新账号。
-2. QQ SDK 仅在隐私同意后、用户主动点击 QQ 登录/绑定时初始化。
-3. Android 将本次 SDK 回调的短期凭证提交给后端；不将其保存到 DataStore、历史、崩溃日志或分析事件。
-4. 后端 `QqIdentityProvider` 预留通过腾讯官方 `https://graph.qq.com/oauth2.0/me` 身份接口复核凭证的边界，要求响应 `client_id` 与本应用 AppID 完全一致，并以接口返回的 OpenID 为准；不能只相信 Android 回传的 JSON。正式开放前仍须以真实移动应用、真实签名和腾讯书面说明确认移动 SDK access token 的服务端校验语义，未确认时 `QQ_ENABLED=false`。
-5. QQ 互联官方下载页在 2026-04-14 列出的 Android SDK 为 3.5.19，但该 SDK 以压缩包而非 Maven Central 坐标发布。正式二进制进入仓库前仍必须记录官方下载 URL、SHA-256、许可/隐私清单和 SBOM；上述核对或应用审核状态缺失时，QQ 适配器保持不可用，核心账号 API 和 UI 仍完成 fail-closed 流程。
-
-官方资料：
-
-- [QQ 互联移动应用接入流程](https://wiki.connect.qq.com/%E7%A7%BB%E5%8A%A8%E5%BA%94%E7%94%A8%E6%8E%A5%E5%85%A5%E6%B5%81%E7%A8%8B)
-- [QQ 互联 SDK 官方下载](https://wiki.connect.qq.com/sdk%E4%B8%8B%E8%BD%BD)
-- [QQ 互联 Android SDK 环境搭建与登录](https://wiki.connect.qq.com/qq%E7%99%BB%E5%BD%95)
-- [QQ 互联获取用户 OpenID](https://wiki.connect.qq.com/%E8%8E%B7%E5%8F%96%E7%94%A8%E6%88%B7openid_oauth2-0)
-- [QQ 互联 SDK 隐私保护声明](https://wiki.connect.qq.com/qq%E4%BA%92%E8%81%94sdk%E9%9A%90%E7%A7%81%E4%BF%9D%E6%8A%A4%E5%A3%B0%E6%98%8E)
-
-### 3.3 手机验证码
-
-账号领域使用 `OtpDeliveryProvider`；生产适配器使用阿里云官方
-`@alicloud/dysmsapi20170525` 的 `SendSms`，领域层不依赖阿里云请求模型。
-阿里云 `SendSms` 不提供幂等保证，因此「吃什么」必须先以自身 challenge
-和幂等键完成原子去重，再调用计费接口；超时后不能盲目重发。
-
-工程规则：
-
-- 首期只接受规范化后的中国大陆 E.164 手机号。
-- 发送前同时限制 IP、设备安装标识、手机号哈希和用途；目标地址执行 1 分钟复用、5 次/小时、10 次/滚动 24 小时上限，并按所有已触发窗口中最晚释放时间返回 `Retry-After`；返回统一响应，避免枚举已注册账号。
-- 验证码使用密码学安全随机数生成，默认 6 位、5 分钟有效、最多 5 次尝试。
-- 同一 challenge 只能成功消费一次；注册、登录和邮箱绑定的验证码不能跨用途使用。Android 1.0 不开放账号恢复 challenge。
-- 发送调用使用服务端 RAM 最小权限身份；Android 没有短信 API Secret。
-- `TemplateParam` 固定只序列化 `{ "code": "六位验证码" }`；不把用户资料、
-  设备信息或场景标签交给短信接口。
-- 只有 `SendSmsResponse.body.code === "OK"` 且存在格式受限的内部回执引用时
-  才标记为供应商已接受；这不等同于运营商最终送达。
-- SDK 自动重试关闭，连接和读取超时均由 `ALIYUN_SMS_TIMEOUT_MS` 控制。
-- 开发和测试使用显式 `FakeOtpDeliveryProvider`，验证码只能被测试夹具读取，普通运行日志不输出。
-
-官方资料：
-
-- [阿里云 SendSms 接口](https://help.aliyun.com/zh/sms/developer-reference/api-dysmsapi-2017-05-25-sendsms)
-- [阿里云短信 OpenAPI 使用说明](https://help.aliyun.com/zh/sms/developer-reference/using-openapi/)
-- [阿里云短信发送规则](https://help.aliyun.com/zh/sms/user-guide/message-rules)
-- [阿里云验证码防盗刷](https://help.aliyun.com/zh/sms/user-guide/verification-code-scams-and-message-flooding-1)
-
-### 3.4 邮箱验证码
-
-邮箱沿用同一 challenge 模型，投递适配器使用标准 SMTP 和固定版本
-`nodemailer`，不与阿里云邮件产品绑定。部署方可更换 SMTP 服务商，但必须先
-完成发信域名/地址验证，并按实际供应商更新隐私清单。
-
-工程规则：
-
-- 邮箱规范化只处理明确安全的大小写和首尾空白，不擅自改写地址本地部分。
-- 邮箱验证码只用于绑定和已绑定账号登录，不能创建或恢复账号。
-- 邮件只使用纯文本固定模板；不插入用户输入 HTML，不启用点击追踪。
-- 当前验证码邮件只含产品名、验证码和有效分钟数；不开 HTML、附件、抄送、
-  点击追踪或退订跟踪。
-- 发件人显示名限制为 1–64 个单行字符，发件地址必须是单一邮箱地址；标题固定。
-- 465 端口必须使用连接即 TLS；其他端口必须使用 STARTTLS。证书链校验和
-  TLS 1.2 下限不能由环境变量关闭。
-- SMTP 启动预检只验证 DNS、TCP、TLS 和认证；真实发件地址是否被接受仍需
-  小流量发送验收。
-- 投递失败不暴露供应商错误详情；手机号、邮箱、验证码、Message-ID、BizId
-  和上游响应正文均不进入日志或客户端错误。供应商引用只在服务内部
-  HMAC 后用于投递状态关联。
-- 不启用连接池或应用层自动重试；连接、问候、DNS 和 socket 超时均由
-  `SMTP_TIMEOUT_MS` 控制。文件/URL 内容读取在 transport 和 message 两层关闭。
-
-官方资料：
-
-- [Nodemailer SMTP transport](https://nodemailer.com/smtp)
-- [Nodemailer message configuration](https://nodemailer.com/message)
-
-### 3.5 阿里云融合认证
-
-手机号主链采用供应商中立的 `FusionAuthProvider`。阿里云适配器只在服务端使用
-`GetFusionAuthToken` 和 `VerifyWithFusionAuthToken`；Android SDK 返回的
-`verifyToken` 只是一次认证材料，不能直接声明账号归属。短信验证码继续作为独立
-降级通道，不与融合认证的 flow/proof 混用。
-
-工程规则：
-
-- 用户完成隐私同意并主动点击手机号登录/注册后，Android 才请求
-  `READ_PHONE_STATE` 并初始化 SDK；显式 Fusion Alpha 还包含供应商 AAR 合并的
-  `AD_ID`、`CHANGE_WIFI_STATE`、`RECEIVE_USER_PRESENT`、`ACCESS_WIFI_STATE` 与
-  `CHANGE_NETWORK_STATE`。其他构建变体和未显式携带本地 SDK 的 Alpha 不声明这
-  六项供应商专属权限，也不包含供应商组件。
-- 服务端固定方案 Code、`com.chishenme.app.alpha` 与已登记的 Alpha 证书 MD5，
-  客户端不能选择其他应用身份。供应商 `authToken`、`verifyToken`、完整手机号均不
-  写入日志、偏好、SavedState、崩溃报告或数据库明文列。
-- `verifyToken` 必须先以稳定 HMAC 指纹原子占用，再调用供应商核验；跨 flow 的
-  顺序或并发重放均失败。完成供应商核验后只生成同 installation、同 purpose、
-  短时且一次性的 App 内部手机号 proof。
-- 防重放会使用 `AUTH_HASH_KEYS_JSON` 中 current 与仍在 retiring 的全部版本计算
-  候选指纹。融合认证开启时，旧 hash key 至少保留到供应商 token/本地 flow 最长
-  生命周期全部排空（当前 12 小时）；若必须提前移除，先关闭融合认证，等待 12 小时
-  且确认无活跃 flow，再轮换和重新开放。只切换 active/dedup 版本不能绕过旧指纹。
-- 登录 proof 只可进入已有账号登录；注册 proof 必须继续完成微信授权，手机号
-  单独不能创建账号。任何身份冲突整体失败，不静默合并。
-- SDK 的 `onVerifyFailed` 先调用 `continue(false)`，允许全局策略进入下一节点；
-  只有整个场景结束、模板结束、用户主动取消、隐私撤回或本地超时才销毁流程。
-- SDK 请求刷新 token 时不返回旧 token 或伪造成功；当前适配器失败关闭并销毁
-  当前场景，用户必须重新主动发起后才会向服务端创建新 flow。因尚未实现 SDK
-  回调内的同步、短时且能原子替换 flow 的刷新协议，真实 token 更新仍是 Alpha
-  真机发布阻断项。SDK 的迟到或重复回调由状态机幂等拒绝。
-- 当前 App 不缓存或猜测“本机手机号”，因此方案中依赖宿主回填当前手机号的自动
-  填号节点不得作为唯一成功路径。上线前必须在阿里云控制台核对最终全局策略，并用
-  ARM64、插有中国大陆 SIM 的真机覆盖一键登录、降级短信、图形验证、用户取消、
-  弱网和 token 刷新；模拟器不能替代这项验收。
-- Fusion SDK、友盟登录安全 SDK 只进入显式要求本地三 AAR 且校验值精确匹配的
-  内部 Alpha。用户授权前不得初始化；隐私清单必须分别披露号码认证处理以及友盟
-  风险设备识别所处理的 Advertising ID、其他设备标识、Wi-Fi/网络连接状态、设备
-  解锁状态与硬件信息。随供应商 AAR 合并的 `AD_ID` 及四项网络/解锁权限只允许
-  存在于显式 Fusion Alpha，并只用于本次认证连接与风控，不用于广告画像；SDK
-  二进制不提交 Git。
-
-官方资料：
-
-- [GetFusionAuthToken](https://help.aliyun.com/zh/pnvs/developer-reference/api-dypnsapi-2017-05-25-getfusionauthtoken)
-- [VerifyWithFusionAuthToken](https://help.aliyun.com/zh/pnvs/developer-reference/api-dypnsapi-2017-05-25-verifywithfusionauthtoken)
-- [融合认证服务端集成](https://help.aliyun.com/zh/pnvs/developer-reference/the-server-integration-2)
-- [融合认证 Android 客户端接入](https://help.aliyun.com/zh/pnvs/developer-reference/the-android-client-access-3)
-- [融合认证全局策略](https://help.aliyun.com/zh/pnvs/user-guide/global-policy/)
-- [融合认证合规指南](https://help.aliyun.com/zh/pnvs/security-and-compliance/converged-certification-services-compliance-guide)
-
-## 4. 领域模型
-
-### 4.1 用户与身份
-
-- `User`：内部 UUID、状态、创建时间、注销时间；不以手机号或第三方 OpenID 作为主键。
-- `IdentityBinding`：内部 UUID、用户 UUID、类型、平台作用域、标识的加密值/检索哈希、验证时间、是否为主身份、解绑时间。
-- `OtpChallenge`：challenge UUID、目标类型、目标检索哈希、用途、验证码哈希、发送状态、到期时间、尝试次数、已消费时间。
-- `OAuthState`：一次性 state 哈希、平台、用途、用户/注册流程引用、到期时间、已消费时间。
-- `FusionPhoneFlow`：flow UUID、installation/purpose 指纹、供应商 token 指纹、状态、
-  到期/占用/消费时间；不保存供应商 token 或手机号明文。
-- `FusionPhoneProof`：一次性 proof UUID、flow 引用、手机号 lookup/dedup HMAC 与对应
-  key version、`maskedPhone` 掩码提示、installation/purpose、到期/消费时间；不保存可逆
-  手机号密文，注册 proof 只能交给后续微信注册事务。
-- `Session`：会话 UUID、访问令牌哈希、刷新令牌家族、当前刷新令牌哈希、设备安装标识哈希、创建/活动/到期/撤销时间。
-
-身份类型为 `PHONE`、`WECHAT`、`EMAIL`、`QQ`；Apple 只在 iOS 路线启用，但数据库枚举和公共领域应允许未来迁移。
-
-### 4.2 可见数据
-
-客户端只接收：
-
-- App 内部用户 UUID。
-- 身份类型、脱敏显示值、绑定时间和是否可解绑。
-- 会话 UUID、通用设备标签、当前设备标记、最近活动和到期时间。
-- App 自有短期 access token 与一次性返回的 refresh token。
-
-客户端不接收：
-
-- 第三方 AppSecret/AppKey。
-- 微信/QQ 平台 access token 或 refresh token。
-- 其他账号的任何标识。
-- 数据库检索哈希、pepper 版本或风控内部原因。
-
-## 5. 核心流程
-
-### 5.1 手机号 + 微信注册
-
-1. 请求 `REGISTER` 手机 challenge。
-2. 服务端限流、生成并发送验证码，返回 challengeId、脱敏目标、重发时间和到期时间。
-3. Android 请求微信 OAuth state，并提交同一设备的 `installationId` 与第 1 步 `phoneChallengeId`。服务端读取手机号 challenge，核对设备后把该 challenge 的 `registration_flow_reference_hash` 原样写入 OAuth state；客户端不能自行生成或替换注册 flow。
-4. Android 使用官方 SDK 拉起微信并获得临时 code。
-5. Android 一次提交 challengeId、验证码、微信 code、state 和设备信息。
-6. 服务端验证微信回调后，在消费 OAuth state 的同一原子操作中封存平台主体的 lookup/dedup HMAC 与 key version；注册事务只读取这份不可修改的 proof，再配对同 flow、同 device 的手机号 challenge，锁定两个身份唯一键。
-7. 任一身份已有归属即整体失败，不创建半成品账号、不自动合并。
-8. 两个身份均可用时创建 User、两个绑定和首个 Session，返回 App 自有令牌。
-
-融合认证注册是同一产品规则的另一入口：Android 先创建 `REGISTER` fusion flow，
-SDK 完成全局策略后把 `verifyToken` 交给服务端换取一次性 `phoneProofId`，再以该
-proof 请求微信 `state`，最后调用 `register/fusion-wechat`。手机号 proof 与微信
-state 必须属于同一 installation、同一 registration flow；任一材料过期、重放或
-冲突时整个事务失败。
-
-### 5.2 已有账号登录
-
-- 手机短信/邮箱：先请求 `LOGIN` challenge，再提交 challengeId 和验证码。
-- 手机融合认证：先创建 `LOGIN` fusion flow，SDK 返回的 `verifyToken` 仍由后端
-  核验，并通过统一 `login` 端点的 `PHONE_FUSION` 方法查找已有手机号绑定。
-- 微信：服务端签发 state，Android 获取 code，后端验证后查找已有绑定。
-- QQ：Android 获得 SDK 临时材料，后端复核后查找已有绑定。
-- 如果身份验证正确但不存在绑定，统一返回“该方式尚未绑定账号”，不能自动注册。
-
-### 5.3 绑定与解绑
-
-- 绑定要求有效登录会话，并对高风险设备要求重新验证主身份。
-- 首次邮箱绑定只经已消费且绑定当前 user/device/operation 的 `BIND` challenge；QQ 绑定只经已消费且已封存平台主体 proof 的一次性 OAuth state。runtime 不拥有身份表直写权限。
-- 唯一键冲突返回专用冲突码，但响应不披露另一账号信息。
-- 至少保留手机号和微信两个创建必需身份；非主邮箱、QQ 可以解绑。
-- 解绑撤销与该身份相关的未完成 challenge，并记录安全审计。
-
-### 5.4 刷新与设备管理
-
-- access token 短期有效，作为 Bearer token 使用；服务端只保存哈希。
-- refresh token 只在 HTTPS 请求体传输，成功使用后立即轮换。
-- refresh token 重放会撤销家族内所有会话材料。
-- 退出其他设备按 session UUID 撤销，不接受客户端提交用户 UUID。
-- Android 1.0 不提供账号恢复接口、入口或预留用途；后续版本如立项，必须重新完成防账号接管设计和真实环境验收，客服也不得仅凭截图或昵称改绑。
-
-## 6. API 边界
-
-公共契约使用供应商中立字段，计划端点包括：
-
-- `POST /v1/auth/phone/request-code`
-- `POST /v1/auth/phone/fusion-token`
-- `POST /v1/auth/phone/fusion-verify`
-- `POST /v1/auth/email/request-code`
-- `POST /v1/auth/oauth/state`
-- `POST /v1/auth/register/phone-wechat`
-- `POST /v1/auth/register/fusion-wechat`
-- `POST /v1/auth/login`
-- `POST /v1/auth/refresh`
-- `POST /v1/auth/logout`
-- `GET /v1/auth/identities`
-- `POST /v1/auth/identities`
-- `DELETE /v1/auth/identities/{bindingId}`
-- `GET /v1/auth/sessions`
-- `DELETE /v1/auth/sessions/{sessionId}`
-- `POST /v1/account/export`
-- `DELETE /v1/account`
-
-所有 JSON 端点继续执行 100 KiB 请求上限、固定错误响应、安全响应头和 API 契约握手。验证码与登录端点使用比推荐端点更严格的分层限流；仅按 IP 的进程内限流不能作为公开多实例部署的最终防线。
-
-## 7. Android 本地安全
-
-- 用 Android Keystore 生成不可导出的 AES-GCM 密钥，加密 App 自有 refresh token 和必要的会话元数据。
-- 每次加密使用新的随机 nonce；密文带 schema 版本和认证标签。
-- 解密失败、密钥失效、备份恢复到另一设备时安全退出，不尝试绕过 Keystore。
-- token 存储从 Android 自动备份和设备迁移中排除。
-- access token 优先只保存在内存；进程重启时用加密 refresh token 换取。
-- OkHttp 日志、崩溃报告、剪贴板、Compose state 和 saved state 禁止包含 token、验证码或 OAuth code。Android 1.0 没有分享入口；封存的分享实现即使在测试中运行，也不得接触这些认证材料，并且不能由远程配置启用。
-
-Android 官方安全基线：
-
-- [Android Keystore](https://developer.android.com/privacy-and-security/keystore)
-- [Android 安全检查清单](https://developer.android.com/privacy-and-security/security-tips)
-
-## 8. 功能开关与失败关闭
-
-- `ACCOUNTS_ENABLED` 只有在数据库 schema、会话密钥就绪，并且
-  `PHONE_AUTH_ENABLED` 或 `FUSION_AUTH_ENABLED` 至少一个手机号通道就绪时才允许
-  为 true；微信适配器不是已有账号 Fusion 登录的前置条件。
-- `PHONE_AUTH_ENABLED`、`FUSION_AUTH_ENABLED`、`EMAIL_AUTH_ENABLED`、
-  `WECHAT_AUTH_ENABLED`、`QQ_AUTH_ENABLED` 分别控制真实通道；缺少所需配置时
-  生产环境启动失败或该能力明确不可用。通道关闭后，请求新 challenge/state、消费
-  旧登录材料和绑定材料都必须在仓储或供应商副作用前拒绝；不能等待上游凭据缺失才失败。
-- 注册仍要求手机号通道和微信通道同时可用。Fusion-only + WeChat=false 时，公开
-  `registrationEnabled=false`，`POST /v1/auth/register/fusion-wechat` 等真实注册路径
-  也必须在服务端失败关闭；不能只靠 Android 隐藏入口。
-- 为完成独立手机号验证与真实供应商验收，受限流保护的 Fusion token/verify 链路仍可
-  生成 `REGISTER` 用途的短时手机号 proof；该 proof 本身不创建用户、不调用微信，且
-  无法绕过最终注册与 REGISTER OAuth state 的 `registrationEnabled` 门禁。
-- 功能配置返回 capability，不返回 AppSecret、模板 ID、签名、发信地址或供应商内部错误。
-- Android 在能力关闭时展示“尚未开放”，不展示可以提交但必然失败的表单。
-- 开发测试适配器只能在非生产环境通过显式开关启用，测试验证码和虚构第三方身份必须有醒目标识。
-
-### 8.1 阿里云官方凭据与客户端启动门禁
-
-- 阿里云用于短信与融合认证：服务端分别固定官方 TypeScript SDK 的
-  `SendSms`、`GetFusionAuthToken`、`VerifyWithFusionAuthToken`；签名由 SDK
-  完成，不维护自研签名器。SMTP 使用独立凭据。
-- 使用 `new Credential()` 的官方默认凭据链。生产 ECS 给实例绑定仅含
-  `SendSms` 以及实际启用的 `dypns:GetFusionAuthToken`、
-  `dypns:VerifyWithFusionAuthToken` 所需权限的 RAM 角色，通过
-  `ALIBABA_CLOUD_ECS_METADATA` 指定角色名，并设置
-  `ALIBABA_CLOUD_IMDSV1_DISABLED=true` 强制 IMDSv2。
-- 生产必须用 `ALIYUN_CREDENTIAL_ALLOWED_PROVIDER` 把解析来源钉死为
-  `default/ecs_ram_role` 或经评审的 `default/oidc_role_arn`；生产禁止
-  `default/env` 长期 AccessKey，解析结果来源不一致时拒绝启动。
-- 长期 AccessKey 不写入 `.env`、Compose、镜像、仓库或客户端。本地如确需
-  使用，必须由部署 Secret 注入官方凭据链识别的环境变量，并使用独立的
-  最小权限 RAM 用户；生产仍优先实例 RAM 角色的临时凭据。
-- 手机短信或融合认证通道启用时，Nest 启动阶段会在
-  `ALIYUN_CREDENTIAL_TIMEOUT_MS` 内解析并验证一次凭据。凭据不存在、格式不完整
-  或超时均以固定消息拒绝启动，不携带 SDK cause、凭据值、profile 路径或元数据
-  正文；两条阿里云通道均关闭时不初始化凭据链，也不会探测 ECS 元数据。
-- API 客户端固定使用 HTTPS 官方端点：短信为 `dysmsapi.aliyuncs.com`，融合认证为
-  `dypnsapi.aliyuncs.com`。每次调用关闭 SDK 自动重试与 keep-alive，并限制空闲连接，
-  避免超时后出现不受控的二次计费请求或长期资源占用。
-
-官方资料：
-
-- [阿里云 TypeScript/Node.js 短信 SDK](https://help.aliyun.com/zh/sms/developer-reference/using-typescript-openapi-example)
-- [阿里云 Node.js 默认凭据链](https://help.aliyun.com/zh/sdk/developer-reference/v2-manage-node-js-access-credentials)
-- [ECS 实例 RAM 角色](https://help.aliyun.com/zh/ecs/user-guide/attach-an-instance-ram-role-to-an-ecs-instance)
-
-## 9. 外部启用门禁
-
-以下内容不能由本地代码替代，统一留到所有可实现工程完成后一次性向负责人收集：
-
-- 微信开放平台已审核移动应用、AppID、AppSecret、Android 包名和正式签名配置。
-- QQ 互联已审核移动应用、AppID/AppKey、正式 SDK 包及其校验值、包名和签名配置。
-- 阿里云短信签名与模板审核、融合认证方案 Code、Alpha 包名/签名登记、全局策略、
-  RAM 角色最小权限、配额与回执方案。
-- 实际 SMTP 服务商、专用授权码、发信域名 DNS 验证、发信地址、退信治理和
-  对应隐私披露。
-- 生产数据库、token pepper/加密密钥、TLS CA、KMS/RAM 权限。
-- 隐私政策、第三方 SDK 清单、个人信息保护影响评估和账号注销规则完成审核。
-
-在这些门禁完成之前，自动化测试使用本地适配器，生产构建保持失败关闭；不得把测试验证码、虚构账号或占位密钥打进可公开 APK。
+- 手机号短信验证码验证成功后，可以创建账号并签发会话；
+- 微信、QQ、邮箱不能单独创建账号，只能登录已绑定到现有账号的身份；
+- 已登录用户可以主动绑定邮箱、微信和 QQ；绑定必须在有效手机主账号会话内完成；
+- 不提供一键手机号登录、图形验证、上行短信或账号恢复；
+- 账号能力关闭、数据库未就绪、供应商未配置或客户端能力不完整时统一失败关闭。
+
+公开 capability 只描述部署中实际可用的通道，不能改变上述产品政策。
+
+## 2. 信任边界
+
+`Android → 自有 HTTPS API → PostgreSQL / 第三方服务`
+
+- Android 只收集用户主动输入的手机号、验证码和 OAuth 回调材料；
+- 阿里云 RAM 凭据、短信签名/模板、SMTP 密码、微信 AppSecret、QQ AppKey 只存在于服务端；
+- Android APK 不包含号码认证供应商 SDK，不申请 `READ_PHONE_STATE`；
+- PostgreSQL 不保存完整手机号、邮箱、明文验证码、OAuth code/token 或 App token；
+- 日志不记录上述敏感值和第三方响应原文。
+
+## 3. 手机短信认证
+
+### 3.1 供应商
+
+手机号通道使用阿里云号码认证服务 `Dypnsapi` 的纯服务端接口：
+
+- `SendSmsVerifyCode`：发送验证码；
+- `CheckSmsVerifyCode`：核验用户输入；
+- ECS RAM 角色只授予 `dypns:SendSmsVerifyCode` 和
+  `dypns:CheckSmsVerifyCode`；
+- 生产凭据固定为 `default/ecs_ram_role` 并强制 IMDSv2；
+- 签名与模板必须来自号码认证控制台的当前可用配套资源。
+
+发送请求使用 `{"code":"##code##"}` 让供应商动态生成验证码，并固定
+`ReturnVerifyCode=false`。API、日志、测试夹具和客户端都不能取得供应商生成的明文码。
+SDK 运行时关闭自动重试，发送请求再显式设置 `AutoRetry=0`；不允许供应商自动切换签名、
+模板或节点重发。每次受控发送只对应一次固定签名/模板调用，应用层重试仍受 challenge 与限流
+约束，以保持计费和审计可预测。
+
+### 3.2 Challenge
+
+请求验证码时，服务端：
+
+1. 规范化中国大陆手机号；
+2. 对手机号、IP、installation 和 purpose 计算域分离 HMAC；
+3. 在本地事务中创建 `otp_challenges`，保存掩码、不可逆指纹、过期时间和重发时间；
+4. 调用供应商发送；
+5. 只在供应商明确成功后把 challenge 标记为已投递；
+6. 返回 challenge UUID、掩码、过期时间和可重发时间。
+
+同号码/设备/IP 的本地限流先于供应商调用；供应商的频控和日限额错误再映射为稳定的公开错误。客户端不得根据错误差异枚举账号是否存在。
+
+### 3.3 校验、并发与建号
+
+PNVS 在校验时还需要手机号，因此登录请求同时携带 challenge、手机号、验证码和设备上下文。服务端重新计算手机号指纹，必须与 challenge 精确匹配后才调用供应商。
+
+为避免同一 challenge 的并发双验，`otp_verification_leases` 提供短时数据库 lease：
+
+1. `claim_otp_verification_lease` 原子抢占；
+2. 只有抢占者调用 `CheckSmsVerifyCode`；
+3. 网络/供应商失败时 `release_otp_verification_lease` 允许受控重试；
+4. 明确验证码失败或成功时 `complete_otp_verification_lease` 原子记录结果；
+5. 成功后 `register_phone_account_from_consumed_otp` 在数据库内创建或查找手机号主账号；
+6. 会话创建与响应在事务成功后完成。
+
+同一 challenge 只能消费一次。供应商超时不得被当作验证码错误，也不能提前消费 challenge；客户端可以按公开退避规则重试。未知或格式异常的供应商响应一律失败关闭。
+
+## 4. 邮箱验证码
+
+邮箱使用服务端本地生成 OTP 和 SMTP 投递：
+
+- OTP 只保存带独立 pepper 的 Argon2id；
+- SMTP 连接在启用时先 `verify()`；
+- 465 使用隐式 TLS，587/25 强制 STARTTLS；
+- 邮件为固定纯文本，无附件、外链或用户可控模板；
+- 邮箱验证码只用于已绑定登录或有效会话内绑定，不能创建账号。
+
+SMTP 运行时变量为
+`SMTP_HOST/PORT/SECURE/USERNAME/PASSWORD/FROM_ADDRESS/REPLY_TO/FROM_NAME/TIMEOUT_MS`。
+root-only 认证候选只接受 `SMTP_APP_PASSWORD`；Secret 更新器在服务器边界内把它映射为
+`api.env` 的 `SMTP_PASSWORD`，候选不得使用运行时名称或同时提供两种名称。ECS Compose
+固定 `SMTP_TIMEOUT_MS=5000`，因此该字段不进入认证候选 Secret；本机受控运行时仍可配置。
+当前 DMARC 检查为 `false`，仅作为 Alpha 非阻断缺口；对外发布前必须完成
+SPF/DKIM/DMARC 与真实投递验收。
+
+## 5. 微信与 QQ
+
+OAuth state 绑定 provider、purpose、installation、过期时间和一次性消费状态：
+
+- LOGIN 只查找已绑定身份，不创建账号。只有 state 与平台临时凭据均验证成功后，
+  未绑定身份才返回稳定的 `IDENTITY_NOT_BOUND`；错码、过期、重放、设备或用途不匹配、
+  平台失败仍统一返回脱敏认证错误；
+- BIND 必须有有效 App 会话；
+- 微信授权 code 只由服务端用 AppSecret 兑换；
+- 微信 OpenID 与 AppID 组成当前移动 App 的稳定身份和去重键；它不会被 UnionID 替换；
+- 服务端把微信返回的 UnionID 以 `开放平台 realm + HMAC-SHA256` 单独保存为跨应用 alias，
+  不保存或记录原始 OpenID/UnionID。realm 是稳定的内部身份命名空间，同一微信开放平台账号
+  下的移动 App 与未来小程序必须复用同一值；
+- UnionID 缺失时，已经由 AppID+OpenID 识别的当前 App 登录仍可继续，但不能跨应用匹配；
+  AppID+OpenID 与 realm+UnionID 若指向不同业务账号则整次操作返回身份冲突，绝不自动合并、
+  转移或覆盖；
+- Android 调用 QQ 官方 `loginServerSide`，把 SDK 回调 `access_token` 字段承载的一次性
+  authorization code 交给自有后端；客户端不提交或采信 OpenID/UnionID；
+- 服务端使用与 Android 相同的公开 AppID、仅保存在服务端的 AppKey 和固定
+  `auth://tauth.qq.com/` redirect URI 向腾讯官方
+  token 端点换取短时 access token，再调用官方 `/oauth2.0/me` 核对返回的 `client_id` 并获取
+  OpenID/可选 UnionID。code、access/refresh token 和供应商原始响应只在本次调用内存中存在；
+- QQ lookup 始终是 `AppID + OpenID` 的 HMAC。启用 UnionID 时，dedup 使用稳定
+  `QQ_OPEN_PLATFORM_REALM_ID + UnionID` 的域分离 HMAC；不保存明文，也不把 UnionID 当成
+  全平台全局标识；
+- QQ realm 与 UnionID namespace marker 的唯一权威是 releases 之外的
+  `/opt/chi-shen-me/shared/auth-identity-state.env`。它是 root:root、`0600` 的非秘密完整性状态，
+  且只允许 `AUTH_IDENTITY_STATE_FORMAT_VERSION=1`、`QQ_OPEN_PLATFORM_REALM_ID`、
+  `QQ_UNION_ID_NAMESPACE_INITIALIZED` 三键；marker 不进入认证候选、Android、API 环境或
+  `deployment.env`；
+- 共享文件不存在时首次开启 QQ，或把其中 marker 从 `false` 提升为 `true`，都必须从活动 QQ
+  通道关闭态开始，在全局部署锁内只输出聚合计数并证明旧 QQ binding 为零。首次直接启用
+  UnionID 时共享文件直接写为 `true`，不产生可被普通 release 回退的中间 `false`；
+- 共享状态在 API/`deployment.env` 候选之前原子持久化，后续预检失败只回滚这两个候选文件，
+  不回滚 realm 或单调 marker。旧 release 即使没有 marker，恢复候选也必须以共享文件为准；
+  紧急关闭只把 QQ/UnionID 当前开关设为 `false` 并保留共享状态。marker 为 `true` 后重新开启
+  QQ 必须同时开启 UnionID，因此已有 binding 不会被误判为首次切换，也不会新增 OpenID-only 绑定。
+
+schema 0012 的受限数据库函数把可选 UnionID 证明封存在已经消费的微信 OAuth state 中，
+随后在同一事务边界内核对 state 的 AppID+OpenID 哈希与目标微信绑定，再写入 alias。
+`bind_oauth_identity_with_wechat_union_from_consumed_state` 在 alias 冲突时回滚新绑定；登录路径在
+alias 成功或明确无 UnionID 后才创建会话。普通运行角色不能直接读取或改写 alias 表。
+`revoke_non_primary_identity_binding` 只允许解绑非主身份；微信解绑保留 alias 防止被另一个业务
+账号接管，最终账号删除则通过外键级联删除 alias。
+
+## 6. 密钥与数据模型
+
+### 6.1 数据表
+
+- `users`：账号主体；
+- `identity_bindings`：PHONE/EMAIL/WECHAT/QQ 的不可逆 lookup、掩码和主身份标记；
+- `otp_challenges`：短信或邮件 challenge、投递/验证状态、次数和过期时间；
+- `otp_verification_leases`：同 challenge 并发供应商核验租约；
+- `oauth_states`：OAuth state、purpose、installation 和消费状态；
+- `wechat_union_aliases`：微信开放平台 realm、UnionID HMAC、对应微信 binding 与验证时间；
+  每个 realm 内 UnionID 与业务账号均唯一，不向 API runtime 开放直接表权限；
+- `auth_session_families` / refresh/access 表：会话轮换与重放检测。
+
+历史迁移中的 0010 Fusion 表只为履行最长 24 小时的数据删除而暂留：maintenance role
+只能执行两项专用 preview/execute 清理函数，不能直接读取表；API、管理员和导出角色均显式
+拒绝这两项函数。这是历史数据最小化，不是 Fusion 运行时能力。schema 0011 后不能仅靠切回
+旧镜像恢复 Fusion；必须恢复迁移前数据库。schema 0012 在 0011 上增加微信 UnionID alias，
+不重键已有 AppID+OpenID binding。普通 0012→0011 回退只允许 alias 表仍为空的过渡窗口；
+一旦记录过 alias，只能保留 0012 数据库并向前修复。当前认证运行时只授权 PHONE_ONLY、
+OAuth/邮件和三项 UnionID state-bound 原语所需的最小表及函数。
+
+### 6.2 密钥环
+
+- `AUTH_HASH_KEYS_JSON`：身份、目的地、设备/IP、token 的域分离 HMAC；
+- `AUTH_OTP_PEPPER_KEYS_JSON`：仅邮件 OTP Argon2id pepper；
+- 两个密钥环不能复用材料；
+- `AUTH_IDENTITY_DEDUP_KEY_VERSION` 不能由普通 Secret 更新脚本改变；
+- 普通轮换不能移除任何仍在使用的版本，删除需单独审查的迁移/排空流程。
+
+`update-auth-secrets.sh --disable` 是可逆的紧急停号，不是密钥销毁。它关闭六个账号/认证
+开关并清退供应商通道配置，但必须在 root-only `api.env` 原样保留
+`AUTH_HASH_ACTIVE_VERSION`、`AUTH_HASH_KEYS_JSON`、`AUTH_IDENTITY_DEDUP_KEY_VERSION`，以及
+已有的完整邮件 OTP pepper pair。主 HMAC ring 同时承载身份去重、设备/IP 和 access/refresh/
+session/OAuth token 的连续性；丢失或替换会让既有绑定/会话不可解析，并可能把同一手机号建成
+新账号。停号后 `--apply` 必须提交相同连续性字段；任一值不一致都在写 `api.env` 或
+`deployment.env` 前失败。
+
+仅关闭 EMAIL 而保持账号、手机号和微信开启时也遵循相同连续性规则：更新器删除全部 SMTP
+字段，但无条件逐值保留已经存在的完整 `AUTH_OTP_PEPPER_*` pair。重新开启邮箱时可以增加
+新版本并切换 active，但不能删除仍在使用的旧版本。
+
+## 7. 运行时配置
+
+账号启用时必须满足：
+
+`ACCOUNTS_ENABLED=true` 且 `PHONE_AUTH_ENABLED=true`。
+
+可选通道：
+
+- `EMAIL_AUTH_ENABLED`；
+- `WECHAT_AUTH_ENABLED`；
+- `QQ_AUTH_ENABLED`；
+- `QQ_UNION_ID_ENABLED`，要求 QQ 同时启用。
+
+PNVS 使用：
+
+- `ALIYUN_PNVS_SIGN_NAME`；
+- `ALIYUN_PNVS_TEMPLATE_CODE`；
+- `ALIYUN_PNVS_TIMEOUT_MS`。
+
+`AUTH_SCHEMA_TRANSITION_MODE` 常态只允许 `none`。一次性 0010→0011 迁移可暂设
+`legacy_phone_drain`，但仅在 `ACCOUNTS_ENABLED=false` 且全部认证通道关闭时有效；该 API
+只接受完整 schema 或仅缺精确最后一项 `0011_phone_only_auth.sql`。bridge preflight 允许的
+旧 `api.env` 字段是固定白名单，未知字段仍拒绝；普通 `none` 模式继续要求严格精确字段。
+
+`update-auth-secrets.sh --legacy-drain` 只更新非秘密部署配置，并用摘要证明共享 `api.env`
+逐字节未变，以便首次 bridge 激活失败时重建旧 API。普通 `--apply` / `--disable` 会把 mode
+恢复为 `none` 并清退旧字段；其中 `--disable` 仍保留上述连续性材料。任何模式都用无网络、
+只读候选容器执行生产配置解析，失败
+自动回滚；成功仍需按 bridge → 备份 → 0011/角色授权/ACL smoke → enabled apply → 激活的
+顺序重建 API、检查 readiness 并完成真实 smoke。
+
+认证更新器只允许写尚非 `current` 的候选 release；活动 release 仅用于锁内只读证明运行态、
+schema/ACL、realm、当前开关和必要的聚合计数。共享 Secret 与候选配置通过后，仍由候选激活器
+完成受控容器重建和原子切链。
+
+这里的“失败自动回滚”只指 Secret 更新器自身预检失败。更新器预检成功后，候选激活器若
+失败，只会自动恢复旧 release、软链和 API 运行态，不会恢复已经提交的共享 `api.env`。
+认证通道上线前必须另备 root-only、关闭目标通道的回滚输入和固定、已通过当前严格 preflight
+的兼容 API image ID 的独立恢复候选；上一镜像若不具备新配置结构，应使用已验证的新镜像并
+保持目标通道关闭，而不是放宽 preflight。激活失败后从恢复候选运行受控 Secret 更新器，清退目标通道 Secret 并保留连续性材料，
+再走其激活门禁重建并验证旧 API。失败候选不得复用；激活器不解析或重组认证 Secret，
+不得把 release/runtime 回退表述成完整 Secret 自动回滚。
+
+## 8. Android 安全状态管理
+
+验证码页面状态由 Activity 级内存 ViewModel 管理：
+
+- Activity 配置重建时只在内存中保留当前步骤、challenge、倒计时和输入；
+- 显式退出、隐私撤回、账号配置代际变化或 challenge 过期时清除；
+- 进程死亡后只按安全的非敏感信息恢复，不把完整手机号/验证码/token 写入 SavedState 或磁盘；
+- 迟到网络响应必须匹配当前 attempt/generation 才能更新 UI 或保存会话。
+
+## 9. 必过验证
+
+- 配置：PHONE_ONLY 组合、每个可选通道的精确字段、关闭路径和 Secret 隔离；
+- PNVS：发送成功/失败、`ReturnVerifyCode=false`、SDK 自动重试关闭、`AutoRetry=0`、固定
+  签名/模板、错误/过期码、限流、超时、异常响应和可预测计费审计；
+- 数据库：lease 并发唯一、失败释放、成功消费、原子建号、重放拒绝、最小角色权限；
+- OAuth/邮箱：未绑定拒绝、已绑定登录、微信绑定、重复/抢占冲突；
+- Android：短信切换返回、Activity 重建、进程恢复、弱网、重复点击；
+- 工件：源码、依赖、Manifest、DEX 均不含旧号码认证 SDK、`READ_PHONE_STATE`、
+  一键手机号登录或图形验证文案；
+- 真实环境：ECS RAM/IMDSv2、控制台当前签名模板、ARM64 + 中国大陆 SIM 真机、
+  SMTP DNS/投递、微信/QQ 平台资质。
+
+工程测试通过不能替代第三方控制台状态、真实供应商调用或真机闭环。

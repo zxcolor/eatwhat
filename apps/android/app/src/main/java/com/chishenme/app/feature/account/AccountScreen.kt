@@ -1,10 +1,8 @@
 package com.chishenme.app.feature.account
 
-import android.Manifest
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
-import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -54,7 +52,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -64,7 +61,6 @@ import com.chishenme.app.data.remote.AccountExportStatusResponse
 import com.chishenme.app.data.remote.AuthIdentityBinding
 import com.chishenme.app.data.remote.AuthIdentityType
 import com.chishenme.app.data.remote.AuthSessionSummary
-import com.chishenme.app.data.remote.FusionAuthPurpose
 import com.chishenme.app.data.remote.OtpPurpose
 import com.chishenme.app.feature.config.RemoteFeatureConfigState
 import com.chishenme.app.feature.config.configOrNull
@@ -88,42 +84,6 @@ fun AccountScreen(
     var pendingUnbind by remember { mutableStateOf<AuthIdentityBinding?>(null) }
     var pendingRevoke by remember { mutableStateOf<AuthSessionSummary?>(null) }
     val hostActivity = LocalContext.current.findActivity()
-    val context = LocalContext.current
-    var pendingFusionPurpose by remember { mutableStateOf<FusionAuthPurpose?>(null) }
-    val requestPhoneStatePermission = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        val purpose = pendingFusionPurpose.also { pendingFusionPurpose = null }
-        val activity = hostActivity
-        if (granted && purpose != null && activity != null) {
-            when (purpose) {
-                FusionAuthPurpose.LOGIN -> viewModel.startFusionLogin(activity)
-                FusionAuthPurpose.REGISTER -> viewModel.startFusionRegistration(activity)
-            }
-        } else if (purpose != null) {
-            viewModel.reportFusionPermissionDenied()
-        }
-    }
-    val launchFusion: (FusionAuthPurpose) -> Unit = { purpose ->
-        val activity = hostActivity
-        if (activity == null) {
-            viewModel.reportFusionPermissionDenied()
-        } else if (
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.READ_PHONE_STATE,
-            ) == PackageManager.PERMISSION_GRANTED
-        ) {
-            when (purpose) {
-                FusionAuthPurpose.LOGIN -> viewModel.startFusionLogin(activity)
-                FusionAuthPurpose.REGISTER -> viewModel.startFusionRegistration(activity)
-            }
-        } else {
-            // Permission is requested only after this explicit user action.
-            pendingFusionPurpose = purpose
-            requestPhoneStatePermission.launch(Manifest.permission.READ_PHONE_STATE)
-        }
-    }
     val createExportDocument = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/json"),
     ) { uri ->
@@ -150,7 +110,6 @@ fun AccountScreen(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
-            viewModel.cancelFusionForPageExit()
         }
     }
 
@@ -197,32 +156,27 @@ fun AccountScreen(
                 state.status == AccountStatus.GUEST -> {
                     val guestCapabilities = requireNotNull(capabilities)
                     item { GuestNoticeCard() }
-                    if (
-                        guestCapabilities.fusionEnabled &&
-                        state.fusionClientConfigured
-                    ) {
-                        item {
-                            FusionAuthCard(
-                                registrationEnabled =
-                                    guestCapabilities.registrationEnabled &&
-                                        guestCapabilities.wechatEnabled &&
-                                        state.wechatClientConfigured,
-                                hostAvailable = hostActivity != null,
-                                busy = state.busy,
-                                onLogin = { launchFusion(FusionAuthPurpose.LOGIN) },
-                                onRegister = { launchFusion(FusionAuthPurpose.REGISTER) },
-                            )
-                        }
-                    }
                     item {
                         OtpLoginCard(
                             state = state,
                             capabilities = guestCapabilities,
                             onRequestCode = { type, target ->
-                                viewModel.requestCode(type, OtpPurpose.LOGIN, target)
+                                viewModel.requestCode(
+                                    type,
+                                    if (type == AuthIdentityType.PHONE) {
+                                        OtpPurpose.REGISTER
+                                    } else {
+                                        OtpPurpose.LOGIN
+                                    },
+                                    target,
+                                )
                             },
                             onSubmit = viewModel::submitLoginCode,
+                            onResend = viewModel::resendCode,
                             onReset = viewModel::clearChallenge,
+                            onSelectType = viewModel::selectOtpInputType,
+                            onTargetChange = viewModel::updateOtpTargetDraft,
+                            onOtpChange = viewModel::updateOtpCodeDraft,
                         )
                     }
                     item {
@@ -231,21 +185,6 @@ fun AccountScreen(
                             clientConfigured = state.wechatClientConfigured,
                             busy = state.busy,
                             onLogin = viewModel::startWechatLogin,
-                        )
-                    }
-                    item {
-                        PhoneWechatRegistrationCard(
-                            state = state,
-                            capabilities = guestCapabilities,
-                            onRequestCode = { phone ->
-                                viewModel.requestCode(
-                                    AuthIdentityType.PHONE,
-                                    OtpPurpose.REGISTER,
-                                    phone,
-                                )
-                            },
-                            onAuthorizeAndRegister = viewModel::submitPhoneWechatRegistration,
-                            onReset = viewModel::clearChallenge,
                         )
                     }
                     item {
@@ -279,7 +218,24 @@ fun AccountScreen(
                                         viewModel.requestCode(AuthIdentityType.EMAIL, OtpPurpose.BIND, email)
                                     },
                                     onSubmit = viewModel::submitBindCode,
+                                    onResend = viewModel::resendCode,
                                     onReset = viewModel::clearChallenge,
+                                    onEmailChange = {
+                                        viewModel.updateOtpTargetDraft(AuthIdentityType.EMAIL, it)
+                                    },
+                                    onOtpChange = viewModel::updateOtpCodeDraft,
+                                )
+                            }
+                        }
+                        if (
+                            activeCapabilities.wechatEnabled &&
+                            state.identities.none { it.type == AuthIdentityType.WECHAT }
+                        ) {
+                            item {
+                                BindWechatCard(
+                                    clientConfigured = state.wechatClientConfigured,
+                                    busy = state.busy,
+                                    onBind = viewModel::startWechatBind,
                                 )
                             }
                         }
@@ -385,7 +341,7 @@ private fun CapabilityUnavailableCard() {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Icon(Icons.Rounded.Info, null, tint = MaterialTheme.colorScheme.primary)
             Text("账号能力当前未开放", style = MaterialTheme.typography.titleLarge)
-            Text("游客仍可使用全部核心推荐。账号服务只有在数据库、至少一种手机号验证通道（短信或一键认证）和微信授权都通过部署门禁后才会开放。")
+            Text("游客仍可使用全部核心推荐。账号服务只有在数据库和普通短信验证码通道通过部署门禁后才会开放。")
         }
     }
 }
@@ -401,68 +357,42 @@ private fun GuestNoticeCard() {
 }
 
 @Composable
-private fun FusionAuthCard(
-    registrationEnabled: Boolean,
-    hostAvailable: Boolean,
-    busy: Boolean,
-    onLogin: () -> Unit,
-    onRegister: () -> Unit,
-) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(
-                "手机号一键验证",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-            )
-            Text("由运营商验证本机号码；只有主动点击后才会申请电话状态权限并启动认证。")
-            Button(
-                onClick = onLogin,
-                enabled = hostAvailable && !busy,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("手机号一键登录") }
-            if (registrationEnabled) {
-                OutlinedButton(
-                    onClick = onRegister,
-                    enabled = hostAvailable && !busy,
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("验证手机号并用微信创建账号") }
-                Text(
-                    "创建账号仍必须继续完成微信授权；仅验证手机号不会创建账号。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun OtpLoginCard(
     state: AccountUiState,
     capabilities: AuthCapabilities,
     onRequestCode: (AuthIdentityType, String) -> Unit,
     onSubmit: (String) -> Unit,
+    onResend: () -> Unit,
     onReset: () -> Unit,
+    onSelectType: (AuthIdentityType) -> Unit,
+    onTargetChange: (AuthIdentityType, String) -> Unit,
+    onOtpChange: (String) -> Unit,
 ) {
     val allowed = buildList {
-        if (capabilities.phoneEnabled) add(AuthIdentityType.PHONE)
+        if (capabilities.phoneEnabled && capabilities.registrationEnabled) {
+            add(AuthIdentityType.PHONE)
+        }
         if (capabilities.emailEnabled) add(AuthIdentityType.EMAIL)
     }
-    var type by remember(allowed) { mutableStateOf(allowed.firstOrNull() ?: AuthIdentityType.PHONE) }
-    var target by remember(type) { mutableStateOf("") }
-    var otp by remember { mutableStateOf("") }
-    val challenge = state.challenge?.takeIf { it.purpose == OtpPurpose.LOGIN }
+    val type = state.otpInputType?.takeIf { it in allowed }
+        ?: allowed.firstOrNull()
+        ?: AuthIdentityType.PHONE
+    val target = state.otpTargetDraft.takeIf { state.otpInputType == type }.orEmpty()
+    val otp = state.otpCodeDraft
+    val challenge = state.challenge?.takeIf {
+        (it.type == AuthIdentityType.PHONE && it.purpose == OtpPurpose.REGISTER) ||
+            (it.type == AuthIdentityType.EMAIL && it.purpose == OtpPurpose.LOGIN)
+    }
 
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("验证码登录", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text("手机号 / 邮箱验证码", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             if (allowed.size > 1 && challenge == null) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     allowed.forEach { option ->
                         FilterChip(
                             selected = type == option,
-                            onClick = { type = option },
+                            onClick = { onSelectType(option) },
                             label = { Text(option.displayName()) },
                         )
                     }
@@ -473,10 +403,16 @@ private fun OtpLoginCard(
             } else if (challenge == null) {
                 OutlinedTextField(
                     value = target,
-                    onValueChange = { target = it.take(254) },
-                    label = { Text(if (type == AuthIdentityType.PHONE) "+86 手机号" else "邮箱") },
+                    onValueChange = { onTargetChange(type, it) },
+                    label = { Text(if (type == AuthIdentityType.PHONE) "手机号" else "邮箱") },
                     supportingText = {
-                        Text(if (type == AuthIdentityType.PHONE) "示例：+8613800138000" else "邮箱只能登录已绑定账号")
+                        Text(
+                            if (type == AuthIdentityType.PHONE) {
+                                "已注册手机号直接登录；新手机号验证后自动创建账号"
+                            } else {
+                                "邮箱只能登录已绑定账号"
+                            },
+                        )
                     },
                     keyboardOptions = KeyboardOptions(
                         keyboardType = if (type == AuthIdentityType.PHONE) KeyboardType.Phone else KeyboardType.Email,
@@ -487,14 +423,25 @@ private fun OtpLoginCard(
                 )
                 Button(
                     onClick = { onRequestCode(type, target) },
-                    enabled = target.isNotBlank() && !state.busy,
+                    enabled = (
+                        if (type == AuthIdentityType.PHONE) {
+                            target.matches(LOCAL_MAINLAND_PHONE_INPUT) ||
+                                target.matches(INTERNATIONAL_MAINLAND_PHONE_INPUT)
+                        } else target.isNotBlank()
+                    ) && !state.busy,
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("发送验证码") }
             } else {
                 Text("验证码已发送至 ${challenge.maskedTarget}")
+                OtpChallengeTiming(
+                    state = state,
+                    challenge = challenge,
+                    onResend = onResend,
+                    onResetForNewTarget = onReset,
+                )
                 OutlinedTextField(
                     value = otp,
-                    onValueChange = { otp = it.filter(Char::isDigit).take(6) },
+                    onValueChange = onOtpChange,
                     label = { Text("6 位验证码") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     singleLine = true,
@@ -505,7 +452,15 @@ private fun OtpLoginCard(
                     onClick = { onSubmit(otp) },
                     enabled = otp.length == 6 && !state.busy,
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text("安全登录") }
+                ) {
+                    Text(
+                        if (challenge.type == AuthIdentityType.PHONE) {
+                            "验证并登录 / 创建账号"
+                        } else {
+                            "安全登录"
+                        },
+                    )
+                }
                 TextButton(onClick = onReset, enabled = !state.busy) { Text("更换账号") }
             }
         }
@@ -545,75 +500,27 @@ private fun WechatLoginCard(
 }
 
 @Composable
-private fun PhoneWechatRegistrationCard(
-    state: AccountUiState,
-    capabilities: AuthCapabilities,
-    onRequestCode: (String) -> Unit,
-    onAuthorizeAndRegister: (String) -> Unit,
-    onReset: () -> Unit,
+private fun BindWechatCard(
+    clientConfigured: Boolean,
+    busy: Boolean,
+    onBind: () -> Unit,
 ) {
-    var phone by remember { mutableStateOf("") }
-    var otp by remember { mutableStateOf("") }
-    val challenge = state.challenge?.takeIf {
-        it.purpose == OtpPurpose.REGISTER && it.type == AuthIdentityType.PHONE
-    }
-    val available = capabilities.registrationEnabled &&
-        capabilities.phoneEnabled &&
-        capabilities.wechatEnabled &&
-        state.wechatClientConfigured
-
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(
-                "短信验证码 + 微信创建账号",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-            )
-            Text("使用此通道时，必须按顺序完成手机号验证码和微信授权；两份证明只在同一注册流程中一次性配对。")
-            if (!available) {
+            Text("绑定微信", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text("绑定后可用微信登录当前账号；若该微信已属于其他账号，系统会拒绝且不会静默合并。")
+            if (!clientConfigured) {
                 Text(
-                    when {
-                        !capabilities.registrationEnabled -> "当前部署尚未开放账号注册，游客功能不受影响。"
-                        !capabilities.phoneEnabled -> "当前短信验证码注册通道尚未开放。"
-                        !capabilities.wechatEnabled -> "当前服务端尚未开放微信注册。"
-                        else -> "此安装包未配置微信开放平台 AppID，注册已安全关闭。"
-                    },
+                    "此安装包未配置微信开放平台 AppID，微信绑定已安全关闭。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            } else if (challenge == null) {
-                OutlinedTextField(
-                    value = phone,
-                    onValueChange = { phone = it.take(14) },
-                    label = { Text("+86 手机号") },
-                    supportingText = { Text("示例：+8613800138000") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                    singleLine = true,
-                    enabled = !state.busy,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Button(
-                    onClick = { onRequestCode(phone) },
-                    enabled = phone.isNotBlank() && !state.busy,
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("发送注册验证码") }
             } else {
-                Text("验证码已发送至 ${challenge.maskedTarget}")
-                OutlinedTextField(
-                    value = otp,
-                    onValueChange = { otp = it.filter(Char::isDigit).take(6) },
-                    label = { Text("6 位验证码") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                    singleLine = true,
-                    enabled = !state.busy,
-                    modifier = Modifier.fillMaxWidth(),
-                )
                 Button(
-                    onClick = { onAuthorizeAndRegister(otp) },
-                    enabled = otp.length == 6 && !state.busy,
+                    onClick = onBind,
+                    enabled = !busy,
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text("微信授权并创建账号") }
-                TextButton(onClick = onReset, enabled = !state.busy) { Text("更换手机号") }
+                ) { Text("前往微信验证绑定") }
             }
         }
     }
@@ -754,10 +661,15 @@ private fun BindEmailCard(
     state: AccountUiState,
     onRequestCode: (String) -> Unit,
     onSubmit: (String) -> Unit,
+    onResend: () -> Unit,
     onReset: () -> Unit,
+    onEmailChange: (String) -> Unit,
+    onOtpChange: (String) -> Unit,
 ) {
-    var email by remember { mutableStateOf("") }
-    var otp by remember { mutableStateOf("") }
+    val email = state.otpTargetDraft.takeIf {
+        state.otpInputType == AuthIdentityType.EMAIL
+    }.orEmpty()
+    val otp = state.otpCodeDraft
     val challenge = state.challenge?.takeIf {
         it.purpose == OtpPurpose.BIND && it.type == AuthIdentityType.EMAIL
     }
@@ -768,7 +680,7 @@ private fun BindEmailCard(
             if (challenge == null) {
                 OutlinedTextField(
                     value = email,
-                    onValueChange = { email = it.take(254) },
+                    onValueChange = onEmailChange,
                     label = { Text("邮箱") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
                     singleLine = true,
@@ -782,12 +694,19 @@ private fun BindEmailCard(
                 ) { Text("发送绑定验证码") }
             } else {
                 Text("验证码已发送至 ${challenge.maskedTarget}")
+                OtpChallengeTiming(
+                    state = state,
+                    challenge = challenge,
+                    onResend = onResend,
+                    onResetForNewTarget = onReset,
+                )
                 OutlinedTextField(
                     value = otp,
-                    onValueChange = { otp = it.filter(Char::isDigit).take(6) },
+                    onValueChange = onOtpChange,
                     label = { Text("6 位验证码") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                     singleLine = true,
+                    enabled = !state.busy,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Button(
@@ -795,8 +714,46 @@ private fun BindEmailCard(
                     enabled = otp.length == 6 && !state.busy,
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("确认绑定") }
-                TextButton(onClick = onReset) { Text("取消") }
+                TextButton(onClick = onReset, enabled = !state.busy) { Text("取消") }
             }
+        }
+    }
+}
+
+@Composable
+private fun OtpChallengeTiming(
+    state: AccountUiState,
+    challenge: PendingOtpChallenge,
+    onResend: () -> Unit,
+    onResetForNewTarget: () -> Unit,
+) {
+    Text(
+        "验证码有效期还剩 ${state.otpSecondsUntilExpiry} 秒",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    if (state.otpCanResend) {
+        TextButton(
+            onClick = onResend,
+            enabled = state.otpSecondsUntilResend == 0L && !state.busy,
+        ) {
+            Text(
+                if (state.otpSecondsUntilResend > 0L) {
+                    "${state.otpSecondsUntilResend} 秒后可重新发送"
+                } else {
+                    "重新发送验证码"
+                },
+            )
+        }
+    } else {
+        TextButton(onClick = onResetForNewTarget, enabled = !state.busy) {
+            Text(
+                if (challenge.type == AuthIdentityType.EMAIL) {
+                    "重新输入邮箱获取新验证码"
+                } else {
+                    "重新输入手机号获取新验证码"
+                },
+            )
         }
     }
 }
@@ -1030,6 +987,8 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
     else -> null
 }
 
+private val LOCAL_MAINLAND_PHONE_INPUT = Regex("^1[3-9]\\d{9}$")
+private val INTERNATIONAL_MAINLAND_PHONE_INPUT = Regex("^\\+861[3-9]\\d{9}$")
 private val ACCOUNT_TIME_FORMATTER = DateTimeFormatter
     .ofPattern("MM-dd HH:mm")
     .withZone(ZoneId.systemDefault())

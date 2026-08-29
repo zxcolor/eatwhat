@@ -5,8 +5,6 @@ import java.util.UUID
 
 internal object AuthResponseValidator {
     private val opaqueToken = Regex("^[A-Za-z0-9_-]{43}$")
-    private val fusionToken = Regex("^[^\\s\\u0000-\\u001F\\u007F]{1,4096}$")
-    private val fusionSchemeCode = Regex("^[A-Za-z0-9_-]{1,128}$")
     private val phoneMask = Regex("^\\+861\\d{2}\\*{4}\\d{4}$")
     private val emailMask = Regex("^[^@\\s]*\\*+[^@\\s]*@[A-Za-z0-9.-]{1,190}$")
 
@@ -53,28 +51,6 @@ internal object AuthResponseValidator {
             resend <= expiry
     }
 
-    fun validFusionToken(
-        response: FusionAuthTokenResponse,
-        now: Instant,
-    ): Boolean {
-        val expiry = response.expiresAt.asInstant() ?: return false
-        return response.flowId.isCanonicalUuid() &&
-            response.schemeCode.matches(fusionSchemeCode) &&
-            response.authToken.matches(fusionToken) &&
-            expiry.isAfter(now) &&
-            expiry <= now.plusSeconds(MAX_FUSION_TOKEN_TTL_SECONDS + CLOCK_SKEW_SECONDS)
-    }
-
-    fun validFusionRegistrationProof(
-        response: FusionRegistrationPhoneProof,
-        now: Instant,
-    ): Boolean {
-        val expiry = response.expiresAt.asInstant() ?: return false
-        return response.proofId.isCanonicalUuid() &&
-            expiry.isAfter(now) &&
-            expiry <= now.plusSeconds(MAX_FUSION_PROOF_TTL_SECONDS + CLOCK_SKEW_SECONDS)
-    }
-
     fun validOAuthState(
         response: OAuthStateResponse,
         provider: AuthIdentityType,
@@ -82,7 +58,7 @@ internal object AuthResponseValidator {
         now: Instant,
     ): Boolean =
         when (provider) {
-            AuthIdentityType.WECHAT -> purpose in setOf(OAuthPurpose.REGISTER, OAuthPurpose.LOGIN)
+            AuthIdentityType.WECHAT -> purpose in setOf(OAuthPurpose.LOGIN, OAuthPurpose.BIND)
             AuthIdentityType.QQ -> purpose in setOf(OAuthPurpose.LOGIN, OAuthPurpose.BIND)
             else -> false
         } &&
@@ -110,9 +86,12 @@ internal object AuthResponseValidator {
             validMask &&
             binding.boundAt.asInstant() != null &&
             (!binding.primary || binding.type == AuthIdentityType.PHONE) &&
-            // The API permits secondary email and QQ identities to be removed.
-            // Phone remains primary and WeChat remains a required registration identity.
-            (!binding.canUnbind || binding.type in setOf(AuthIdentityType.EMAIL, AuthIdentityType.QQ))
+            // Phone remains the primary identity; secondary providers are removable.
+            (!binding.canUnbind || binding.type in setOf(
+                AuthIdentityType.EMAIL,
+                AuthIdentityType.WECHAT,
+                AuthIdentityType.QQ,
+            ))
     }
 
     fun validSessions(response: AuthSessionsResponse): Boolean =
@@ -140,6 +119,4 @@ internal object AuthResponseValidator {
 
     private const val CLOCK_SKEW_SECONDS = 30L
     private const val MAX_OTP_TTL_SECONDS = 10 * 60L
-    private const val MAX_FUSION_TOKEN_TTL_SECONDS = 12 * 60 * 60L
-    private const val MAX_FUSION_PROOF_TTL_SECONDS = 15 * 60L
 }

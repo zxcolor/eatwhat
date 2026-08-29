@@ -3,7 +3,7 @@ import type { VersionedHash } from "./auth-crypto.js";
 
 export type AuthIdentityType = "PHONE" | "EMAIL" | "WECHAT" | "QQ";
 export type AuthOtpPurpose = "REGISTER" | "LOGIN" | "BIND" | "RECOVERY";
-export type AuthOAuthPurpose = "REGISTER" | "LOGIN" | "BIND";
+export type AuthOAuthPurpose = "LOGIN" | "BIND";
 
 export interface AuthenticatedSession {
 	readonly userId: string;
@@ -22,7 +22,8 @@ export interface OtpChallengeDraft {
 	readonly operationTargetHash: string | null;
 	readonly targetUserId: string | null;
 	readonly registrationFlowReferenceHash: string | null;
-	readonly codeHash: VersionedHash;
+	readonly verificationMethod: "ALIYUN_PNVS" | "LOCAL_HASH";
+	readonly codeHash: VersionedHash | null;
 	readonly idempotencyKeyHash: string;
 	readonly hashKeyVersion: string;
 	readonly requestIpHash: string;
@@ -49,8 +50,9 @@ export interface OtpProof {
 	readonly channel: "PHONE" | "EMAIL";
 	readonly purpose: AuthOtpPurpose;
 	readonly destinationDedupHash: string;
-	readonly codeHash: string;
-	readonly codeHashKeyVersion: string;
+	readonly verificationMethod: "ALIYUN_PNVS" | "LOCAL_HASH";
+	readonly codeHash: string | null;
+	readonly codeHashKeyVersion: string | null;
 	readonly operationTargetHash: string | null;
 	readonly targetUserId: string | null;
 	readonly registrationFlowReferenceHash: string | null;
@@ -62,40 +64,6 @@ export interface RegistrationFlowProof {
 	readonly registrationFlowReferenceHash: string;
 	readonly deviceHash: string;
 	readonly hashKeyVersion: string;
-}
-
-export interface FusionAuthFlowDraft {
-	readonly id: string;
-	readonly purpose: "LOGIN" | "REGISTER";
-	readonly registrationFlowReferenceHash: string | null;
-	readonly requestIpHash: string;
-	readonly deviceHash: string;
-	readonly hashKeyVersion: string;
-	readonly createdAt: Date;
-	readonly expiresAt: Date;
-	readonly retainUntil: Date;
-}
-
-export interface FusionAuthProof {
-	readonly id: string;
-	readonly purpose: "LOGIN" | "REGISTER";
-	readonly registrationFlowReferenceHash: string | null;
-	readonly deviceHash: string;
-	readonly hashKeyVersion: string;
-	readonly expiresAt: Date;
-}
-
-export interface VerifiedFusionAuthProof extends FusionAuthProof {
-	readonly registrationFlowReferenceHash: string;
-	readonly verifiedPhone: VerifiedFusionPhoneHashes;
-	readonly verifiedAt: Date;
-}
-
-export interface VerifiedFusionPhoneHashes {
-	readonly lookup: VersionedHash;
-	readonly dedup: VersionedHash;
-	readonly maskedPhone: string;
-	readonly verifyTokenHash: VersionedHash;
 }
 
 export interface OAuthStateDraft {
@@ -163,6 +131,10 @@ export type CompleteCredentialResult =
 	| { readonly kind: "INVALID_CREDENTIALS" }
 	| { readonly kind: "IDENTITY_CONFLICT" };
 
+export type CompleteOAuthCredentialResult =
+	| CompleteCredentialResult
+	| { readonly kind: "IDENTITY_NOT_BOUND" };
+
 export type RefreshSessionResult =
 	| {
 			readonly kind: "SUCCESS";
@@ -177,4 +149,8 @@ export type RefreshSessionResult =
 export interface VerifiedOAuthHashes {
 	readonly lookup: VersionedHash;
 	readonly dedup: VersionedHash;
+	readonly wechatUnionAlias: Readonly<{
+		readonly realmId: string;
+		readonly hash: VersionedHash;
+	}> | null;
 }

@@ -65,6 +65,68 @@ describe("Nest database pool lifecycle", () => {
 		expect(client.release).toHaveBeenCalledTimes(1);
 	});
 
+	it("starts the WeChat Union alias bridge only when exactly 0012 is pending", async () => {
+		const plan = await loadMigrationPlan();
+		expect(plan.at(-1)?.fileName).toBe("0012_wechat_union_aliases.sql");
+		const applied = plan.slice(0, -1).map(({ version, name, checksum }) => ({
+			version,
+			name,
+			checksum,
+		}));
+		const createPool = () => {
+			const client = {
+				query: vi.fn(async (text: string) => {
+					if (text.includes("to_regclass")) {
+						return {
+							rows: [{ table_name: "schema_migrations" }],
+							rowCount: 1,
+						};
+					}
+					if (text.startsWith("SELECT version, name, checksum")) {
+						return { rows: applied, rowCount: applied.length };
+					}
+					return { rows: [], rowCount: 1 };
+				}),
+				release: vi.fn(),
+			};
+			const pool = {
+				on: vi.fn(),
+				connect: vi.fn(async () => client),
+				end: vi.fn(async () => undefined),
+			};
+			return { client, pool };
+		};
+		const env = {
+			NODE_ENV: "test",
+			DATABASE_ENABLED: "true",
+			DATABASE_URL:
+				"postgresql://api_runtime:runtime-pass@db.internal:5432/chi_shen_me",
+			ACCOUNTS_ENABLED: "false",
+		} as const;
+
+		const bridgeState = createPool();
+		const bridge = new DatabasePool(
+			loadAppConfig({
+				...env,
+				AUTH_SCHEMA_TRANSITION_MODE: "wechat_union_aliases_pending",
+				WECHAT_AUTH_ENABLED: "false",
+			}),
+			() => bridgeState.pool as unknown as Pool,
+		);
+		await expect(bridge.onApplicationBootstrap()).resolves.toBeUndefined();
+		await bridge.onApplicationShutdown();
+
+		const strictState = createPool();
+		const strict = new DatabasePool(
+			loadAppConfig({ ...env, AUTH_SCHEMA_TRANSITION_MODE: "none" }),
+			() => strictState.pool as unknown as Pool,
+		);
+		await expect(strict.onApplicationBootstrap()).rejects.toThrow(
+			"数据库启动检查失败",
+		);
+		expect(strictState.client.release).toHaveBeenCalledWith(true);
+	});
+
 	it("checks the exact schema and closes the singleton pool on shutdown", async () => {
 		const plan = await loadMigrationPlan();
 		const events: string[] = [];

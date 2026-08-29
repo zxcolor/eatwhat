@@ -1,4 +1,8 @@
 export type NodeEnvironment = "development" | "test" | "production";
+export type AuthSchemaTransitionMode =
+	| "none"
+	| "legacy_phone_drain"
+	| "wechat_union_aliases_pending";
 
 export type DatabaseSslConfig =
 	| false
@@ -9,6 +13,7 @@ export type DatabaseSslConfig =
 
 export interface DatabaseConfig {
 	readonly enabled: boolean;
+	readonly authSchemaTransitionMode: AuthSchemaTransitionMode;
 	readonly connectionString: string | null;
 	readonly ssl: DatabaseSslConfig;
 	readonly poolMaximum: number;
@@ -48,6 +53,22 @@ function readBoundedInteger(
 		throw new Error(`${name} 必须是 ${minimum} 到 ${maximum} 的整数`);
 	}
 	return parsed;
+}
+
+function readAuthSchemaTransitionMode(
+	value: string | undefined,
+): AuthSchemaTransitionMode {
+	const normalized = value === undefined || value === "" ? "none" : value;
+	if (
+		normalized !== "none" &&
+		normalized !== "legacy_phone_drain" &&
+		normalized !== "wechat_union_aliases_pending"
+	) {
+		throw new Error(
+			"AUTH_SCHEMA_TRANSITION_MODE 只允许 none、legacy_phone_drain 或 wechat_union_aliases_pending",
+		);
+	}
+	return normalized;
 }
 
 interface ParsedDatabaseUrl {
@@ -205,6 +226,25 @@ export function loadDatabaseConfig(
 	env: NodeJS.ProcessEnv,
 	nodeEnv: NodeEnvironment,
 ): DatabaseConfig {
+	const authSchemaTransitionMode = readAuthSchemaTransitionMode(
+		env.AUTH_SCHEMA_TRANSITION_MODE,
+	);
+	if (
+		authSchemaTransitionMode === "legacy_phone_drain" &&
+		readStrictBoolean(env.ACCOUNTS_ENABLED, "ACCOUNTS_ENABLED", false)
+	) {
+		throw new Error(
+			"AUTH_SCHEMA_TRANSITION_MODE=legacy_phone_drain 时必须关闭 ACCOUNTS_ENABLED",
+		);
+	}
+	if (
+		authSchemaTransitionMode === "wechat_union_aliases_pending" &&
+		readStrictBoolean(env.WECHAT_AUTH_ENABLED, "WECHAT_AUTH_ENABLED", false)
+	) {
+		throw new Error(
+			"AUTH_SCHEMA_TRANSITION_MODE=wechat_union_aliases_pending 时必须关闭 WECHAT_AUTH_ENABLED",
+		);
+	}
 	const enabled = readStrictBoolean(
 		env.DATABASE_ENABLED,
 		"DATABASE_ENABLED",
@@ -239,6 +279,7 @@ export function loadDatabaseConfig(
 	if (!enabled) {
 		return Object.freeze({
 			enabled: false,
+			authSchemaTransitionMode,
 			connectionString: null,
 			ssl: false,
 			poolMaximum,
@@ -251,6 +292,7 @@ export function loadDatabaseConfig(
 	validateProductionConnectionIdentity(env, parsedUrl, nodeEnv, "API");
 	return Object.freeze({
 		enabled: true,
+		authSchemaTransitionMode,
 		connectionString: parsedUrl.value,
 		ssl: readSslConfig(
 			env.DATABASE_SSL_MODE,

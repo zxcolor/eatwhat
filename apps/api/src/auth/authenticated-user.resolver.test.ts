@@ -23,10 +23,11 @@ function config() {
 		AUTH_OTP_PEPPER_ACTIVE_VERSION: "v1",
 		AUTH_OTP_PEPPER_KEYS_JSON: JSON.stringify({ v1: otpPepper }),
 		AUTH_IDENTITY_DEDUP_KEY_VERSION: "v1",
-		ALIYUN_SMS_SIGN_NAME: "test-sign",
-		ALIYUN_SMS_TEMPLATE_CODE: "SMS_TEST",
+		ALIYUN_PNVS_SIGN_NAME: "test-sign",
+		ALIYUN_PNVS_TEMPLATE_CODE: "100001",
 		WECHAT_APP_ID: "wx0123456789abcdef",
 		WECHAT_APP_SECRET: "private-provider-secret",
+		WECHAT_OPEN_PLATFORM_REALM_ID: "eatwhat-primary",
 	});
 }
 

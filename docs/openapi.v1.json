@@ -873,7 +873,7 @@
 				"operationId": "requestPhoneCode",
 				"tags": ["Authentication"],
 				"summary": "请求手机验证码",
-				"description": "首期只接受 +86 E.164 中国大陆手机号，且只支持 REGISTER 与 LOGIN。REGISTER 只创建手机 challenge，还必须与微信 code/state 一起提交注册。统一响应避免枚举账号。",
+				"description": "首期只接受 +86 E.164 中国大陆手机号，支持 REGISTER 与 LOGIN。PHONE OTP 验证成功后直接创建或登录手机号账号；统一响应避免枚举账号。",
 				"parameters": [
 					{ "$ref": "#/components/parameters/RequestCorrelationId" },
 					{ "$ref": "#/components/parameters/ClientContractVersion" }
@@ -889,70 +889,6 @@
 				"responses": {
 					"202": { "$ref": "#/components/responses/PhoneCodeAccepted" },
 					"400": { "$ref": "#/components/responses/AuthBadRequest" },
-					"403": { "$ref": "#/components/responses/AuthForbidden" },
-					"409": { "$ref": "#/components/responses/AuthConflict" },
-					"413": { "$ref": "#/components/responses/PayloadTooLarge" },
-					"415": { "$ref": "#/components/responses/UnsupportedMediaType" },
-					"429": { "$ref": "#/components/responses/RateLimited" },
-					"500": { "$ref": "#/components/responses/InternalError" },
-					"503": { "$ref": "#/components/responses/AuthUnavailable" }
-				}
-			}
-		},
-		"/v1/auth/phone/fusion-token": {
-			"post": {
-				"operationId": "requestFusionToken",
-				"tags": ["Authentication"],
-				"summary": "签发融合认证临时令牌",
-				"description": "服务端固定方案、包名、签名与时效。REGISTER 只启动手机号证明流程，不能单独创建账号。",
-				"parameters": [
-					{ "$ref": "#/components/parameters/RequestCorrelationId" },
-					{ "$ref": "#/components/parameters/ClientContractVersion" }
-				],
-				"requestBody": {
-					"required": true,
-					"content": {
-						"application/json": {
-							"schema": { "$ref": "#/components/schemas/FusionAuthTokenRequest" }
-						}
-					}
-				},
-				"responses": {
-					"201": { "$ref": "#/components/responses/FusionAuthTokenCreated" },
-					"400": { "$ref": "#/components/responses/AuthBadRequest" },
-					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
-					"403": { "$ref": "#/components/responses/AuthForbidden" },
-					"409": { "$ref": "#/components/responses/AuthConflict" },
-					"413": { "$ref": "#/components/responses/PayloadTooLarge" },
-					"415": { "$ref": "#/components/responses/UnsupportedMediaType" },
-					"429": { "$ref": "#/components/responses/RateLimited" },
-					"500": { "$ref": "#/components/responses/InternalError" },
-					"503": { "$ref": "#/components/responses/AuthUnavailable" }
-				}
-			}
-		},
-		"/v1/auth/phone/fusion-verify": {
-			"post": {
-				"operationId": "verifyFusionPhone",
-				"tags": ["Authentication"],
-				"summary": "验证融合认证注册手机号",
-				"description": "只接受 REGISTER flow；成功后返回绑定设备、短期且一次性的脱敏手机证明。",
-				"parameters": [
-					{ "$ref": "#/components/parameters/RequestCorrelationId" },
-					{ "$ref": "#/components/parameters/ClientContractVersion" }
-				],
-				"requestBody": {
-					"required": true,
-					"content": {
-						"application/json": {
-							"schema": { "$ref": "#/components/schemas/FusionAuthVerifyRequest" }
-						}
-					}
-				},
-				"responses": {
-					"200": { "$ref": "#/components/responses/FusionPhoneVerified" },
-					"400": { "$ref": "#/components/responses/AuthBadRequest" },
-					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
 					"403": { "$ref": "#/components/responses/AuthForbidden" },
 					"409": { "$ref": "#/components/responses/AuthConflict" },
 					"413": { "$ref": "#/components/responses/PayloadTooLarge" },
@@ -1001,7 +937,7 @@
 				"operationId": "createOAuthState",
 				"tags": ["Authentication"],
 				"summary": "签发一次性 OAuth state",
-				"description": "WECHAT 只允许 REGISTER/LOGIN，QQ 只允许 LOGIN/BIND。BIND 用途必须带有效 Bearer 会话；REGISTER/LOGIN 不要求会话。",
+				"description": "WECHAT 与 QQ 只允许 LOGIN/BIND。BIND 用途必须带有效 Bearer 会话；LOGIN 不要求会话，且只登录已绑定身份。",
 				"security": [{}, { "BearerAuth": [] }],
 				"parameters": [
 					{ "$ref": "#/components/parameters/RequestCorrelationId" },
@@ -1029,78 +965,12 @@
 				}
 			}
 		},
-		"/v1/auth/register/phone-wechat": {
-			"post": {
-				"operationId": "registerPhoneWechat",
-				"tags": ["Authentication"],
-				"summary": "以手机验证和微信授权共同注册",
-				"description": "原子消费 REGISTER 手机 challenge 与 WECHAT REGISTER state。任一身份已属于其他账号时整体冲突，绝不静默合并。",
-				"parameters": [
-					{ "$ref": "#/components/parameters/RequestCorrelationId" },
-					{ "$ref": "#/components/parameters/ClientContractVersion" }
-				],
-				"requestBody": {
-					"required": true,
-					"content": {
-						"application/json": {
-							"schema": {
-								"$ref": "#/components/schemas/RegisterPhoneWechatRequest"
-							}
-						}
-					}
-				},
-				"responses": {
-					"201": { "$ref": "#/components/responses/AuthSessionCreated" },
-					"400": { "$ref": "#/components/responses/AuthBadRequest" },
-					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
-					"403": { "$ref": "#/components/responses/AuthForbidden" },
-					"409": { "$ref": "#/components/responses/AuthConflict" },
-					"413": { "$ref": "#/components/responses/PayloadTooLarge" },
-					"415": { "$ref": "#/components/responses/UnsupportedMediaType" },
-					"429": { "$ref": "#/components/responses/RateLimited" },
-					"500": { "$ref": "#/components/responses/InternalError" },
-					"503": { "$ref": "#/components/responses/AuthUnavailable" }
-				}
-			}
-		},
-		"/v1/auth/register/fusion-wechat": {
-			"post": {
-				"operationId": "registerFusionWechat",
-				"tags": ["Authentication"],
-				"summary": "以融合手机号证明和微信授权共同注册",
-				"description": "原子消费短期融合手机 proof 与同一设备、同一注册流程的 WECHAT state；不提供手机单因子注册。",
-				"parameters": [
-					{ "$ref": "#/components/parameters/RequestCorrelationId" },
-					{ "$ref": "#/components/parameters/ClientContractVersion" }
-				],
-				"requestBody": {
-					"required": true,
-					"content": {
-						"application/json": {
-							"schema": { "$ref": "#/components/schemas/RegisterFusionWechatRequest" }
-						}
-					}
-				},
-				"responses": {
-					"201": { "$ref": "#/components/responses/AuthSessionCreated" },
-					"400": { "$ref": "#/components/responses/AuthBadRequest" },
-					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
-					"403": { "$ref": "#/components/responses/AuthForbidden" },
-					"409": { "$ref": "#/components/responses/AuthConflict" },
-					"413": { "$ref": "#/components/responses/PayloadTooLarge" },
-					"415": { "$ref": "#/components/responses/UnsupportedMediaType" },
-					"429": { "$ref": "#/components/responses/RateLimited" },
-					"500": { "$ref": "#/components/responses/InternalError" },
-					"503": { "$ref": "#/components/responses/AuthUnavailable" }
-				}
-			}
-		},
 		"/v1/auth/login": {
 			"post": {
 				"operationId": "login",
 				"tags": ["Authentication"],
 				"summary": "登录已有账号",
-				"description": "PHONE/WECHAT 可登录已有账号；EMAIL/QQ 只在该身份已绑定时登录。身份不存在时不自动注册。",
+				"description": "PHONE OTP 可直接注册或登录；EMAIL/WECHAT/QQ 只在该身份已绑定时登录，不会创建账号。",
 				"parameters": [
 					{ "$ref": "#/components/parameters/RequestCorrelationId" },
 					{ "$ref": "#/components/parameters/ClientContractVersion" }
@@ -1213,7 +1083,7 @@
 				"operationId": "bindIdentity",
 				"tags": ["Identity and sessions"],
 				"summary": "绑定已验证身份",
-				"description": "邮箱消费 BIND challenge，QQ 消费 BIND state 与临时平台材料。手机号和微信不提供绑定入口；已属于其他账号时返回冲突，不披露其他账号。",
+				"description": "邮箱消费 BIND challenge，微信或 QQ 消费 BIND state 与临时平台材料。手机号不提供绑定入口；已属于其他账号时返回冲突，不披露其他账号。",
 				"security": [{ "BearerAuth": [] }],
 				"parameters": [
 					{ "$ref": "#/components/parameters/RequestCorrelationId" },
@@ -3045,7 +2915,6 @@
 					"accountsEnabled": { "type": "boolean" },
 					"registrationEnabled": { "type": "boolean" },
 					"phoneEnabled": { "type": "boolean" },
-					"fusionEnabled": { "type": "boolean", "default": false },
 					"wechatEnabled": { "type": "boolean" },
 					"emailEnabled": { "type": "boolean" },
 					"qqEnabled": { "type": "boolean" },
@@ -3055,7 +2924,6 @@
 					"accountsEnabled",
 					"registrationEnabled",
 					"phoneEnabled",
-					"fusionEnabled",
 					"wechatEnabled",
 					"emailEnabled",
 					"qqEnabled",
@@ -3082,14 +2950,6 @@
 				"pattern": "^[A-Za-z0-9._~+/=-]+$",
 				"writeOnly": true,
 				"x-sensitive": "third-party-authorization-code"
-			},
-			"ThirdPartyAccessToken": {
-				"type": "string",
-				"minLength": 16,
-				"maxLength": 2048,
-				"pattern": "^[A-Za-z0-9._~+/=-]+$",
-				"writeOnly": true,
-				"x-sensitive": "third-party-access-token"
 			},
 			"AppAccessToken": {
 				"type": "string",
@@ -3148,74 +3008,6 @@
 					}
 				},
 				"required": ["phoneNumber", "purpose", "installationId"],
-				"additionalProperties": false
-			},
-			"FusionAuthTokenRequest": {
-				"type": "object",
-				"properties": {
-					"purpose": { "type": "string", "enum": ["LOGIN", "REGISTER"] },
-					"installationId": {
-						"$ref": "#/components/schemas/ContractUuid",
-						"writeOnly": true,
-						"x-sensitive": "device-installation-id"
-					}
-				},
-				"required": ["purpose", "installationId"],
-				"additionalProperties": false
-			},
-			"FusionAuthTokenResponse": {
-				"type": "object",
-				"properties": {
-					"flowId": { "$ref": "#/components/schemas/ContractUuid" },
-					"schemeCode": {
-						"type": "string",
-						"minLength": 1,
-						"maxLength": 128,
-						"pattern": "^[A-Za-z0-9_-]+$",
-						"readOnly": true,
-						"x-sensitive": "fusion-scheme-code"
-					},
-					"authToken": {
-						"type": "string",
-						"minLength": 1,
-						"maxLength": 4096,
-						"pattern": "^[^\\s\\u0000-\\u001F\\u007F]+$",
-						"readOnly": true,
-						"x-sensitive": "short-lived-fusion-auth-token"
-					},
-					"expiresAt": { "$ref": "#/components/schemas/UtcDateTime" }
-				},
-				"required": ["flowId", "schemeCode", "authToken", "expiresAt"],
-				"additionalProperties": false
-			},
-			"FusionAuthVerifyRequest": {
-				"type": "object",
-				"properties": {
-					"flowId": { "$ref": "#/components/schemas/ContractUuid" },
-					"verifyToken": {
-						"type": "string",
-						"minLength": 1,
-						"maxLength": 4096,
-						"pattern": "^[^\\s\\u0000-\\u001F\\u007F]+$",
-						"writeOnly": true,
-						"x-sensitive": "fusion-verify-token"
-					},
-					"installationId": {
-						"$ref": "#/components/schemas/ContractUuid",
-						"writeOnly": true,
-						"x-sensitive": "device-installation-id"
-					}
-				},
-				"required": ["flowId", "verifyToken", "installationId"],
-				"additionalProperties": false
-			},
-			"FusionAuthVerifyResponse": {
-				"type": "object",
-				"properties": {
-					"proofId": { "$ref": "#/components/schemas/ContractUuid" },
-					"expiresAt": { "$ref": "#/components/schemas/UtcDateTime" }
-				},
-				"required": ["proofId", "expiresAt"],
 				"additionalProperties": false
 			},
 			"EmailRequestCode": {
@@ -3293,49 +3085,6 @@
 					{
 						"type": "object",
 						"properties": {
-							"provider": { "type": "string", "const": "WECHAT" },
-							"purpose": { "type": "string", "const": "REGISTER" },
-							"installationId": {
-								"type": "string",
-								"format": "uuid",
-								"pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-							},
-							"phoneChallengeId": {
-								"type": "string",
-								"format": "uuid",
-								"pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-							}
-						},
-						"required": [
-							"provider",
-							"purpose",
-							"installationId",
-							"phoneChallengeId"
-						],
-						"additionalProperties": false
-					},
-					{
-						"type": "object",
-						"properties": {
-							"provider": { "type": "string", "const": "WECHAT" },
-							"purpose": { "type": "string", "const": "REGISTER" },
-							"installationId": {
-								"type": "string",
-								"format": "uuid",
-								"pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-							},
-							"phoneProofId": {
-								"type": "string",
-								"format": "uuid",
-								"pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-							}
-						},
-						"required": ["provider", "purpose", "installationId", "phoneProofId"],
-						"additionalProperties": false
-					},
-					{
-						"type": "object",
-						"properties": {
 							"provider": {
 								"type": "string",
 								"enum": ["WECHAT", "QQ"]
@@ -3353,7 +3102,10 @@
 					{
 						"type": "object",
 						"properties": {
-							"provider": { "type": "string", "const": "QQ" },
+							"provider": {
+								"type": "string",
+								"enum": ["WECHAT", "QQ"]
+							},
 							"purpose": { "type": "string", "const": "BIND" },
 							"installationId": {
 								"type": "string",
@@ -3374,7 +3126,7 @@
 							"provider": { "type": "string", "const": "WECHAT" },
 							"purpose": {
 								"type": "string",
-								"enum": ["REGISTER", "LOGIN"]
+								"enum": ["LOGIN", "BIND"]
 							},
 							"state": {
 								"$ref": "#/components/schemas/OAuthStateValue",
@@ -3403,55 +3155,6 @@
 					}
 				]
 			},
-			"RegisterPhoneWechatRequest": {
-				"type": "object",
-				"description": "唯一注册契约：已验证手机 challenge 与微信临时 code/state 必须同时提交。",
-				"properties": {
-					"phoneChallengeId": {
-						"$ref": "#/components/schemas/ContractUuid",
-						"writeOnly": true
-					},
-					"phoneOtpCode": { "$ref": "#/components/schemas/OtpCode" },
-					"wechatOAuthState": {
-						"$ref": "#/components/schemas/OAuthStateValue",
-						"writeOnly": true,
-						"x-sensitive": "one-time-oauth-state"
-					},
-					"wechatAuthorizationCode": {
-						"$ref": "#/components/schemas/ThirdPartyAuthorizationCode"
-					},
-					"device": { "$ref": "#/components/schemas/AuthDeviceContext" }
-				},
-				"required": [
-					"phoneChallengeId",
-					"phoneOtpCode",
-					"wechatOAuthState",
-					"wechatAuthorizationCode",
-					"device"
-				],
-				"additionalProperties": false
-			},
-			"RegisterFusionWechatRequest": {
-				"type": "object",
-				"description": "融合手机号 proof 与微信临时 code/state 必须同时提交。",
-				"properties": {
-					"phoneProofId": {
-						"$ref": "#/components/schemas/ContractUuid",
-						"writeOnly": true
-					},
-					"wechatOAuthState": {
-						"$ref": "#/components/schemas/OAuthStateValue",
-						"writeOnly": true,
-						"x-sensitive": "one-time-oauth-state"
-					},
-					"wechatAuthorizationCode": {
-						"$ref": "#/components/schemas/ThirdPartyAuthorizationCode"
-					},
-					"device": { "$ref": "#/components/schemas/AuthDeviceContext" }
-				},
-				"required": ["phoneProofId", "wechatOAuthState", "wechatAuthorizationCode", "device"],
-				"additionalProperties": false
-			},
 			"LoginRequest": {
 				"oneOf": [
 					{
@@ -3463,30 +3166,15 @@
 							},
 							"otpCode": { "$ref": "#/components/schemas/OtpCode" },
 							"device": { "$ref": "#/components/schemas/AuthDeviceContext" },
-							"method": { "type": "string", "const": "PHONE" }
-						},
-						"required": ["challengeId", "otpCode", "device", "method"],
-						"additionalProperties": false
-					},
-					{
-						"type": "object",
-						"properties": {
-							"method": { "type": "string", "const": "PHONE_FUSION" },
-							"flowId": {
-								"$ref": "#/components/schemas/ContractUuid",
-								"writeOnly": true
-							},
-							"verifyToken": {
+							"method": { "type": "string", "const": "PHONE" },
+							"phoneNumber": {
 								"type": "string",
-								"minLength": 1,
-								"maxLength": 4096,
-								"pattern": "^[^\\s\\u0000-\\u001F\\u007F]+$",
+								"pattern": "^\\+861[3-9]\\d{9}$",
 								"writeOnly": true,
-								"x-sensitive": "fusion-verify-token"
-							},
-							"device": { "$ref": "#/components/schemas/AuthDeviceContext" }
+								"x-sensitive": "phone-number"
+							}
 						},
-						"required": ["method", "flowId", "verifyToken", "device"],
+						"required": ["challengeId", "otpCode", "device", "method", "phoneNumber"],
 						"additionalProperties": false
 					},
 					{
@@ -3506,6 +3194,7 @@
 					},
 					{
 						"type": "object",
+						"description": "微信必须已绑定到现有账号。state 与微信临时授权均验证成功但身份未绑定时返回 IDENTITY_NOT_BOUND，不创建账号。",
 						"properties": {
 							"oauthState": {
 								"$ref": "#/components/schemas/OAuthStateValue",
@@ -3523,20 +3212,20 @@
 					},
 					{
 						"type": "object",
-						"description": "QQ 必须已绑定到现有账号；平台材料由服务端再验证。",
+						"description": "QQ 必须已绑定到现有账号；只接受 QQ Server-Side 登录返回的临时 authorization_code，由服务端交换并验证，客户端不得提交 access_token 或 OpenID。",
 						"properties": {
 							"oauthState": {
 								"$ref": "#/components/schemas/OAuthStateValue",
 								"writeOnly": true,
 								"x-sensitive": "one-time-oauth-state"
 							},
-							"accessToken": {
-								"$ref": "#/components/schemas/ThirdPartyAccessToken"
+							"authorizationCode": {
+								"$ref": "#/components/schemas/ThirdPartyAuthorizationCode"
 							},
 							"method": { "type": "string", "const": "QQ" },
 							"device": { "$ref": "#/components/schemas/AuthDeviceContext" }
 						},
-						"required": ["oauthState", "accessToken", "method", "device"],
+						"required": ["oauthState", "authorizationCode", "method", "device"],
 						"additionalProperties": false
 					}
 				]
@@ -3731,12 +3420,29 @@
 								"writeOnly": true,
 								"x-sensitive": "one-time-oauth-state"
 							},
-							"accessToken": {
-								"$ref": "#/components/schemas/ThirdPartyAccessToken"
+							"authorizationCode": {
+								"$ref": "#/components/schemas/ThirdPartyAuthorizationCode"
+							},
+							"type": { "type": "string", "const": "WECHAT" }
+						},
+						"required": ["oauthState", "authorizationCode", "type"],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"description": "只接受 QQ Server-Side 登录返回的临时 authorization_code，由服务端交换并验证；客户端不得提交 access_token 或 OpenID。",
+						"properties": {
+							"oauthState": {
+								"$ref": "#/components/schemas/OAuthStateValue",
+								"writeOnly": true,
+								"x-sensitive": "one-time-oauth-state"
+							},
+							"authorizationCode": {
+								"$ref": "#/components/schemas/ThirdPartyAuthorizationCode"
 							},
 							"type": { "type": "string", "const": "QQ" }
 						},
-						"required": ["oauthState", "accessToken", "type"],
+						"required": ["oauthState", "authorizationCode", "type"],
 						"additionalProperties": false
 					}
 				]
@@ -5613,40 +5319,6 @@
 						"schema": {
 							"$ref": "#/components/schemas/PhoneCodeChallengeResponse"
 						}
-					}
-				}
-			},
-			"FusionAuthTokenCreated": {
-				"description": "短期融合认证令牌；客户端和中间缓存不得保存。",
-				"headers": {
-					"X-ChiShenMe-Contract-Version": {
-						"$ref": "#/components/headers/ContractVersion"
-					},
-					"Cache-Control": {
-						"required": true,
-						"schema": { "type": "string", "const": "no-store" }
-					}
-				},
-				"content": {
-					"application/json": {
-						"schema": { "$ref": "#/components/schemas/FusionAuthTokenResponse" }
-					}
-				}
-			},
-			"FusionPhoneVerified": {
-				"description": "短期、设备绑定、一次性的脱敏手机注册 proof。",
-				"headers": {
-					"X-ChiShenMe-Contract-Version": {
-						"$ref": "#/components/headers/ContractVersion"
-					},
-					"Cache-Control": {
-						"required": true,
-						"schema": { "type": "string", "const": "no-store" }
-					}
-				},
-				"content": {
-					"application/json": {
-						"schema": { "$ref": "#/components/schemas/FusionAuthVerifyResponse" }
 					}
 				}
 			},

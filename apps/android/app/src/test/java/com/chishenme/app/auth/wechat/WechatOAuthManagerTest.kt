@@ -147,17 +147,59 @@ class WechatOAuthManagerTest {
     }
 
     @Test
-    fun `bind fails before SDK creation`() = runTest {
+    fun `expired active attempt is detached before a new authorization starts`() = runTest {
+        var currentTime = now
+        val factory = FakeFactory(configured = true)
+        val manager = WechatOAuthManager(
+            consentGate = WechatConsentGate { true },
+            sessionFactory = factory,
+            coordinator = WechatOAuthCoordinator { currentTime },
+        )
+
+        assertEquals(
+            WechatOAuthStartResult.Started,
+            manager.beginAuthorization(OAuthPurpose.LOGIN, state, now.plusSeconds(1)),
+        )
+        val firstSession = factory.sessions.single()
+        currentTime = now.plusSeconds(2)
+        assertEquals(
+            WechatOAuthStartResult.Started,
+            manager.beginAuthorization(
+                OAuthPurpose.LOGIN,
+                "n".repeat(43),
+                currentTime.plusSeconds(300),
+            ),
+        )
+
+        assertEquals(1, firstSession.detachCount)
+        assertEquals(2, factory.createCount)
+    }
+
+    @Test
+    fun `bind starts SDK authorization after consent`() = runTest {
         val factory = FakeFactory(configured = true)
         val result = manager(consent = true, factory = factory).beginAuthorization(
             OAuthPurpose.BIND,
+            state,
+            now.plusSeconds(300),
+        )
+
+        assertEquals(WechatOAuthStartResult.Started, result)
+        assertEquals(1, factory.createCount)
+        assertEquals(1, factory.session.registerCount)
+    }
+
+    @Test
+    fun `register purpose is rejected without creating the SDK`() = runTest {
+        val factory = FakeFactory(configured = true)
+        val result = manager(consent = true, factory = factory).beginAuthorization(
+            OAuthPurpose.REGISTER,
             state,
             now.plusSeconds(300),
         ) as WechatOAuthStartResult.Failed
 
         assertEquals(WechatOAuthFailure.UNSUPPORTED_PURPOSE, result.reason)
         assertEquals(0, factory.createCount)
-        assertEquals(0, factory.session.registerCount)
     }
 
     @Test
@@ -182,13 +224,13 @@ class WechatOAuthManagerTest {
     fun `cancelled callback contains no provider error material`() = runTest {
         val factory = FakeFactory(configured = true)
         val manager = manager(consent = true, factory = factory)
-        manager.beginAuthorization(OAuthPurpose.REGISTER, state, now.plusSeconds(300))
+        manager.beginAuthorization(OAuthPurpose.BIND, state, now.plusSeconds(300))
         val event = async(start = CoroutineStart.UNDISPATCHED) { manager.events.first() }
 
         manager.acceptSdkCallback(WechatSdkCallback.Cancelled)
         val failure = event.await() as WechatOAuthEvent.Failed
 
-        assertEquals(OAuthPurpose.REGISTER, failure.purpose)
+        assertEquals(OAuthPurpose.BIND, failure.purpose)
         assertEquals(WechatOAuthFailure.USER_CANCELLED, failure.reason)
         assertFalse(failure.toString().contains(state))
     }
@@ -220,13 +262,13 @@ class WechatOAuthManagerTest {
     fun `privacy withdrawal emits safe failure and is idempotent`() = runTest {
         val factory = FakeFactory(configured = true)
         val manager = manager(consent = true, factory = factory)
-        manager.beginAuthorization(OAuthPurpose.REGISTER, state, now.plusSeconds(300))
+        manager.beginAuthorization(OAuthPurpose.BIND, state, now.plusSeconds(300))
         val event = async(start = CoroutineStart.UNDISPATCHED) { manager.events.first() }
 
         manager.revokePrivacyConsent()
         val failure = event.await() as WechatOAuthEvent.Failed
 
-        assertEquals(OAuthPurpose.REGISTER, failure.purpose)
+        assertEquals(OAuthPurpose.BIND, failure.purpose)
         assertEquals(WechatOAuthFailure.PRIVACY_REQUIRED, failure.reason)
         assertFalse(failure.toString().contains(state))
         assertEquals(1, factory.session.detachCount)
@@ -248,7 +290,7 @@ class WechatOAuthManagerTest {
         manager.revokePrivacyConsent()
         manager.allowPrivacyConsent()
         val nextState = "n".repeat(43)
-        manager.beginAuthorization(OAuthPurpose.REGISTER, nextState, now.plusSeconds(300))
+        manager.beginAuthorization(OAuthPurpose.BIND, nextState, now.plusSeconds(300))
         assertTrue(manager.handleCallbackIntent(Intent()))
         val secondSession = factory.sessions.last()
 
@@ -261,7 +303,7 @@ class WechatOAuthManagerTest {
         )
         val authorized = event.await() as WechatOAuthEvent.Authorized
 
-        assertEquals(OAuthPurpose.REGISTER, authorized.purpose)
+        assertEquals(OAuthPurpose.BIND, authorized.purpose)
         assertEquals(1, secondSession.detachCount)
     }
 

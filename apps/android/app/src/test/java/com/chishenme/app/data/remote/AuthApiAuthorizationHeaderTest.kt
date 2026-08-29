@@ -32,14 +32,20 @@ class AuthApiAuthorizationHeaderTest {
             purpose = OtpPurpose.BIND,
             installationId = "11111111-1111-4111-8111-111111111111",
         )
+        val emailLoginRequest = emailBindRequest.copy(purpose = OtpPurpose.LOGIN)
         val privateToken = "t".repeat(43)
         val privateBearer = "Bearer $privateToken"
 
         api.requestPhoneCode(null, phoneRequest)
+        api.requestEmailCode(null, emailLoginRequest)
         api.requestEmailCode(privateBearer, emailBindRequest)
 
         assertEquals(null, captured[0].header("Authorization"))
-        assertEquals(privateBearer, captured[1].header("Authorization"))
+        assertEquals(null, captured[1].header("Authorization"))
+        assertEquals(privateBearer, captured[2].header("Authorization"))
+        assertEquals("/v1/auth/phone/request-code", captured[0].url.encodedPath)
+        assertEquals("/v1/auth/email/request-code", captured[1].url.encodedPath)
+        assertEquals("/v1/auth/email/request-code", captured[2].url.encodedPath)
         captured.forEach { sent ->
             val body = Buffer().also { buffer -> sent.body?.writeTo(buffer) }.readUtf8()
             assertFalse(body.contains(privateBearer))
@@ -52,6 +58,7 @@ class AuthApiAuthorizationHeaderTest {
             .addInterceptor(
                 Interceptor { chain ->
                     onRequest(chain.request())
+                    val emailTarget = chain.request().url.encodedPath.contains("/email/")
                     okhttp3.Response.Builder()
                         .request(chain.request())
                         .protocol(Protocol.HTTP_1_1)
@@ -60,8 +67,8 @@ class AuthApiAuthorizationHeaderTest {
                         .body(
                             """{
                                 "challengeId":"22222222-2222-4222-8222-222222222222",
-                                "targetType":"PHONE",
-                                "maskedTarget":"+86138****8000",
+                                "targetType":"${if (emailTarget) "EMAIL" else "PHONE"}",
+                                "maskedTarget":"${if (emailTarget) "u****r@example.com" else "+86138****8000"}",
                                 "expiresAt":"2026-08-21T04:05:00Z",
                                 "resendAvailableAt":"2026-08-21T04:01:00Z"
                             }""".trimIndent().toResponseBody("application/json".toMediaType()),

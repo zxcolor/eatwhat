@@ -10,20 +10,16 @@ import type {
 	AuthOAuthPurpose,
 	AuthOtpPurpose,
 	CompleteCredentialResult,
+	CompleteOAuthCredentialResult,
 	CreateOAuthStateResult,
 	CreateOtpChallengeResult,
-	FusionAuthFlowDraft,
-	FusionAuthProof,
 	OAuthProof,
 	OAuthStateDraft,
 	OtpChallengeDraft,
 	OtpProof,
 	RefreshIssueDraft,
 	RefreshSessionResult,
-	RegistrationFlowProof,
 	SessionIssueDraft,
-	VerifiedFusionAuthProof,
-	VerifiedFusionPhoneHashes,
 	VerifiedOAuthHashes,
 } from "./auth-workflow.types.js";
 import type { AuthenticatedUserContext } from "./authenticated-user.resolver.js";
@@ -54,23 +50,19 @@ interface OtpProofRow extends QueryResultRow {
 	readonly channel: "PHONE" | "EMAIL";
 	readonly purpose: "REGISTER" | "LOGIN" | "BIND" | "RECOVERY";
 	readonly destination_dedup_hash: string;
-	readonly code_hash: string;
-	readonly code_hash_key_version: string;
+	readonly verification_method: "ALIYUN_PNVS" | "LOCAL_HASH";
+	readonly code_hash: string | null;
+	readonly code_hash_key_version: string | null;
 	readonly operation_target_hash: string | null;
 	readonly target_user_id: string | null;
 	readonly registration_flow_reference_hash: string | null;
 	readonly device_hash: string;
 	readonly hash_key_version: string;
 }
-interface RegistrationFlowRow extends QueryResultRow {
-	readonly registration_flow_reference_hash: string;
-	readonly device_hash: string;
-	readonly hash_key_version: string;
-}
 interface OAuthProofRow extends QueryResultRow {
 	readonly id: string;
 	readonly provider: "WECHAT" | "QQ";
-	readonly purpose: "REGISTER" | "LOGIN" | "BIND";
+	readonly purpose: "LOGIN" | "BIND";
 	readonly flow_reference_hash: string;
 	readonly operation_target_hash: string | null;
 	readonly target_user_id: string | null;
@@ -86,6 +78,9 @@ interface UuidRow extends QueryResultRow {
 interface IdentityOwnerRow extends QueryResultRow {
 	readonly user_id: string;
 	readonly revoked_at: Date | string | null;
+}
+interface OAuthOwnerRow extends IdentityOwnerRow {
+	readonly user_status: "ACTIVE" | "LOCKED" | "DELETION_PENDING";
 }
 interface IdentityBindingRow extends QueryResultRow {
 	readonly id: string;
@@ -162,64 +157,18 @@ interface RefreshCredentialRow extends QueryResultRow {
 	readonly user_status: "ACTIVE" | "LOCKED" | "DELETION_PENDING";
 }
 
-interface FusionProofRow extends QueryResultRow {
-	readonly id: string;
-	readonly purpose: "LOGIN" | "REGISTER";
-	readonly registration_flow_reference_hash: string | null;
-	readonly device_hash: string;
-	readonly hash_key_version: string;
-	readonly expires_at: Date | string;
-	readonly verified_phone_lookup_hash: string | null;
-	readonly verified_phone_lookup_key_version: string | null;
-	readonly verified_phone_dedup_hash: string | null;
-	readonly verified_phone_dedup_key_version: string | null;
-	readonly masked_phone: string | null;
-	readonly verify_token_hash: string | null;
-	readonly verify_token_hash_key_version: string | null;
-	readonly verified_at: Date | string | null;
-	readonly proof_expires_at: Date | string | null;
-}
-
 export interface OtpLoginCompletion {
 	readonly proof: OtpProof;
 	readonly verificationSucceeded: boolean;
 	readonly session: SessionIssueDraft | null;
+	readonly newUserId: string | null;
+	readonly verificationClaimHash: string | null;
 }
 export interface OAuthLoginCompletion {
 	readonly proof: OAuthProof;
 	readonly verifiedIdentity: VerifiedOAuthHashes;
 	readonly session: SessionIssueDraft;
 }
-export interface FusionLoginCompletion {
-	readonly proof: FusionAuthProof;
-	readonly verifyTokenHash: VersionedHash;
-	readonly verifiedPhone: VerifiedFusionPhoneHashes | null;
-	readonly session: SessionIssueDraft | null;
-}
-export interface FusionVerificationCompletion {
-	readonly proof: FusionAuthProof;
-	readonly verifyTokenHash: VersionedHash;
-	readonly verifiedPhone: VerifiedFusionPhoneHashes | null;
-}
-export interface FusionRegistrationCompletion {
-	readonly newUserId: string;
-	readonly phoneProof: VerifiedFusionAuthProof;
-	readonly oauthProof: OAuthProof;
-	readonly verifiedWechatIdentity: VerifiedOAuthHashes;
-	readonly session: SessionIssueDraft;
-}
-export type CompleteFusionVerificationResult =
-	| { readonly kind: "SUCCESS"; readonly proof: VerifiedFusionAuthProof }
-	| { readonly kind: "INVALID_CREDENTIALS" };
-export interface RegistrationCompletion {
-	readonly newUserId: string;
-	readonly otpProof: OtpProof;
-	readonly otpVerificationSucceeded: boolean;
-	readonly oauthProof: OAuthProof;
-	readonly verifiedWechatIdentity: VerifiedOAuthHashes | null;
-	readonly session: SessionIssueDraft | null;
-}
-
 export interface IdentityBindingRecord {
 	readonly bindingId: string;
 	readonly type: "PHONE" | "EMAIL" | "WECHAT" | "QQ";
@@ -364,30 +313,6 @@ export abstract class AuthRepository {
 	abstract createOtpChallenge(
 		draft: OtpChallengeDraft,
 	): Promise<CreateOtpChallengeResult>;
-	abstract createFusionFlow(draft: FusionAuthFlowDraft): Promise<boolean>;
-	abstract findFusionProof(
-		flowId: string,
-		purpose: "LOGIN" | "REGISTER",
-		deviceHashCandidates: readonly string[],
-	): Promise<FusionAuthProof | null>;
-	abstract claimFusionVerifyToken(
-		proof: FusionAuthProof,
-		verifyTokenHashes: readonly VersionedHash[],
-		primaryVerifyTokenHash: VersionedHash,
-	): Promise<boolean>;
-	abstract findVerifiedFusionProof(
-		flowId: string,
-		deviceHashCandidates: readonly string[],
-	): Promise<VerifiedFusionAuthProof | null>;
-	abstract completeFusionVerification(
-		completion: FusionVerificationCompletion,
-	): Promise<CompleteFusionVerificationResult>;
-	abstract completeFusionLogin(
-		completion: FusionLoginCompletion,
-	): Promise<CompleteCredentialResult>;
-	abstract completeFusionRegistration(
-		completion: FusionRegistrationCompletion,
-	): Promise<CompleteCredentialResult>;
 	abstract finalizeOtpDelivery(
 		challengeId: string,
 		outcome: "SENT" | "FAILED",
@@ -400,10 +325,6 @@ export abstract class AuthRepository {
 		purpose: AuthOtpPurpose,
 		deviceHashCandidates: readonly string[],
 	): Promise<OtpProof | null>;
-	abstract findRegistrationFlow(
-		phoneChallengeId: string,
-		deviceHashCandidates: readonly string[],
-	): Promise<RegistrationFlowProof | null>;
 	abstract createOAuthState(
 		draft: OAuthStateDraft,
 	): Promise<CreateOAuthStateResult>;
@@ -420,12 +341,18 @@ export abstract class AuthRepository {
 	abstract completeOtpLogin(
 		completion: OtpLoginCompletion,
 	): Promise<CompleteCredentialResult>;
+	abstract claimPhoneOtpVerification(
+		proof: OtpProof,
+		claimHash: string,
+		leaseUntil: Date,
+	): Promise<boolean>;
+	abstract releasePhoneOtpVerification(
+		proof: OtpProof,
+		claimHash: string,
+	): Promise<boolean>;
 	abstract completeOAuthLogin(
 		completion: OAuthLoginCompletion,
-	): Promise<CompleteCredentialResult>;
-	abstract completeRegistration(
-		completion: RegistrationCompletion,
-	): Promise<CompleteCredentialResult>;
+	): Promise<CompleteOAuthCredentialResult>;
 	abstract refreshSession(
 		refreshHashCandidates: readonly VersionedHash[],
 		deviceHashCandidates: readonly string[],
@@ -480,200 +407,6 @@ export class PostgresAuthRepository extends AuthRepository {
 
 	isAvailable(): boolean {
 		return this.database.isEnabled();
-	}
-
-	async createFusionFlow(draft: FusionAuthFlowDraft): Promise<boolean> {
-		return this.database.withTransaction(async (transaction) => {
-			const result = await transaction.query(
-				`INSERT INTO public.fusion_auth_flows (
-				   id, purpose, registration_flow_reference_hash, request_ip_hash,
-				   device_hash, hash_key_version, created_at, expires_at, retain_until
-				 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-				 ON CONFLICT (id) DO NOTHING`,
-				[
-					draft.id,
-					draft.purpose,
-					draft.registrationFlowReferenceHash,
-					draft.requestIpHash,
-					draft.deviceHash,
-					draft.hashKeyVersion,
-					draft.createdAt,
-					draft.expiresAt,
-					draft.retainUntil,
-				],
-			);
-			return result.rowCount === 1;
-		});
-	}
-
-	async findFusionProof(
-		flowId: string,
-		purpose: "LOGIN" | "REGISTER",
-		deviceHashCandidates: readonly string[],
-	): Promise<FusionAuthProof | null> {
-		return this.database.withTransaction(async (transaction) => {
-			const result = await transaction.query<FusionProofRow>(
-				`SELECT id, purpose, registration_flow_reference_hash, device_hash,
-				   hash_key_version, expires_at, verified_phone_lookup_hash,
-				   verified_phone_lookup_key_version, verified_phone_dedup_hash,
-				   verified_phone_dedup_key_version, masked_phone, verify_token_hash,
-				   verify_token_hash_key_version, verified_at
-				 FROM public.fusion_auth_flows
-				 WHERE id = $1 AND purpose = $2 AND device_hash = ANY($3::varchar[])
-				   AND consumed_at IS NULL AND verified_at IS NULL
-				   AND attempts < 5 AND expires_at > clock_timestamp()
-				 LIMIT 1`,
-				[flowId, purpose, deviceHashCandidates],
-			);
-			return mapFusionProof(result.rows[0]);
-		});
-	}
-
-	async findVerifiedFusionProof(
-		flowId: string,
-		deviceHashCandidates: readonly string[],
-	): Promise<VerifiedFusionAuthProof | null> {
-		return this.database.withTransaction(async (transaction) => {
-			return selectVerifiedFusionProof(
-				transaction,
-				flowId,
-				deviceHashCandidates,
-			);
-		});
-	}
-
-	async claimFusionVerifyToken(
-		proof: FusionAuthProof,
-		verifyTokenHashes: readonly VersionedHash[],
-		primaryVerifyTokenHash: VersionedHash,
-	): Promise<boolean> {
-		return this.database.withTransaction(async (transaction) => {
-			const result = await transaction.query<BooleanRow>(
-				"SELECT public.claim_fusion_auth_verify_token($1, $2, $3, $4, $5, $6, $7, $8) AS changed",
-				[
-					proof.id,
-					proof.purpose,
-					proof.deviceHash,
-					proof.hashKeyVersion,
-					verifyTokenHashes.map((candidate) => candidate.value),
-					verifyTokenHashes.map((candidate) => candidate.keyVersion),
-					primaryVerifyTokenHash.value,
-					primaryVerifyTokenHash.keyVersion,
-				],
-			);
-			return result.rows[0]?.changed === true;
-		});
-	}
-
-	async completeFusionVerification(
-		completion: FusionVerificationCompletion,
-	): Promise<CompleteFusionVerificationResult> {
-		return this.database.withTransaction(async (transaction) => {
-			const changed = await recordFusionResult(
-				transaction,
-				completion.proof,
-				completion.verifyTokenHash,
-				completion.verifiedPhone,
-				false,
-			);
-			if (!changed || completion.verifiedPhone === null) {
-				return Object.freeze({ kind: "INVALID_CREDENTIALS" as const });
-			}
-			const proof = await selectVerifiedFusionProof(
-				transaction,
-				completion.proof.id,
-				[completion.proof.deviceHash],
-			);
-			return proof === null
-				? Object.freeze({ kind: "INVALID_CREDENTIALS" as const })
-				: Object.freeze({ kind: "SUCCESS" as const, proof });
-		});
-	}
-
-	async completeFusionLogin(
-		completion: FusionLoginCompletion,
-	): Promise<CompleteCredentialResult> {
-		return this.database.withTransaction(async (transaction) => {
-			const changed = await recordFusionResult(
-				transaction,
-				completion.proof,
-				completion.verifyTokenHash,
-				completion.verifiedPhone,
-				true,
-			);
-			if (
-				!changed ||
-				completion.verifiedPhone === null ||
-				completion.session === null
-			) {
-				return Object.freeze({ kind: "INVALID_CREDENTIALS" as const });
-			}
-			const userId = await findActiveIdentityUser(
-				transaction,
-				"PHONE",
-				completion.verifiedPhone.dedup.value,
-			);
-			if (userId === null) {
-				return Object.freeze({ kind: "INVALID_CREDENTIALS" as const });
-			}
-			await insertSession(transaction, userId, completion.session);
-			return Object.freeze({
-				kind: "SUCCESS" as const,
-				userId,
-				sessionId: completion.session.sessionId,
-			});
-		});
-	}
-
-	async completeFusionRegistration(
-		completion: FusionRegistrationCompletion,
-	): Promise<CompleteCredentialResult> {
-		return this.database.withTransaction(async (transaction) => {
-			const oauthConsumed = await consumeOAuth(
-				transaction,
-				completion.oauthProof,
-				completion.verifiedWechatIdentity,
-			);
-			if (!oauthConsumed) {
-				return Object.freeze({ kind: "INVALID_CREDENTIALS" as const });
-			}
-			const conflict = await transaction.query<UserRow>(
-				`SELECT binding.user_id FROM public.identity_bindings AS binding
-				 WHERE (binding.identity_type = 'PHONE' AND binding.dedup_hash = $1)
-				    OR (binding.identity_type = 'WECHAT' AND binding.dedup_hash = $2)
-				 LIMIT 1`,
-				[
-					completion.phoneProof.verifiedPhone.dedup.value,
-					completion.verifiedWechatIdentity.dedup.value,
-				],
-			);
-			if (conflict.rows[0] !== undefined) {
-				return Object.freeze({ kind: "IDENTITY_CONFLICT" as const });
-			}
-			const registered = await transaction.query<BooleanRow>(
-				"SELECT public.register_fusion_phone_wechat_account($1, $2, $3, $4, $5) AS changed",
-				[
-					completion.newUserId,
-					completion.phoneProof.id,
-					completion.oauthProof.id,
-					completion.phoneProof.registrationFlowReferenceHash,
-					completion.phoneProof.deviceHash,
-				],
-			);
-			if (registered.rows[0]?.changed !== true) {
-				return Object.freeze({ kind: "INVALID_CREDENTIALS" as const });
-			}
-			await insertSession(
-				transaction,
-				completion.newUserId,
-				completion.session,
-			);
-			return Object.freeze({
-				kind: "SUCCESS" as const,
-				userId: completion.newUserId,
-				sessionId: completion.session.sessionId,
-			});
-		});
 	}
 
 	async createOtpChallenge(
@@ -732,9 +465,15 @@ export class PostgresAuthRepository extends AuthRepository {
 				   count(*) FILTER (WHERE device_hash = $2 AND created_at >= $4) AS device_count,
 				   count(*) FILTER (WHERE request_ip_hash = $3 AND created_at >= $4) AS ip_count,
 				   count(*) FILTER (
-				     WHERE destination_dedup_hash = $1 AND device_hash = $2
-				       AND purpose = $5 AND delivery_status = 'PENDING'
-				       AND created_at >= $6
+				     WHERE destination_dedup_hash = $1 AND created_at >= $6
+				       AND (
+				         ($8::text = 'PHONE' AND channel = 'PHONE'
+				           AND delivery_status IN ('PENDING', 'SENT')
+				           AND consumed_at IS NULL)
+				         OR ($8::text = 'EMAIL' AND channel = 'EMAIL'
+				           AND device_hash = $2 AND purpose = $5
+				           AND delivery_status = 'PENDING')
+				       )
 				   ) AS pending_count,
 				   min(created_at) FILTER (
 				     WHERE destination_dedup_hash = $1 AND created_at >= $4
@@ -745,9 +484,15 @@ export class PostgresAuthRepository extends AuthRepository {
 				   min(created_at) FILTER (WHERE device_hash = $2 AND created_at >= $4) AS device_oldest,
 				   min(created_at) FILTER (WHERE request_ip_hash = $3 AND created_at >= $4) AS ip_oldest,
 				   min(created_at) FILTER (
-				     WHERE destination_dedup_hash = $1 AND device_hash = $2
-				       AND purpose = $5 AND delivery_status = 'PENDING'
-				       AND created_at >= $6
+				     WHERE destination_dedup_hash = $1 AND created_at >= $6
+				       AND (
+				         ($8::text = 'PHONE' AND channel = 'PHONE'
+				           AND delivery_status IN ('PENDING', 'SENT')
+				           AND consumed_at IS NULL)
+				         OR ($8::text = 'EMAIL' AND channel = 'EMAIL'
+				           AND device_hash = $2 AND purpose = $5
+				           AND delivery_status = 'PENDING')
+				       )
 				   ) AS pending_oldest
 				 FROM public.otp_challenges WHERE created_at >= $7`,
 				[
@@ -758,6 +503,7 @@ export class PostgresAuthRepository extends AuthRepository {
 					draft.purpose,
 					new Date(draft.createdAt.getTime() - resendDelayMs),
 					new Date(draft.createdAt.getTime() - 24 * 60 * 60_000),
+					draft.channel,
 				],
 			);
 			const count = counts.rows[0];
@@ -779,13 +525,13 @@ export class PostgresAuthRepository extends AuthRepository {
 				   destination_dedup_hash, destination_dedup_hash_algorithm,
 				   destination_dedup_key_version, masked_destination,
 				   operation_target_hash, target_user_id, registration_flow_reference_hash,
-				   code_hash, code_hash_algorithm, code_hash_key_version,
+				   verification_method, code_hash, code_hash_algorithm, code_hash_key_version,
 				   idempotency_key_hash, hash_key_version, request_ip_hash, device_hash,
 				   created_at, retain_until
 				 ) VALUES (
 				   $1, $2, $3, $4, 'HMAC-SHA256', $5, $6, 'HMAC-SHA256', $7, $8,
-				   $9, $10, $11, $12, 'ARGON2ID-PEPPERED', $13,
-				   $14, $15, $16, $17, $18, $19
+				   $9, $10, $11, $12, $13, $14,
+				   $15, $16, $17, $18, $19, $20, $21
 				 )`,
 				[
 					draft.id,
@@ -799,8 +545,10 @@ export class PostgresAuthRepository extends AuthRepository {
 					draft.operationTargetHash,
 					draft.targetUserId,
 					draft.registrationFlowReferenceHash,
-					draft.codeHash.value,
-					draft.codeHash.keyVersion,
+					draft.verificationMethod,
+					draft.codeHash?.value ?? null,
+					draft.codeHash === null ? null : "ARGON2ID-PEPPERED",
+					draft.codeHash?.keyVersion ?? null,
 					draft.idempotencyKeyHash,
 					draft.hashKeyVersion,
 					draft.requestIpHash,
@@ -809,6 +557,15 @@ export class PostgresAuthRepository extends AuthRepository {
 					draft.retainUntil,
 				],
 			);
+			if (draft.channel === "PHONE") {
+				const superseded = await transaction.query<BooleanRow>(
+					"SELECT public.supersede_phone_otp_challenges_for_send($1) AS changed",
+					[draft.id],
+				);
+				if (superseded.rows[0]?.changed !== true) {
+					throw new Error("failed to prepare the PNVS send boundary");
+				}
+			}
 			return Object.freeze({ kind: "CREATED" as const });
 		});
 	}
@@ -836,8 +593,9 @@ export class PostgresAuthRepository extends AuthRepository {
 	): Promise<OtpProof | null> {
 		return this.database.withTransaction(async (transaction) => {
 			const result = await transaction.query<OtpProofRow>(
-				`SELECT id, channel, purpose, destination_dedup_hash, code_hash,
-				   code_hash_key_version, operation_target_hash, target_user_id,
+				`SELECT id, channel, purpose, destination_dedup_hash,
+				   verification_method, code_hash, code_hash_key_version,
+				   operation_target_hash, target_user_id,
 				   registration_flow_reference_hash, device_hash, hash_key_version
 				 FROM public.otp_challenges
 				 WHERE id = $1 AND channel = $2 AND purpose = $3
@@ -847,31 +605,6 @@ export class PostgresAuthRepository extends AuthRepository {
 				[challengeId, channel, purpose, deviceHashCandidates],
 			);
 			return mapOtpProof(result.rows[0]);
-		});
-	}
-
-	async findRegistrationFlow(
-		phoneChallengeId: string,
-		deviceHashCandidates: readonly string[],
-	): Promise<RegistrationFlowProof | null> {
-		return this.database.withTransaction(async (transaction) => {
-			const result = await transaction.query<RegistrationFlowRow>(
-				`SELECT registration_flow_reference_hash, device_hash, hash_key_version
-				 FROM public.otp_challenges
-				 WHERE id = $1 AND channel = 'PHONE' AND purpose = 'REGISTER'
-				   AND device_hash = ANY($2::varchar[])
-				   AND delivery_status = 'SENT' AND consumed_at IS NULL
-				   AND attempts < 5 AND expires_at > clock_timestamp() LIMIT 1`,
-				[phoneChallengeId, deviceHashCandidates],
-			);
-			const row = result.rows[0];
-			return row === undefined
-				? null
-				: Object.freeze({
-						registrationFlowReferenceHash: row.registration_flow_reference_hash,
-						deviceHash: row.device_hash,
-						hashKeyVersion: row.hash_key_version,
-					});
 		});
 	}
 
@@ -905,8 +638,7 @@ export class PostgresAuthRepository extends AuthRepository {
 			const count = counts.rows[0];
 			if (
 				count !== undefined &&
-				(toCount(count.device_count) >= 10 ||
-					toCount(count.flow_count) >= (draft.purpose === "REGISTER" ? 3 : 10))
+				(toCount(count.device_count) >= 10 || toCount(count.flow_count) >= 10)
 			) {
 				return Object.freeze({
 					kind: "RATE_LIMITED" as const,
@@ -1001,23 +733,64 @@ export class PostgresAuthRepository extends AuthRepository {
 		completion: OtpLoginCompletion,
 	): Promise<CompleteCredentialResult> {
 		return this.database.withTransaction(async (transaction) => {
-			const consumed = await recordOtpAttempt(
-				transaction,
-				completion.proof,
-				completion.verificationSucceeded,
-			);
+			const consumed =
+				completion.proof.channel === "PHONE"
+					? completion.verificationClaimHash !== null &&
+						(await completePhoneOtpVerification(
+							transaction,
+							completion.proof,
+							completion.verificationClaimHash,
+							completion.verificationSucceeded,
+						))
+					: await recordOtpAttempt(
+							transaction,
+							completion.proof,
+							completion.verificationSucceeded,
+						);
 			if (!consumed)
 				return Object.freeze({ kind: "INVALID_CREDENTIALS" as const });
 			if (completion.session === null) {
 				return Object.freeze({ kind: "INVALID_CREDENTIALS" as const });
 			}
-			const userId = await findActiveIdentityUser(
+			let userId = await findActiveIdentityUser(
 				transaction,
 				completion.proof.channel,
 				completion.proof.destinationDedupHash,
 			);
-			if (userId === null)
+			if (
+				userId === null &&
+				completion.proof.channel === "PHONE" &&
+				completion.proof.purpose === "REGISTER" &&
+				completion.newUserId !== null
+			) {
+				const registered = await transaction.query<BooleanRow>(
+					"SELECT public.register_phone_account_from_consumed_otp($1, $2, $3) AS changed",
+					[
+						completion.newUserId,
+						completion.proof.id,
+						completion.proof.deviceHash,
+					],
+				);
+				if (registered.rows[0]?.changed !== true) {
+					// A different valid REGISTER challenge for the same phone can win the
+					// unique binding race while this transaction is waiting. Re-read after
+					// the failed insert so both callers keep the same login-or-register
+					// semantics without exposing whether the account existed beforehand.
+					userId = await findActiveIdentityUser(
+						transaction,
+						"PHONE",
+						completion.proof.destinationDedupHash,
+					);
+					if (userId === null) {
+						return Object.freeze({ kind: "INVALID_CREDENTIALS" as const });
+					}
+				} else {
+					userId = completion.newUserId;
+				}
+			}
+			if (userId === null) {
 				return Object.freeze({ kind: "INVALID_CREDENTIALS" as const });
+			}
 			await insertSession(transaction, userId, completion.session);
 			return Object.freeze({
 				kind: "SUCCESS" as const,
@@ -1027,9 +800,44 @@ export class PostgresAuthRepository extends AuthRepository {
 		});
 	}
 
+	async claimPhoneOtpVerification(
+		proof: OtpProof,
+		claimHash: string,
+		leaseUntil: Date,
+	): Promise<boolean> {
+		return this.database.withTransaction(async (transaction) => {
+			const result = await transaction.query<BooleanRow>(
+				"SELECT public.claim_otp_verification_lease($1, $2, $3, $4, $5, $6, $7) AS changed",
+				[
+					proof.id,
+					proof.purpose,
+					proof.targetUserId,
+					proof.operationTargetHash,
+					proof.deviceHash,
+					claimHash,
+					leaseUntil,
+				],
+			);
+			return result.rows[0]?.changed === true;
+		});
+	}
+
+	async releasePhoneOtpVerification(
+		proof: OtpProof,
+		claimHash: string,
+	): Promise<boolean> {
+		return this.database.withTransaction(async (transaction) => {
+			const result = await transaction.query<BooleanRow>(
+				"SELECT public.release_otp_verification_lease($1, $2) AS changed",
+				[proof.id, claimHash],
+			);
+			return result.rows[0]?.changed === true;
+		});
+	}
+
 	async completeOAuthLogin(
 		completion: OAuthLoginCompletion,
-	): Promise<CompleteCredentialResult> {
+	): Promise<CompleteOAuthCredentialResult> {
 		return this.database.withTransaction(async (transaction) => {
 			const consumed = await consumeOAuth(
 				transaction,
@@ -1038,80 +846,32 @@ export class PostgresAuthRepository extends AuthRepository {
 			);
 			if (!consumed)
 				return Object.freeze({ kind: "INVALID_CREDENTIALS" as const });
-			const userId = await findActiveIdentityUser(
+			const identityOwner = await findActiveOAuthIdentityUser(
 				transaction,
 				completion.proof.provider,
+				completion.verifiedIdentity.lookup.value,
 				completion.verifiedIdentity.dedup.value,
 			);
-			if (userId === null)
-				return Object.freeze({ kind: "INVALID_CREDENTIALS" as const });
+			if (identityOwner.kind === "CONFLICT") {
+				return Object.freeze({ kind: "IDENTITY_CONFLICT" as const });
+			}
+			if (identityOwner.kind === "NONE")
+				return Object.freeze({ kind: "IDENTITY_NOT_BOUND" as const });
+			const userId = identityOwner.userId;
+			if (
+				completion.proof.provider === "WECHAT" &&
+				!(await recordWechatUnionAliasFromConsumedState(
+					transaction,
+					completion.proof.id,
+					identityOwner.bindingId,
+				))
+			) {
+				return Object.freeze({ kind: "IDENTITY_CONFLICT" as const });
+			}
 			await insertSession(transaction, userId, completion.session);
 			return Object.freeze({
 				kind: "SUCCESS" as const,
 				userId,
-				sessionId: completion.session.sessionId,
-			});
-		});
-	}
-
-	async completeRegistration(
-		completion: RegistrationCompletion,
-	): Promise<CompleteCredentialResult> {
-		return this.database.withTransaction(async (transaction) => {
-			const otpConsumed = await recordOtpAttempt(
-				transaction,
-				completion.otpProof,
-				completion.otpVerificationSucceeded,
-			);
-			if (!otpConsumed)
-				return Object.freeze({ kind: "INVALID_CREDENTIALS" as const });
-			if (
-				completion.verifiedWechatIdentity === null ||
-				completion.session === null
-			) {
-				return Object.freeze({ kind: "INVALID_CREDENTIALS" as const });
-			}
-			const oauthConsumed = await consumeOAuth(
-				transaction,
-				completion.oauthProof,
-				completion.verifiedWechatIdentity,
-			);
-			if (!oauthConsumed)
-				return Object.freeze({ kind: "INVALID_CREDENTIALS" as const });
-			const conflict = await transaction.query<UserRow>(
-				`SELECT binding.user_id FROM public.identity_bindings AS binding
-				 WHERE (binding.identity_type = 'PHONE' AND binding.dedup_hash = $1)
-				    OR (binding.identity_type = 'WECHAT' AND binding.dedup_hash = $2)
-				 LIMIT 1`,
-				[
-					completion.otpProof.destinationDedupHash,
-					completion.verifiedWechatIdentity.dedup.value,
-				],
-			);
-			if (conflict.rows[0] !== undefined) {
-				return Object.freeze({ kind: "IDENTITY_CONFLICT" as const });
-			}
-			const registered = await transaction.query<BooleanRow>(
-				"SELECT public.register_phone_wechat_account($1, $2, $3, $4, $5) AS changed",
-				[
-					completion.newUserId,
-					completion.otpProof.id,
-					completion.oauthProof.id,
-					completion.otpProof.registrationFlowReferenceHash,
-					completion.otpProof.deviceHash,
-				],
-			);
-			if (registered.rows[0]?.changed !== true) {
-				return Object.freeze({ kind: "INVALID_CREDENTIALS" as const });
-			}
-			await insertSession(
-				transaction,
-				completion.newUserId,
-				completion.session,
-			);
-			return Object.freeze({
-				kind: "SUCCESS" as const,
-				userId: completion.newUserId,
 				sessionId: completion.session.sessionId,
 			});
 		});
@@ -1271,14 +1031,14 @@ export class PostgresAuthRepository extends AuthRepository {
 			) {
 				return Object.freeze({ kind: "INVALID_CREDENTIALS" as const });
 			}
-			const consumed = await recordOtpAttempt(
-				transaction,
-				completion.proof,
-				completion.verificationSucceeded,
-			);
-			if (!consumed) {
+			if (!completion.verificationSucceeded) {
+				await recordOtpAttempt(transaction, completion.proof, false);
 				return Object.freeze({ kind: "INVALID_CREDENTIALS" as const });
 			}
+
+			// Conflict checks intentionally run only after the caller has proved
+			// possession of the emailed code, but before the challenge is consumed.
+			// A conflict response must never leave a valid proof consumed-but-unbound.
 			const conflict = await findIdentityOwner(
 				transaction,
 				"EMAIL",
@@ -1291,6 +1051,20 @@ export class PostgresAuthRepository extends AuthRepository {
 			) {
 				return Object.freeze({ kind: "IDENTITY_CONFLICT" as const });
 			}
+			if (
+				await hasActiveEmailIdentity(transaction, completion.session.userId)
+			) {
+				return Object.freeze({ kind: "IDENTITY_CONFLICT" as const });
+			}
+
+			const consumed = await recordOtpAttempt(
+				transaction,
+				completion.proof,
+				true,
+			);
+			if (!consumed) {
+				return Object.freeze({ kind: "INVALID_CREDENTIALS" as const });
+			}
 			const bound = await transaction.query<UuidRow>(
 				"SELECT public.bind_email_identity_from_consumed_otp($1, $2, $3, $4) AS id",
 				[
@@ -1302,7 +1076,9 @@ export class PostgresAuthRepository extends AuthRepository {
 			);
 			const bindingId = bound.rows[0]?.id;
 			if (bindingId === undefined || bindingId === null) {
-				return Object.freeze({ kind: "IDENTITY_CONFLICT" as const });
+				// Returning here would commit the consumed challenge. Throw so the
+				// transaction rolls the consume back when a concurrent conflict wins.
+				throw new Error("verified email binding did not complete");
 			}
 			const binding = await findIdentityBinding(
 				transaction,
@@ -1319,7 +1095,8 @@ export class PostgresAuthRepository extends AuthRepository {
 	): Promise<CompleteBindingResult> {
 		return this.database.withTransaction(async (transaction) => {
 			if (
-				completion.proof.provider !== "QQ" ||
+				(completion.proof.provider !== "QQ" &&
+					completion.proof.provider !== "WECHAT") ||
 				completion.proof.purpose !== "BIND" ||
 				completion.proof.targetUserId !== completion.session.userId ||
 				completion.proof.operationTargetHash === null ||
@@ -1338,21 +1115,34 @@ export class PostgresAuthRepository extends AuthRepository {
 			}
 			const conflict = await findIdentityOwner(
 				transaction,
-				"QQ",
+				completion.proof.provider,
 				completion.verifiedIdentity.dedup.value,
 			);
+			const lookupConflict = await findIdentityLookupOwner(
+				transaction,
+				completion.proof.provider,
+				completion.verifiedIdentity.lookup.value,
+			);
 			if (
-				conflict !== null &&
-				(conflict.userId !== completion.session.userId ||
-					conflict.revokedAt === null)
+				(conflict !== null && conflict.userId !== completion.session.userId) ||
+				(lookupConflict !== null &&
+					lookupConflict.userId !== completion.session.userId) ||
+				(conflict !== null &&
+					lookupConflict !== null &&
+					conflict.userId !== lookupConflict.userId)
 			) {
 				return Object.freeze({ kind: "IDENTITY_CONFLICT" as const });
 			}
+			const bindingFunction =
+				completion.proof.provider === "WECHAT"
+					? "public.bind_oauth_identity_with_wechat_union_from_consumed_state"
+					: "public.bind_oauth_identity_from_consumed_state";
 			const bound = await transaction.query<UuidRow>(
-				"SELECT public.bind_qq_identity_from_consumed_oauth_state($1, $2, $3, $4, $5) AS id",
+				`SELECT ${bindingFunction}($1, $2, $3, $4, $5, $6) AS id`,
 				[
 					completion.session.userId,
 					completion.proof.id,
+					completion.proof.provider,
 					completion.proof.flowReferenceHash,
 					completion.proof.operationTargetHash,
 					completion.proof.deviceHash,
@@ -1388,7 +1178,10 @@ export class PostgresAuthRepository extends AuthRepository {
 			if (binding === null) {
 				return Object.freeze({ kind: "INVALID_CREDENTIALS" as const });
 			}
-			if (binding.primary || !["EMAIL", "QQ"].includes(binding.type)) {
+			if (
+				binding.primary ||
+				!["EMAIL", "WECHAT", "QQ"].includes(binding.type)
+			) {
 				return Object.freeze({ kind: "FORBIDDEN" as const });
 			}
 			if (binding.revokedAt !== null) {
@@ -1721,7 +1514,7 @@ async function hasActiveSession(
 
 async function findIdentityOwner(
 	transaction: DatabaseTransaction,
-	type: "EMAIL" | "QQ",
+	type: "EMAIL" | "WECHAT" | "QQ",
 	dedupHash: string,
 ): Promise<{
 	readonly userId: string;
@@ -1741,6 +1534,96 @@ async function findIdentityOwner(
 				userId: row.user_id,
 				revokedAt: row.revoked_at === null ? null : asDate(row.revoked_at),
 			});
+}
+
+async function hasActiveEmailIdentity(
+	transaction: DatabaseTransaction,
+	userId: string,
+): Promise<boolean> {
+	const result = await transaction.query<UuidRow>(
+		`SELECT id
+		 FROM public.identity_bindings
+		 WHERE user_id = $1 AND identity_type = 'EMAIL' AND revoked_at IS NULL
+		 LIMIT 1`,
+		[userId],
+	);
+	return result.rows[0]?.id !== undefined;
+}
+
+async function findIdentityLookupOwner(
+	transaction: DatabaseTransaction,
+	type: "WECHAT" | "QQ",
+	lookupHash: string,
+): Promise<{
+	readonly userId: string;
+	readonly revokedAt: Date | null;
+} | null> {
+	const result = await transaction.query<IdentityOwnerRow>(
+		`SELECT user_id, revoked_at
+		 FROM public.identity_bindings
+		 WHERE identity_type = $1 AND lookup_hash = $2
+		 LIMIT 1`,
+		[type, lookupHash],
+	);
+	const row = result.rows[0];
+	return row === undefined
+		? null
+		: Object.freeze({
+				userId: row.user_id,
+				revokedAt: row.revoked_at === null ? null : asDate(row.revoked_at),
+			});
+}
+
+type ActiveOAuthIdentityOwner =
+	| { readonly kind: "NONE" }
+	| {
+			readonly kind: "OWNER";
+			readonly userId: string;
+			readonly bindingId: string;
+	  }
+	| { readonly kind: "CONFLICT" };
+
+async function findActiveOAuthIdentityUser(
+	transaction: DatabaseTransaction,
+	type: "WECHAT" | "QQ",
+	lookupHash: string,
+	dedupHash: string,
+): Promise<ActiveOAuthIdentityOwner> {
+	const result = await transaction.query<
+		OAuthOwnerRow & { readonly id: string }
+	>(
+		`SELECT binding.id, binding.user_id, binding.revoked_at,
+		   account_user.status AS user_status
+		 FROM public.identity_bindings AS binding
+		 JOIN public.users AS account_user ON account_user.id = binding.user_id
+		 WHERE binding.identity_type = $1
+		   AND (binding.lookup_hash = $2 OR binding.dedup_hash = $3)
+		 LIMIT 3`,
+		[type, lookupHash, dedupHash],
+	);
+	const owners = new Set(result.rows.map((row) => row.user_id));
+	if (owners.size > 1) return Object.freeze({ kind: "CONFLICT" as const });
+	const owner = result.rows[0]?.user_id;
+	if (
+		owner === undefined ||
+		!result.rows.some(
+			(row) =>
+				row.user_id === owner &&
+				row.revoked_at === null &&
+				row.user_status === "ACTIVE",
+		)
+	) {
+		return Object.freeze({ kind: "NONE" as const });
+	}
+	const bindingId = result.rows.find(
+		(row) =>
+			row.user_id === owner &&
+			row.revoked_at === null &&
+			row.user_status === "ACTIVE",
+	)?.id;
+	if (bindingId === undefined)
+		return Object.freeze({ kind: "CONFLICT" as const });
+	return Object.freeze({ kind: "OWNER" as const, userId: owner, bindingId });
 }
 
 async function findIdentityBinding(
@@ -1771,7 +1654,9 @@ function mapIdentityBinding(row: IdentityBindingRow): IdentityBindingRecord {
 		canUnbind:
 			!row.is_primary &&
 			row.revoked_at === null &&
-			(row.identity_type === "EMAIL" || row.identity_type === "QQ"),
+			(row.identity_type === "EMAIL" ||
+				row.identity_type === "WECHAT" ||
+				row.identity_type === "QQ"),
 		revokedAt: row.revoked_at === null ? null : asDate(row.revoked_at),
 	});
 }
@@ -1795,55 +1680,25 @@ async function recordOtpAttempt(
 	return result.rows[0]?.changed === true;
 }
 
-async function recordFusionResult(
+async function completePhoneOtpVerification(
 	transaction: DatabaseTransaction,
-	proof: FusionAuthProof,
-	verifyTokenHash: VersionedHash,
-	verifiedPhone: VerifiedFusionPhoneHashes | null,
-	consumeOnSuccess: boolean,
+	proof: OtpProof,
+	claimHash: string,
+	verificationSucceeded: boolean,
 ): Promise<boolean> {
 	const result = await transaction.query<BooleanRow>(
-		"SELECT public.record_fusion_auth_result($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) AS changed",
+		"SELECT public.complete_otp_verification_lease($1, $2, $3, $4, $5, $6, $7) AS changed",
 		[
 			proof.id,
 			proof.purpose,
+			proof.targetUserId,
+			proof.operationTargetHash,
 			proof.deviceHash,
-			proof.hashKeyVersion,
-			verifyTokenHash.value,
-			verifyTokenHash.keyVersion,
-			verifiedPhone !== null,
-			consumeOnSuccess,
-			verifiedPhone?.lookup.value ?? null,
-			verifiedPhone?.lookup.keyVersion ?? null,
-			verifiedPhone?.dedup.value ?? null,
-			verifiedPhone?.dedup.keyVersion ?? null,
-			verifiedPhone?.maskedPhone ?? null,
+			claimHash,
+			verificationSucceeded,
 		],
 	);
 	return result.rows[0]?.changed === true;
-}
-
-async function selectVerifiedFusionProof(
-	transaction: DatabaseTransaction,
-	flowId: string,
-	deviceHashCandidates: readonly string[],
-): Promise<VerifiedFusionAuthProof | null> {
-	const result = await transaction.query<FusionProofRow>(
-		`SELECT id, purpose, registration_flow_reference_hash, device_hash,
-		   hash_key_version, expires_at, proof_expires_at,
-		   verified_phone_lookup_hash,
-		   verified_phone_lookup_key_version, verified_phone_dedup_hash,
-		   verified_phone_dedup_key_version, masked_phone, verify_token_hash,
-		   verify_token_hash_key_version, verified_at
-		 FROM public.fusion_auth_flows
-		 WHERE id = $1 AND purpose = 'REGISTER'
-		   AND device_hash = ANY($2::varchar[])
-		   AND consumed_at IS NULL AND verified_at IS NOT NULL
-		   AND proof_expires_at > clock_timestamp()
-		 LIMIT 1`,
-		[flowId, deviceHashCandidates],
-	);
-	return mapVerifiedFusionProof(result.rows[0]);
 }
 
 async function consumeOAuth(
@@ -1851,8 +1706,27 @@ async function consumeOAuth(
 	proof: OAuthProof,
 	hashes: VerifiedOAuthHashes,
 ): Promise<boolean> {
+	if (proof.provider === "QQ") {
+		const result = await transaction.query<BooleanRow>(
+			"SELECT public.consume_oauth_state($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) AS changed",
+			[
+				proof.id,
+				proof.provider,
+				proof.purpose,
+				proof.flowReferenceHash,
+				proof.operationTargetHash,
+				proof.targetUserId,
+				proof.deviceHash,
+				hashes.lookup.value,
+				hashes.lookup.keyVersion,
+				hashes.dedup.value,
+				hashes.dedup.keyVersion,
+			],
+		);
+		return result.rows[0]?.changed === true;
+	}
 	const result = await transaction.query<BooleanRow>(
-		"SELECT public.consume_oauth_state($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) AS changed",
+		"SELECT public.consume_oauth_state_with_wechat_union($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) AS changed",
 		[
 			proof.id,
 			proof.provider,
@@ -1865,7 +1739,22 @@ async function consumeOAuth(
 			hashes.lookup.keyVersion,
 			hashes.dedup.value,
 			hashes.dedup.keyVersion,
+			hashes.wechatUnionAlias?.realmId ?? null,
+			hashes.wechatUnionAlias?.hash.value ?? null,
+			hashes.wechatUnionAlias?.hash.keyVersion ?? null,
 		],
+	);
+	return result.rows[0]?.changed === true;
+}
+
+async function recordWechatUnionAliasFromConsumedState(
+	transaction: DatabaseTransaction,
+	oauthStateId: string,
+	identityBindingId: string,
+): Promise<boolean> {
+	const result = await transaction.query<BooleanRow>(
+		"SELECT public.record_wechat_union_alias_from_consumed_state($1, $2) AS changed",
+		[oauthStateId, identityBindingId],
 	);
 	return result.rows[0]?.changed === true;
 }
@@ -1970,6 +1859,7 @@ function mapOtpProof(row: OtpProofRow | undefined): OtpProof | null {
 				channel: row.channel,
 				purpose: row.purpose,
 				destinationDedupHash: row.destination_dedup_hash,
+				verificationMethod: row.verification_method,
 				codeHash: row.code_hash,
 				codeHashKeyVersion: row.code_hash_key_version,
 				operationTargetHash: row.operation_target_hash,
@@ -1978,65 +1868,6 @@ function mapOtpProof(row: OtpProofRow | undefined): OtpProof | null {
 				deviceHash: row.device_hash,
 				hashKeyVersion: row.hash_key_version,
 			});
-}
-
-function mapFusionProof(row: FusionProofRow | undefined): FusionAuthProof | null {
-	return row === undefined
-		? null
-		: Object.freeze({
-				id: row.id,
-				purpose: row.purpose,
-				registrationFlowReferenceHash:
-					row.registration_flow_reference_hash,
-				deviceHash: row.device_hash,
-				hashKeyVersion: row.hash_key_version,
-				expiresAt: asDate(row.expires_at),
-			});
-}
-
-function mapVerifiedFusionProof(
-	row: FusionProofRow | undefined,
-): VerifiedFusionAuthProof | null {
-	if (
-		row === undefined ||
-		row.purpose !== "REGISTER" ||
-		row.registration_flow_reference_hash === null ||
-		row.verified_phone_lookup_hash === null ||
-		row.verified_phone_lookup_key_version === null ||
-		row.verified_phone_dedup_hash === null ||
-		row.verified_phone_dedup_key_version === null ||
-		row.masked_phone === null ||
-		row.verify_token_hash === null ||
-		row.verify_token_hash_key_version === null ||
-		row.verified_at === null ||
-		row.proof_expires_at === null
-	) {
-		return null;
-	}
-	return Object.freeze({
-		id: row.id,
-		purpose: row.purpose,
-		registrationFlowReferenceHash: row.registration_flow_reference_hash,
-		deviceHash: row.device_hash,
-		hashKeyVersion: row.hash_key_version,
-		expiresAt: asDate(row.proof_expires_at),
-		verifiedAt: asDate(row.verified_at),
-		verifiedPhone: Object.freeze({
-			lookup: Object.freeze({
-				value: row.verified_phone_lookup_hash,
-				keyVersion: row.verified_phone_lookup_key_version,
-			}),
-			dedup: Object.freeze({
-				value: row.verified_phone_dedup_hash,
-				keyVersion: row.verified_phone_dedup_key_version,
-			}),
-			maskedPhone: row.masked_phone,
-			verifyTokenHash: Object.freeze({
-				value: row.verify_token_hash,
-				keyVersion: row.verify_token_hash_key_version,
-			}),
-		}),
-	});
 }
 
 function mapOAuthProof(row: OAuthProofRow | undefined): OAuthProof | null {

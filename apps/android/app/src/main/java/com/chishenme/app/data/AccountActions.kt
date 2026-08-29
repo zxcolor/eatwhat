@@ -7,9 +7,6 @@ import com.chishenme.app.data.remote.AuthIdentityBinding
 import com.chishenme.app.data.remote.AuthIdentityType
 import com.chishenme.app.data.remote.AuthSessionSummary
 import com.chishenme.app.data.remote.DeleteAccountResponse
-import com.chishenme.app.data.remote.FusionAuthPurpose
-import com.chishenme.app.data.remote.FusionAuthTokenResponse
-import com.chishenme.app.data.remote.FusionRegistrationPhoneProof
 import com.chishenme.app.data.remote.OAuthPurpose
 import com.chishenme.app.data.remote.OAuthStateResponse
 import com.chishenme.app.data.remote.OtpPurpose
@@ -25,29 +22,6 @@ interface AccountAuthActions {
 
     suspend fun restoreSession(): AuthOutcome<LocalAuthSession?>
 
-    suspend fun requestFusionToken(
-        purpose: FusionAuthPurpose,
-    ): AuthOutcome<FusionAuthTokenResponse> = AuthOutcome.Failure(
-        AuthFailureKind.UNAVAILABLE,
-        "当前安装包未开放手机号一键验证",
-    )
-
-    suspend fun loginWithFusion(
-        flowId: String,
-        verifyToken: String,
-    ): AuthOutcome<LocalAuthSession> = AuthOutcome.Failure(
-        AuthFailureKind.UNAVAILABLE,
-        "当前安装包未开放手机号一键验证",
-    )
-
-    suspend fun verifyFusionForRegistration(
-        flowId: String,
-        verifyToken: String,
-    ): AuthOutcome<FusionRegistrationPhoneProof> = AuthOutcome.Failure(
-        AuthFailureKind.UNAVAILABLE,
-        "当前安装包未开放手机号一键验证",
-    )
-
     suspend fun requestPhoneCode(
         rawPhone: String,
         purpose: OtpPurpose,
@@ -61,36 +35,13 @@ interface AccountAuthActions {
     suspend fun createOAuthState(
         provider: AuthIdentityType,
         purpose: OAuthPurpose,
-        phoneChallengeId: String? = null,
     ): AuthOutcome<OAuthStateResponse>
-
-    suspend fun createWechatRegistrationStateForFusion(
-        phoneProofId: String,
-    ): AuthOutcome<OAuthStateResponse> = AuthOutcome.Failure(
-        AuthFailureKind.UNAVAILABLE,
-        "当前安装包未开放融合认证注册",
-    )
-
-    suspend fun registerPhoneWechat(
-        challengeId: String,
-        otpCode: String,
-        oauthState: String,
-        authorizationCode: String,
-    ): AuthOutcome<LocalAuthSession>
-
-    suspend fun registerFusionWechat(
-        phoneProofId: String,
-        oauthState: String,
-        authorizationCode: String,
-    ): AuthOutcome<LocalAuthSession> = AuthOutcome.Failure(
-        AuthFailureKind.UNAVAILABLE,
-        "当前安装包未开放融合认证注册",
-    )
 
     suspend fun loginWithOtp(
         type: AuthIdentityType,
         challengeId: String,
         otpCode: String,
+        phoneNumber: String? = null,
     ): AuthOutcome<LocalAuthSession>
 
     suspend fun loginWithWechat(
@@ -100,7 +51,7 @@ interface AccountAuthActions {
 
     suspend fun loginWithQq(
         oauthState: String,
-        qqAccessToken: String,
+        authorizationCode: String,
     ): AuthOutcome<LocalAuthSession>
 
     suspend fun identities(): AuthOutcome<List<AuthIdentityBinding>>
@@ -113,7 +64,12 @@ interface AccountAuthActions {
 
     suspend fun bindWithQq(
         oauthState: String,
-        qqAccessToken: String,
+        authorizationCode: String,
+    ): AuthOutcome<AuthIdentityBinding>
+
+    suspend fun bindWithWechat(
+        oauthState: String,
+        authorizationCode: String,
     ): AuthOutcome<AuthIdentityBinding>
 
     suspend fun sessions(): AuthOutcome<List<AuthSessionSummary>>

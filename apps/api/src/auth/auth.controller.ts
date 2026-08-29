@@ -5,10 +5,6 @@ import {
 	BindingIdPathSchema,
 	type EmailRequestCode,
 	EmailRequestCodeSchema,
-	type FusionAuthTokenRequest,
-	FusionAuthTokenRequestSchema,
-	type FusionAuthVerifyRequest,
-	FusionAuthVerifyRequestSchema,
 	type LoginRequest,
 	LoginRequestSchema,
 	type LogoutRequest,
@@ -19,10 +15,6 @@ import {
 	PhoneRequestCodeSchema,
 	type RefreshRequest,
 	RefreshRequestSchema,
-	type RegisterPhoneWechatRequest,
-	RegisterPhoneWechatRequestSchema,
-	type RegisterFusionWechatRequest,
-	RegisterFusionWechatRequestSchema,
 	type SessionIdPath,
 	SessionIdPathSchema,
 } from "@chi-shen-me/contracts";
@@ -32,7 +24,6 @@ import {
 	Delete,
 	Get,
 	Headers,
-	Header,
 	HttpCode,
 	HttpStatus,
 	Ip,
@@ -81,29 +72,6 @@ export class AuthController {
 		);
 	}
 
-	@Post("phone/fusion-token")
-	@HttpCode(HttpStatus.CREATED)
-	@Header("Cache-Control", "no-store")
-	@RateLimit(5, 60_000)
-	requestFusionToken(
-		@Body(new ZodBodyPipe(FusionAuthTokenRequestSchema))
-		input: FusionAuthTokenRequest,
-		@Ip() clientIp: string,
-	) {
-		return this.service.requestFusionToken(input, clientIp);
-	}
-
-	@Post("phone/fusion-verify")
-	@HttpCode(HttpStatus.OK)
-	@Header("Cache-Control", "no-store")
-	@RateLimit(10, 60_000)
-	verifyFusionPhone(
-		@Body(new ZodBodyPipe(FusionAuthVerifyRequestSchema))
-		input: FusionAuthVerifyRequest,
-	) {
-		return this.service.verifyFusionPhone(input);
-	}
-
 	@Post("email/request-code")
 	@HttpCode(HttpStatus.ACCEPTED)
 	@RateLimit(5, 60_000)
@@ -132,28 +100,6 @@ export class AuthController {
 				? requireBearerAccessToken(authorization)
 				: optionalBearerAccessToken(authorization);
 		return this.service.createOAuthState(input, bearer, clientIp);
-	}
-
-	@Post("register/phone-wechat")
-	@HttpCode(HttpStatus.CREATED)
-	@RateLimit(10, 60_000)
-	register(
-		@Body(new ZodBodyPipe(RegisterPhoneWechatRequestSchema))
-		input: RegisterPhoneWechatRequest,
-		@Ip() clientIp: string,
-	) {
-		return this.service.register(input, clientIp);
-	}
-
-	@Post("register/fusion-wechat")
-	@HttpCode(HttpStatus.CREATED)
-	@RateLimit(10, 60_000)
-	registerWithFusion(
-		@Body(new ZodBodyPipe(RegisterFusionWechatRequestSchema))
-		input: RegisterFusionWechatRequest,
-		@Ip() clientIp: string,
-	) {
-		return this.service.registerWithFusion(input, clientIp);
 	}
 
 	@Post("login")

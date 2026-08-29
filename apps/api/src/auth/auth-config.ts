@@ -23,14 +23,6 @@ export interface AuthRuntimeConfig {
 		readonly templateCode: string | null;
 		readonly timeoutMs: number;
 	};
-	readonly fusion: {
-		readonly enabled: boolean;
-		readonly schemeCode: string | null;
-		readonly packageName: string | null;
-		readonly packageSign: string | null;
-		readonly tokenTtlMs: number;
-		readonly timeoutMs: number;
-	};
 	readonly email: {
 		readonly enabled: boolean;
 		readonly host: string | null;
@@ -39,6 +31,7 @@ export interface AuthRuntimeConfig {
 		readonly username: string | null;
 		readonly password: string | null;
 		readonly fromAddress: string | null;
+		readonly replyToAddress: string | null;
 		readonly fromName: string;
 		readonly timeoutMs: number;
 	};
@@ -46,11 +39,15 @@ export interface AuthRuntimeConfig {
 		readonly enabled: boolean;
 		readonly appId: string | null;
 		readonly appSecret: string | null;
+		readonly openPlatformRealmId: string | null;
 		readonly timeoutMs: number;
 	};
 	readonly qq: {
 		readonly enabled: boolean;
+		readonly unionIdEnabled: boolean;
 		readonly appId: string | null;
+		readonly appKey: string | null;
+		readonly openPlatformRealmId: string | null;
 		readonly timeoutMs: number;
 	};
 }
@@ -119,6 +116,22 @@ function readWechatAppId(
 	return normalized;
 }
 
+function readWechatOpenPlatformRealmId(
+	enabled: boolean,
+	value: string | undefined,
+): string | null {
+	const normalized = optionalWhenDisabled(
+		enabled,
+		value,
+		"WECHAT_OPEN_PLATFORM_REALM_ID",
+		64,
+	);
+	if (normalized !== null && !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(normalized)) {
+		throw new Error("WECHAT_OPEN_PLATFORM_REALM_ID 必须是稳定的小写内部标识");
+	}
+	return normalized;
+}
+
 function readQqAppId(
 	enabled: boolean,
 	value: string | undefined,
@@ -126,6 +139,38 @@ function readQqAppId(
 	const normalized = optionalWhenDisabled(enabled, value, "QQ_APP_ID", 16);
 	if (normalized !== null && !/^[1-9][0-9]{4,15}$/u.test(normalized)) {
 		throw new Error("QQ_APP_ID 必须为 5 至 16 位、不以 0 开头的纯数字 AppID");
+	}
+	return normalized;
+}
+
+function readQqAppKey(
+	enabled: boolean,
+	value: string | undefined,
+): string | null {
+	if (!enabled) return null;
+	const secret = value ?? "";
+	if (
+		secret.length < 16 ||
+		secret.length > 256 ||
+		!/^[\x21-\x7e]+$/u.test(secret)
+	) {
+		throw new Error("QQ_APP_KEY 在 QQ 登录启用时必须是有效的服务端密钥");
+	}
+	return secret;
+}
+
+function readQqOpenPlatformRealmId(
+	unionIdEnabled: boolean,
+	value: string | undefined,
+): string | null {
+	const normalized = optionalWhenDisabled(
+		unionIdEnabled,
+		value,
+		"QQ_OPEN_PLATFORM_REALM_ID",
+		64,
+	);
+	if (normalized !== null && !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(normalized)) {
+		throw new Error("QQ_OPEN_PLATFORM_REALM_ID 必须是稳定的小写内部标识");
 	}
 	return normalized;
 }
@@ -159,66 +204,13 @@ function readSmsTemplateCode(
 	const normalized = optionalWhenDisabled(
 		enabled,
 		value,
-		"ALIYUN_SMS_TEMPLATE_CODE",
+		"ALIYUN_PNVS_TEMPLATE_CODE",
 		64,
 	);
-	if (normalized !== null && !/^SMS_[A-Za-z0-9]{1,32}$/u.test(normalized)) {
-		throw new Error("ALIYUN_SMS_TEMPLATE_CODE 必须是有效的短信模板 Code");
+	if (normalized !== null && !/^[A-Za-z0-9_-]{1,64}$/u.test(normalized)) {
+		throw new Error("ALIYUN_PNVS_TEMPLATE_CODE 必须是有效的短信认证模板 Code");
 	}
 	return normalized;
-}
-
-function readFusionSchemeCode(
-	enabled: boolean,
-	value: string | undefined,
-): string | null {
-	const normalized = optionalWhenDisabled(
-		enabled,
-		value,
-		"ALIYUN_FUSION_SCHEME_CODE",
-		128,
-	);
-	if (normalized !== null && !/^[A-Za-z0-9_-]{1,128}$/u.test(normalized)) {
-		throw new Error("ALIYUN_FUSION_SCHEME_CODE 必须是有效的融合认证方案 Code");
-	}
-	return normalized;
-}
-
-function readAndroidPackageName(
-	enabled: boolean,
-	value: string | undefined,
-): string | null {
-	const normalized = optionalWhenDisabled(
-		enabled,
-		value,
-		"ALIYUN_FUSION_PACKAGE_NAME",
-		255,
-	);
-	if (
-		normalized !== null &&
-		!// Android application IDs are dot-separated Java identifiers. Keeping
-		// this server-pinned prevents a caller from minting tokens for another app.
-		/^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$/u.test(normalized)
-	) {
-		throw new Error("ALIYUN_FUSION_PACKAGE_NAME 必须是有效的 Android 包名");
-	}
-	return normalized;
-}
-
-function readAndroidPackageSign(
-	enabled: boolean,
-	value: string | undefined,
-): string | null {
-	const normalized = optionalWhenDisabled(
-		enabled,
-		value,
-		"ALIYUN_FUSION_PACKAGE_SIGN",
-		32,
-	);
-	if (normalized !== null && !/^[0-9a-fA-F]{32}$/u.test(normalized)) {
-		throw new Error("ALIYUN_FUSION_PACKAGE_SIGN 必须是 32 位十六进制包签名");
-	}
-	return normalized?.toLowerCase() ?? null;
 }
 
 function readEmailAddress(
@@ -439,19 +431,24 @@ export function loadAuthRuntimeConfig(
 
 	const phoneEnabled =
 		enabled && readBoolean(env.PHONE_AUTH_ENABLED, "PHONE_AUTH_ENABLED");
-	const fusionEnabled =
-		enabled && readBoolean(env.FUSION_AUTH_ENABLED, "FUSION_AUTH_ENABLED");
 	const emailEnabled =
 		enabled && readBoolean(env.EMAIL_AUTH_ENABLED, "EMAIL_AUTH_ENABLED");
 	const wechatEnabled =
 		enabled && readBoolean(env.WECHAT_AUTH_ENABLED, "WECHAT_AUTH_ENABLED");
 	const qqEnabled =
 		enabled && readBoolean(env.QQ_AUTH_ENABLED, "QQ_AUTH_ENABLED");
+	const qqUnionIdEnabled = readBooleanWithFallback(
+		env.QQ_UNION_ID_ENABLED,
+		false,
+		"QQ_UNION_ID_ENABLED",
+	);
+	if (qqUnionIdEnabled && !qqEnabled) {
+		throw new Error("QQ_UNION_ID_ENABLED=true 时必须同时启用 QQ_AUTH_ENABLED");
+	}
 	const dataExportEnabled =
 		enabled && readBoolean(env.DATA_EXPORT_ENABLED, "DATA_EXPORT_ENABLED");
-	const registrationEnabled =
-		enabled && (phoneEnabled || fusionEnabled) && wechatEnabled;
-	if (enabled && !(phoneEnabled || fusionEnabled)) {
+	const registrationEnabled = enabled && phoneEnabled;
+	if (enabled && !phoneEnabled) {
 		throw new Error("账号服务启用前必须至少就绪一个手机通道");
 	}
 
@@ -462,7 +459,7 @@ export function loadAuthRuntimeConfig(
 		"AUTH_HASH_ACTIVE_VERSION",
 	);
 	const otpPepperRing = readKeyRing(
-		phoneEnabled || emailEnabled,
+		emailEnabled,
 		env,
 		"AUTH_OTP_PEPPER_KEYS_JSON",
 		"AUTH_OTP_PEPPER_ACTIVE_VERSION",
@@ -513,7 +510,7 @@ export function loadAuthRuntimeConfig(
 			5_000,
 		),
 		aliyunCredentialAllowedProvider: readAliyunCredentialAllowedProvider(
-			phoneEnabled || fusionEnabled,
+			phoneEnabled,
 			options.production === true,
 			env.ALIYUN_CREDENTIAL_ALLOWED_PROVIDER,
 		),
@@ -549,7 +546,7 @@ export function loadAuthRuntimeConfig(
 				env.AUTH_OTP_RESEND_SECONDS,
 				60,
 				"AUTH_OTP_RESEND_SECONDS",
-				30,
+				60,
 				300,
 			) * 1_000,
 		oauthStateTtlMs:
@@ -564,50 +561,20 @@ export function loadAuthRuntimeConfig(
 			enabled: phoneEnabled,
 			signName: readCodePointBoundedValue(
 				phoneEnabled,
-				env.ALIYUN_SMS_SIGN_NAME,
-				"ALIYUN_SMS_SIGN_NAME",
+				env.ALIYUN_PNVS_SIGN_NAME,
+				"ALIYUN_PNVS_SIGN_NAME",
 				2,
 				12,
 			),
 			templateCode: readSmsTemplateCode(
 				phoneEnabled,
-				env.ALIYUN_SMS_TEMPLATE_CODE,
+				env.ALIYUN_PNVS_TEMPLATE_CODE,
 			),
 			timeoutMs: readInteger(
-				env.ALIYUN_SMS_TIMEOUT_MS,
+				env.ALIYUN_PNVS_TIMEOUT_MS,
 				1_500,
-				"ALIYUN_SMS_TIMEOUT_MS",
+				"ALIYUN_PNVS_TIMEOUT_MS",
 				1_000,
-				5_000,
-			),
-		}),
-		fusion: Object.freeze({
-			enabled: fusionEnabled,
-			schemeCode: readFusionSchemeCode(
-				fusionEnabled,
-				env.ALIYUN_FUSION_SCHEME_CODE,
-			),
-			packageName: readAndroidPackageName(
-				fusionEnabled,
-				env.ALIYUN_FUSION_PACKAGE_NAME,
-			),
-			packageSign: readAndroidPackageSign(
-				fusionEnabled,
-				env.ALIYUN_FUSION_PACKAGE_SIGN,
-			),
-			tokenTtlMs:
-				readInteger(
-					env.ALIYUN_FUSION_TOKEN_TTL_SECONDS,
-					900,
-					"ALIYUN_FUSION_TOKEN_TTL_SECONDS",
-					900,
-					43_200,
-				) * 1_000,
-			timeoutMs: readInteger(
-				env.ALIYUN_FUSION_TIMEOUT_MS,
-				2_000,
-				"ALIYUN_FUSION_TIMEOUT_MS",
-				500,
 				5_000,
 			),
 		}),
@@ -622,6 +589,11 @@ export function loadAuthRuntimeConfig(
 				emailEnabled,
 				env.SMTP_FROM_ADDRESS,
 				"SMTP_FROM_ADDRESS",
+			),
+			replyToAddress: readEmailAddress(
+				emailEnabled,
+				env.SMTP_REPLY_TO,
+				"SMTP_REPLY_TO",
 			),
 			fromName: readSmtpFromName(emailEnabled, env.SMTP_FROM_NAME),
 			timeoutMs: readInteger(
@@ -641,6 +613,10 @@ export function loadAuthRuntimeConfig(
 				"WECHAT_APP_SECRET",
 				256,
 			),
+			openPlatformRealmId: readWechatOpenPlatformRealmId(
+				wechatEnabled,
+				env.WECHAT_OPEN_PLATFORM_REALM_ID,
+			),
 			timeoutMs: readInteger(
 				env.WECHAT_AUTH_TIMEOUT_MS,
 				2_000,
@@ -651,7 +627,13 @@ export function loadAuthRuntimeConfig(
 		}),
 		qq: Object.freeze({
 			enabled: qqEnabled,
+			unionIdEnabled: qqUnionIdEnabled,
 			appId: readQqAppId(qqEnabled, env.QQ_APP_ID),
+			appKey: readQqAppKey(qqEnabled, env.QQ_APP_KEY),
+			openPlatformRealmId: readQqOpenPlatformRealmId(
+				qqUnionIdEnabled,
+				env.QQ_OPEN_PLATFORM_REALM_ID,
+			),
 			timeoutMs: readInteger(
 				env.QQ_AUTH_TIMEOUT_MS,
 				2_000,

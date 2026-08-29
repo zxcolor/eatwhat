@@ -18,7 +18,7 @@ import org.junit.Test
 class QqOAuthManagerTest {
     private val now = Instant.parse("2026-08-21T04:00:00Z")
     private val state = "s".repeat(43)
-    private val token = "private-access-token-1234567890"
+    private val authorizationCode = "private-authorization-code-1234567890"
 
     @Test
     fun `construction and privacy refusal never create SDK`() = runTest {
@@ -125,14 +125,14 @@ class QqOAuthManagerTest {
         assertEquals(1, host.launchCount)
 
         val event = async(start = CoroutineStart.UNDISPATCHED) { manager.events.first() }
-        factory.callback?.invoke(QqSdkCallback.Authorized(token))
+        factory.callback?.invoke(QqSdkCallback.Authorized(authorizationCode))
         val authorized = event.await() as QqOAuthEvent.Authorized
 
         assertFalse(authorized.toString().contains(state))
-        assertFalse(authorized.toString().contains(token))
-        val consumed = authorized.consumeProof { proofState, proofToken ->
+        assertFalse(authorized.toString().contains(authorizationCode))
+        val consumed = authorized.consumeProof { proofState, proofAuthorizationCode ->
             assertEquals(state, proofState)
-            assertEquals(token, proofToken)
+            assertEquals(authorizationCode, proofAuthorizationCode)
             "sent-to-backend"
         }
         assertEquals("sent-to-backend", consumed)
@@ -190,11 +190,11 @@ class QqOAuthManagerTest {
         )
         val secondSession = factory.sessions.last()
 
-        oldCallback(QqSdkCallback.Authorized(token))
+        oldCallback(QqSdkCallback.Authorized(authorizationCode))
         assertEquals(0, secondSession.clearCount)
 
         val event = async(start = CoroutineStart.UNDISPATCHED) { manager.events.first() }
-        factory.callbacks.last()(QqSdkCallback.Authorized(token))
+        factory.callbacks.last()(QqSdkCallback.Authorized(authorizationCode))
         val authorized = event.await() as QqOAuthEvent.Authorized
         val consumedState = authorized.consumeProof { proofState, _ -> proofState }
 
@@ -206,10 +206,21 @@ class QqOAuthManagerTest {
 
     @Test
     fun `SDK callback DTO debug text never exposes credential`() {
-        val dto = QqSdkCallback.Authorized(token)
+        val dto = QqSdkCallback.Authorized(authorizationCode)
 
-        assertFalse(dto.toString().contains(token))
+        assertFalse(dto.toString().contains(authorizationCode))
         assertTrue(dto.toString().contains("Authorized"))
+    }
+
+    @Test
+    fun `OpenSDK login result request code is forwarded`() {
+        assertTrue(isQqLoginActivityResult(OPEN_SDK_LOGIN_REQUEST_CODE))
+    }
+
+    @Test
+    fun `unrelated and Tencent facade request codes are rejected`() {
+        assertFalse(isQqLoginActivityResult(TENCENT_FACADE_REQUEST_CODE))
+        assertFalse(isQqLoginActivityResult(Int.MIN_VALUE))
     }
 
     private fun manager(consent: Boolean, factory: FakeFactory) = QqOAuthManager(
@@ -271,5 +282,10 @@ class QqOAuthManagerTest {
         override fun clear() {
             clearCount += 1
         }
+    }
+
+    private companion object {
+        const val OPEN_SDK_LOGIN_REQUEST_CODE = 11101
+        const val TENCENT_FACADE_REQUEST_CODE = 10001
     }
 }

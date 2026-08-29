@@ -12,6 +12,8 @@ export const RETENTION_POLICY_CODES = Object.freeze([
 	"ACCOUNT_DELETION_TOMBSTONE_30D",
 	"OTP_24H",
 	"OAUTH_STATE_24H",
+	// Transitional data-minimization only: migration 0011 intentionally keeps
+	// the historical 0010 tables, but no Fusion authentication capability uses them.
 	"FUSION_AUTH_24H",
 	"ACCESS_TOKEN_24H_AFTER_EXPIRY",
 	"SESSION_FAMILY_30D_AFTER_EXPIRY",

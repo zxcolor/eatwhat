@@ -15,7 +15,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.chishenme.app.auth.fusion.FusionAuthManager
 import com.chishenme.app.auth.qq.QqOAuthManager
 import com.chishenme.app.auth.wechat.WechatOAuthManager
 import com.chishenme.app.feature.consent.ConsentScreen
@@ -29,7 +28,6 @@ import javax.inject.Inject
 class MainActivity : ComponentActivity() {
     @Inject lateinit var qqOAuth: QqOAuthManager
     @Inject lateinit var wechatOAuth: WechatOAuthManager
-    @Inject lateinit var fusionAuth: FusionAuthManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -38,7 +36,6 @@ class MainActivity : ComponentActivity() {
             ChiShenMeApp(
                 qqOAuth = qqOAuth,
                 wechatOAuth = wechatOAuth,
-                fusionAuth = fusionAuth,
             )
         }
     }
@@ -54,7 +51,6 @@ class MainActivity : ComponentActivity() {
 private fun ChiShenMeApp(
     qqOAuth: QqOAuthManager,
     wechatOAuth: WechatOAuthManager,
-    fusionAuth: FusionAuthManager,
     consentViewModel: ConsentViewModel = hiltViewModel(),
 ) {
     val accepted by consentViewModel.privacyAccepted.collectAsStateWithLifecycle()
@@ -67,7 +63,6 @@ private fun ChiShenMeApp(
             runCatching { wechatOAuth.allowPrivacyConsent() }
             runCatching { qqOAuth.allowPrivacyConsent() }
         } else {
-            runCatching { fusionAuth.revokePrivacyConsent() }
             runCatching { wechatOAuth.revokePrivacyConsent() }
             runCatching { qqOAuth.revokePrivacyConsent() }
         }
@@ -85,7 +80,6 @@ private fun ChiShenMeApp(
             true -> AppNavigation(
                 onWithdrawPrivacy = {
                     consentViewModel.withdrawPrivacy {
-                        runCatching { fusionAuth.revokePrivacyConsent() }
                         runCatching { wechatOAuth.revokePrivacyConsent() }
                         runCatching { qqOAuth.revokePrivacyConsent() }
                     }

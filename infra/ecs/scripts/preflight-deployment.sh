@@ -16,6 +16,7 @@ command -v base64 >/dev/null
 command -v cmp >/dev/null
 command -v docker >/dev/null
 command -v openssl >/dev/null
+command -v readlink >/dev/null
 command -v realpath >/dev/null
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -84,6 +85,41 @@ assert_exact_env_keys() {
   done
 }
 
+assert_env_keys_with_optional() {
+  local path="$1"
+  shift
+  local -A required=()
+  local -A optional=()
+  local -A actual=()
+  local env_name line section='required'
+
+  for env_name in "$@"; do
+    if [[ "$env_name" == '--' ]]; then
+      [[ "$section" == 'required' ]] || die 'invalid optional environment key delimiter'
+      section='optional'
+    elif [[ "$section" == 'required' ]]; then
+      required["$env_name"]=1
+    else
+      optional["$env_name"]=1
+    fi
+  done
+  [[ "$section" == 'optional' ]] || die 'optional environment key delimiter is missing'
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ ^[A-Z][A-Z0-9_]*=.*$ ]] || die "invalid environment line in $path"
+    env_name="${line%%=*}"
+    [[ -z "${actual[$env_name]+x}" ]] || die "duplicate environment key in $path: $env_name"
+    [[ -n "${required[$env_name]+x}" || -n "${optional[$env_name]+x}" ]] ||
+      die "unexpected environment key in $path: $env_name"
+    [[ -n "${line#*=}" ]] || die "empty secret setting: $env_name"
+    actual["$env_name"]=1
+  done <"$path"
+
+  for env_name in "${!required[@]}"; do
+    [[ -n "${actual[$env_name]+x}" ]] || die "required environment key is missing from $path: $env_name"
+  done
+}
+
 read_env_value() {
   local path="$1"
   local name="$2"
@@ -92,6 +128,19 @@ read_env_value() {
   [[ "${#matches[@]}" -eq 1 ]] || die "missing or duplicate secret setting: $name"
   [[ -n "${matches[0]#*=}" ]] || die "empty secret setting: $name"
   printf '%s' "${matches[0]#*=}"
+}
+
+count_present_env_keys() {
+  local path="$1"
+  shift
+  local count=0 name
+  for name in "$@"; do
+    if grep -Eq "^${name}=" "$path"; then
+      read_env_value "$path" "$name" >/dev/null
+      count=$((count + 1))
+    fi
+  done
+  printf '%s' "$count"
 }
 
 assert_directory "$bundle_root" 700
@@ -118,8 +167,9 @@ declare -a deployment_names=(
   API_IMAGE
   API_IMAGE_ID
   API_LOOPBACK_PORT
+  AUTH_SCHEMA_TRANSITION_MODE
   COMPOSE_PROJECT_NAME
-  FUSION_AUTH_ENABLED
+  EMAIL_AUTH_ENABLED
   MINIMUM_SUPPORTED_VERSION
   POSTGIS_IMAGE
   POSTGIS_IMAGE_ID
@@ -127,9 +177,13 @@ declare -a deployment_names=(
   POSTGRES_DB
   POSTGRES_VOLUME_NAME
   PHONE_AUTH_ENABLED
+  QQ_AUTH_ENABLED
+  QQ_OPEN_PLATFORM_REALM_ID
+  QQ_UNION_ID_ENABLED
   RETENTION_MODE
   SHARED_STATE_DIRECTORY
   WECHAT_AUTH_ENABLED
+  WECHAT_OPEN_PLATFORM_REALM_ID
 )
 assert_exact_env_keys "$deployment_env" "${deployment_names[@]}"
 
@@ -145,15 +199,21 @@ postgres_bootstrap_user="$(read_deployment_value POSTGRES_BOOTSTRAP_USER)"
 postgres_volume_name="$(read_deployment_value POSTGRES_VOLUME_NAME)"
 minimum_supported_version="$(read_deployment_value MINIMUM_SUPPORTED_VERSION)"
 amap_enabled="$(read_deployment_value AMAP_ENABLED)"
+auth_schema_transition_mode="$(read_deployment_value AUTH_SCHEMA_TRANSITION_MODE)"
 accounts_enabled="$(read_deployment_value ACCOUNTS_ENABLED)"
 phone_auth_enabled="$(read_deployment_value PHONE_AUTH_ENABLED)"
-fusion_auth_enabled="$(read_deployment_value FUSION_AUTH_ENABLED)"
+email_auth_enabled="$(read_deployment_value EMAIL_AUTH_ENABLED)"
 wechat_auth_enabled="$(read_deployment_value WECHAT_AUTH_ENABLED)"
+wechat_open_platform_realm_id="$(read_deployment_value WECHAT_OPEN_PLATFORM_REALM_ID)"
+qq_auth_enabled="$(read_deployment_value QQ_AUTH_ENABLED)"
+qq_union_id_enabled="$(read_deployment_value QQ_UNION_ID_ENABLED)"
+qq_open_platform_realm_id="$(read_deployment_value QQ_OPEN_PLATFORM_REALM_ID)"
 aliyun_ram_role="$(read_deployment_value ALIBABA_CLOUD_ECS_METADATA)"
 retention_mode="$(read_deployment_value RETENTION_MODE)"
 
 [[ "$compose_project_name" == 'chi-shen-me-alpha' ]] || die 'unexpected Compose project name'
 [[ "$shared_state_directory" == '/opt/chi-shen-me/shared' ]] || die 'unexpected shared state directory'
+assert_directory "$shared_state_directory" 700
 [[ "$api_loopback_port" =~ ^[0-9]+$ && "$api_loopback_port" -ge 1024 && "$api_loopback_port" -le 65535 ]] ||
   die 'invalid API loopback port'
 [[ "$api_image" =~ ^[A-Za-z0-9._/:@-]+$ ]] || die 'invalid API image reference'
@@ -165,17 +225,129 @@ retention_mode="$(read_deployment_value RETENTION_MODE)"
 [[ "$postgres_volume_name" == 'chi-shen-me-alpha_postgres_data' ]] || die 'unexpected PostgreSQL volume name'
 [[ "$minimum_supported_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die 'invalid minimum supported version'
 [[ "$amap_enabled" == 'true' || "$amap_enabled" == 'false' ]] || die 'AMAP_ENABLED must be true or false'
-for auth_switch in "$accounts_enabled" "$phone_auth_enabled" "$fusion_auth_enabled" "$wechat_auth_enabled"; do
+[[ "$auth_schema_transition_mode" == 'none' || "$auth_schema_transition_mode" == 'legacy_phone_drain' || "$auth_schema_transition_mode" == 'wechat_union_aliases_pending' ]] ||
+  die 'AUTH_SCHEMA_TRANSITION_MODE must be none, legacy_phone_drain or wechat_union_aliases_pending'
+[[ "$wechat_open_platform_realm_id" =~ ^[a-z0-9][a-z0-9._-]{0,63}$ ]] ||
+  die 'WECHAT_OPEN_PLATFORM_REALM_ID must be a stable lowercase internal identifier'
+[[ "$qq_open_platform_realm_id" =~ ^[a-z0-9][a-z0-9._-]{0,63}$ ]] ||
+  die 'QQ_OPEN_PLATFORM_REALM_ID must be a stable lowercase internal identifier'
+
+# QQ identity semantics outlive every immutable release. Once QQ is enabled,
+# the realm and the monotonic UnionID marker are also anchored in this shared,
+# root-only non-secret state file. This survives a rollback to an older release
+# whose deployment.env predates these fields.
+qq_identity_state_file="$shared_state_directory/auth-identity-state.env"
+qq_identity_state_present='false'
+persisted_qq_namespace_initialized='false'
+if [[ -e "$qq_identity_state_file" || -L "$qq_identity_state_file" ]]; then
+  assert_regular_file "$qq_identity_state_file" 600
+  assert_exact_env_keys "$qq_identity_state_file" \
+    AUTH_IDENTITY_STATE_FORMAT_VERSION \
+    QQ_OPEN_PLATFORM_REALM_ID QQ_UNION_ID_NAMESPACE_INITIALIZED
+  persisted_identity_state_format_version="$(
+    read_env_value "$qq_identity_state_file" AUTH_IDENTITY_STATE_FORMAT_VERSION
+  )"
+  persisted_qq_realm_id="$(read_env_value "$qq_identity_state_file" QQ_OPEN_PLATFORM_REALM_ID)"
+  persisted_qq_namespace_initialized="$(
+    read_env_value "$qq_identity_state_file" QQ_UNION_ID_NAMESPACE_INITIALIZED
+  )"
+  [[ "$persisted_identity_state_format_version" == '1' ]] ||
+    die 'shared QQ identity state has an unsupported format version'
+  [[ "$persisted_qq_realm_id" =~ ^[a-z0-9][a-z0-9._-]{0,63}$ ]] ||
+    die 'shared QQ identity state has an invalid Open Platform realm'
+  [[ "$persisted_qq_namespace_initialized" == 'true' ||
+     "$persisted_qq_namespace_initialized" == 'false' ]] ||
+    die 'shared QQ identity state has an invalid UnionID namespace marker'
+  [[ "$persisted_qq_realm_id" == "$qq_open_platform_realm_id" ]] ||
+    die 'release must preserve the shared QQ Open Platform realm'
+  qq_identity_state_present='true'
+else
+  [[ "$qq_auth_enabled" == 'false' ]] ||
+    die 'QQ authentication requires initialized shared identity state'
+fi
+
+# Once a schema-0012-aware release is active, the Open Platform realm is an
+# identity namespace rather than an ordinary feature flag. A routine release
+# must not silently re-hash the same UnionID into a different namespace.
+current_link='/opt/chi-shen-me/current'
+if [[ -e "$current_link" || -L "$current_link" ]]; then
+  [[ -L "$current_link" ]] || die 'current release path must be a direct symlink'
+  current_release="$(readlink -- "$current_link")"
+  [[ "$current_release" =~ ^/opt/chi-shen-me/releases/[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] ||
+    die 'current release link does not directly name an immutable release'
+  [[ "$(realpath -e -- "$current_link")" == "$current_release" ]] ||
+    die 'current release link resolves unexpectedly'
+  current_deployment_env="$current_release/deploy/deployment.env"
+  if [[ "$current_deployment_env" != "$deployment_env" && -f "$current_deployment_env" ]]; then
+    mapfile -t current_realm_lines < <(
+      grep -E '^WECHAT_OPEN_PLATFORM_REALM_ID=' "$current_deployment_env" || true
+    )
+    [[ "${#current_realm_lines[@]}" -le 1 ]] ||
+      die 'current release has a duplicate WeChat Open Platform realm'
+    if [[ "${#current_realm_lines[@]}" -eq 1 ]]; then
+      current_realm="${current_realm_lines[0]#*=}"
+      [[ -n "$current_realm" && "$current_realm" == "$wechat_open_platform_realm_id" ]] ||
+        die 'routine releases must preserve the WeChat Open Platform realm'
+    fi
+    if [[ "$qq_identity_state_present" == 'false' ]]; then
+      mapfile -t current_qq_realm_lines < <(
+        grep -E '^QQ_OPEN_PLATFORM_REALM_ID=' "$current_deployment_env" || true
+      )
+      [[ "${#current_qq_realm_lines[@]}" -le 1 ]] ||
+        die 'current release has a duplicate QQ Open Platform realm'
+      if [[ "${#current_qq_realm_lines[@]}" -eq 1 ]]; then
+        current_qq_realm="${current_qq_realm_lines[0]#*=}"
+        [[ -n "$current_qq_realm" && "$current_qq_realm" == "$qq_open_platform_realm_id" ]] ||
+          die 'routine releases must preserve the QQ Open Platform realm'
+      fi
+    else
+      mapfile -t current_qq_enabled_lines < <(
+        grep -E '^QQ_AUTH_ENABLED=' "$current_deployment_env" || true
+      )
+      [[ "${#current_qq_enabled_lines[@]}" -le 1 ]] ||
+        die 'current release has a duplicate QQ authentication switch'
+      if [[ "${#current_qq_enabled_lines[@]}" -eq 1 &&
+            "${current_qq_enabled_lines[0]#*=}" == 'true' ]]; then
+        current_qq_realm="$(read_env_value "$current_deployment_env" QQ_OPEN_PLATFORM_REALM_ID)"
+        current_qq_union_enabled="$(read_env_value "$current_deployment_env" QQ_UNION_ID_ENABLED)"
+        [[ "$current_qq_realm" == "$persisted_qq_realm_id" ]] ||
+          die 'enabled current QQ release differs from the shared identity realm'
+        if [[ "$persisted_qq_namespace_initialized" == 'true' ]]; then
+          [[ "$current_qq_union_enabled" == 'true' ]] ||
+            die 'enabled current QQ release must preserve the shared UnionID namespace'
+        else
+          [[ "$current_qq_union_enabled" == 'false' ]] ||
+            die 'current QQ release cannot enable an uninitialized UnionID namespace'
+        fi
+      fi
+    fi
+  fi
+fi
+for auth_switch in "$accounts_enabled" "$phone_auth_enabled" "$email_auth_enabled" "$wechat_auth_enabled" "$qq_auth_enabled" "$qq_union_id_enabled"; do
   [[ "$auth_switch" == 'true' || "$auth_switch" == 'false' ]] || die 'authentication switches must be true or false'
 done
 if [[ "$accounts_enabled" == 'true' ]]; then
-  [[ "$phone_auth_enabled" == 'true' || "$fusion_auth_enabled" == 'true' ]] ||
-    die 'accounts require SMS phone auth or FusionAuth'
+  [[ "$phone_auth_enabled" == 'true' ]] || die 'PHONE_ONLY accounts require SMS phone authentication'
 else
-  [[ "$phone_auth_enabled" == 'false' && "$fusion_auth_enabled" == 'false' && "$wechat_auth_enabled" == 'false' ]] ||
+  [[ "$phone_auth_enabled" == 'false' && "$email_auth_enabled" == 'false' && "$wechat_auth_enabled" == 'false' && "$qq_auth_enabled" == 'false' && "$qq_union_id_enabled" == 'false' ]] ||
     die 'authentication channels must stay disabled when accounts are disabled'
 fi
-if [[ "$phone_auth_enabled" == 'true' || "$fusion_auth_enabled" == 'true' ]]; then
+if [[ "$auth_schema_transition_mode" == 'legacy_phone_drain' && "$accounts_enabled" != 'false' ]]; then
+  die 'legacy_phone_drain requires ACCOUNTS_ENABLED=false'
+fi
+if [[ "$auth_schema_transition_mode" == 'wechat_union_aliases_pending' && "$wechat_auth_enabled" != 'false' ]]; then
+  die 'wechat_union_aliases_pending requires WECHAT_AUTH_ENABLED=false'
+fi
+if [[ "$qq_union_id_enabled" == 'true' && "$qq_auth_enabled" != 'true' ]]; then
+  die 'QQ_UNION_ID_ENABLED requires QQ_AUTH_ENABLED'
+fi
+if [[ "$qq_union_id_enabled" == 'true' && "$persisted_qq_namespace_initialized" != 'true' ]]; then
+  die 'QQ_UNION_ID_ENABLED requires an initialized QQ UnionID namespace'
+fi
+if [[ "$persisted_qq_namespace_initialized" == 'true' && "$qq_auth_enabled" == 'true' && "$qq_union_id_enabled" != 'true' ]]; then
+  die 'initialized QQ UnionID namespace requires UnionID whenever QQ authentication is enabled'
+fi
+if [[ "$phone_auth_enabled" == 'true' ]]; then
   [[ "$aliyun_ram_role" =~ ^[A-Za-z0-9._-]{1,64}$ && "$aliyun_ram_role" != 'replace-with-ram-role-name' ]] ||
     die 'a real ECS RAM role name is required for Aliyun authentication APIs'
 fi
@@ -189,7 +361,6 @@ actual_postgis_image_id="$(docker image inspect --format '{{.Id}}' "$postgis_ima
 [[ "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$postgis_image")" == 'linux/amd64' ]] || die 'PostGIS image platform is not linux/amd64'
 [[ "$(docker image inspect --format '{{.Config.User}}' "$api_image")" == 'node' ]] || die 'API image must run as node'
 
-assert_directory "$shared_state_directory" 700
 secrets_dir="$shared_state_directory/secrets"
 assert_directory "$secrets_dir" 700
 
@@ -225,9 +396,29 @@ if [[ "$amap_enabled" == 'true' ]]; then
     AMAP_WEB_SERVICE_KEY AMAP_WEB_SERVICE_SIGNATURE_PRIVATE_KEY AMAP_IP_WHITELIST_CONFIGURED
   )
 fi
+identity_continuity_names=(
+  AUTH_HASH_ACTIVE_VERSION AUTH_HASH_KEYS_JSON AUTH_IDENTITY_DEDUP_KEY_VERSION
+)
+otp_continuity_names=(AUTH_OTP_PEPPER_ACTIVE_VERSION AUTH_OTP_PEPPER_KEYS_JSON)
+identity_continuity_count="$(
+  count_present_env_keys "$secrets_dir/api.env" "${identity_continuity_names[@]}"
+)"
+otp_continuity_count="$(
+  count_present_env_keys "$secrets_dir/api.env" "${otp_continuity_names[@]}"
+)"
+[[ "$identity_continuity_count" -eq 0 || "$identity_continuity_count" -eq 3 ]] ||
+  die 'api.env contains an incomplete authentication identity/session continuity group'
+[[ "$otp_continuity_count" -eq 0 || "$otp_continuity_count" -eq 2 ]] ||
+  die 'api.env contains an incomplete email OTP continuity group'
+[[ "$otp_continuity_count" -eq 0 || "$identity_continuity_count" -eq 3 ]] ||
+  die 'email OTP continuity requires the authentication identity/session continuity group'
 if [[ "$accounts_enabled" == 'true' ]]; then
+  [[ "$identity_continuity_count" -eq 3 ]] ||
+    die 'enabled accounts require the authentication identity/session continuity group'
+fi
+if [[ "$identity_continuity_count" -eq 3 ]]; then
   api_env_names+=(
-    AUTH_HASH_ACTIVE_VERSION AUTH_HASH_KEYS_JSON AUTH_IDENTITY_DEDUP_KEY_VERSION
+    "${identity_continuity_names[@]}"
   )
 fi
 if [[ "$wechat_auth_enabled" == 'true' ]]; then
@@ -235,16 +426,52 @@ if [[ "$wechat_auth_enabled" == 'true' ]]; then
 fi
 if [[ "$phone_auth_enabled" == 'true' ]]; then
   api_env_names+=(
-    AUTH_OTP_PEPPER_ACTIVE_VERSION AUTH_OTP_PEPPER_KEYS_JSON
-    ALIYUN_SMS_SIGN_NAME ALIYUN_SMS_TEMPLATE_CODE
+    ALIYUN_PNVS_SIGN_NAME ALIYUN_PNVS_TEMPLATE_CODE
   )
 fi
-if [[ "$fusion_auth_enabled" == 'true' ]]; then
+if [[ "$email_auth_enabled" == 'true' ]]; then
+  [[ "$otp_continuity_count" -eq 2 ]] ||
+    die 'email authentication requires the email OTP continuity group'
+fi
+if [[ "$otp_continuity_count" -eq 2 ]]; then
+  api_env_names+=("${otp_continuity_names[@]}")
+fi
+if [[ "$email_auth_enabled" == 'true' ]]; then
   api_env_names+=(
-    ALIYUN_FUSION_SCHEME_CODE ALIYUN_FUSION_PACKAGE_NAME ALIYUN_FUSION_PACKAGE_SIGN
+    SMTP_HOST SMTP_PORT SMTP_SECURE SMTP_USERNAME SMTP_PASSWORD
+    SMTP_FROM_ADDRESS SMTP_REPLY_TO SMTP_FROM_NAME
   )
 fi
-assert_exact_env_keys "$secrets_dir/api.env" "${api_env_names[@]}"
+if [[ "$qq_auth_enabled" == 'true' ]]; then
+  api_env_names+=(QQ_APP_ID QQ_APP_KEY)
+fi
+if [[ "$auth_schema_transition_mode" == 'legacy_phone_drain' ]]; then
+  declare -a legacy_optional_auth_env_names=(
+    ALIYUN_PNVS_SIGN_NAME
+    ALIYUN_PNVS_TEMPLATE_CODE
+    SMTP_HOST
+    SMTP_PORT
+    SMTP_SECURE
+    SMTP_USERNAME
+    SMTP_PASSWORD
+    SMTP_FROM_ADDRESS
+    SMTP_REPLY_TO
+    SMTP_FROM_NAME
+    QQ_APP_ID
+    QQ_APP_KEY
+    ALIYUN_SMS_SIGN_NAME
+    ALIYUN_SMS_TEMPLATE_CODE
+    ALIYUN_FUSION_SCHEME_CODE
+    ALIYUN_FUSION_PACKAGE_NAME
+    ALIYUN_FUSION_PACKAGE_SIGN
+    WECHAT_APP_ID
+    WECHAT_APP_SECRET
+  )
+  assert_env_keys_with_optional \
+    "$secrets_dir/api.env" "${api_env_names[@]}" -- "${legacy_optional_auth_env_names[@]}"
+else
+  assert_exact_env_keys "$secrets_dir/api.env" "${api_env_names[@]}"
+fi
 
 database_url="$(read_env_value "$secrets_dir/api.env" DATABASE_URL)"
 migration_url="$(read_env_value "$secrets_dir/migration.env" DATABASE_MIGRATION_URL)"
@@ -275,12 +502,6 @@ if [[ "$amap_enabled" == 'true' ]]; then
   unset amap_web_value amap_signing_value amap_whitelist
 fi
 
-if [[ "$fusion_auth_enabled" == 'true' ]]; then
-  fusion_package_name="$(read_env_value "$secrets_dir/api.env" ALIYUN_FUSION_PACKAGE_NAME)"
-  [[ "$fusion_package_name" == 'com.chishenme.app.alpha' ]] || die 'FusionAuth package must match the Alpha application ID'
-  unset fusion_package_name
-fi
-
 # Keep deployment validation exactly aligned with the API process. The pinned
 # candidate image validates the same api.env through the production
 # loadAuthRuntimeConfig implementation, without initializing credentials or
@@ -291,12 +512,15 @@ fi
 if ! docker run --rm --network none --read-only \
   --cap-drop ALL --security-opt no-new-privileges:true \
   --env-file "$secrets_dir/api.env" \
+  --env AUTH_SCHEMA_TRANSITION_MODE="$auth_schema_transition_mode" \
   --env ACCOUNTS_ENABLED="$accounts_enabled" \
   --env PHONE_AUTH_ENABLED="$phone_auth_enabled" \
-  --env FUSION_AUTH_ENABLED="$fusion_auth_enabled" \
-  --env EMAIL_AUTH_ENABLED=false \
+  --env EMAIL_AUTH_ENABLED="$email_auth_enabled" \
   --env WECHAT_AUTH_ENABLED="$wechat_auth_enabled" \
-  --env QQ_AUTH_ENABLED=false \
+  --env WECHAT_OPEN_PLATFORM_REALM_ID="$wechat_open_platform_realm_id" \
+  --env QQ_AUTH_ENABLED="$qq_auth_enabled" \
+  --env QQ_UNION_ID_ENABLED="$qq_union_id_enabled" \
+  --env QQ_OPEN_PLATFORM_REALM_ID="$qq_open_platform_realm_id" \
   --env DATA_EXPORT_ENABLED=false \
   --env ALIYUN_CREDENTIAL_ALLOWED_PROVIDER=default/ecs_ram_role \
   --entrypoint node "$api_image" --input-type=module --eval '
@@ -307,16 +531,71 @@ if ! docker run --rm --network none --read-only \
       databaseEnabled: true,
       production: true,
     });
-    const registrationEnabled =
-      enabled &&
-      (process.env.PHONE_AUTH_ENABLED === "true" ||
-        process.env.FUSION_AUTH_ENABLED === "true") &&
-      process.env.WECHAT_AUTH_ENABLED === "true";
+    const continuityNames = [
+      "AUTH_HASH_ACTIVE_VERSION",
+      "AUTH_HASH_KEYS_JSON",
+      "AUTH_IDENTITY_DEDUP_KEY_VERSION",
+    ];
+    const otpContinuityNames = [
+      "AUTH_OTP_PEPPER_ACTIVE_VERSION",
+      "AUTH_OTP_PEPPER_KEYS_JSON",
+    ];
+    const hasContinuity = continuityNames.every(
+      (name) => process.env[name] !== undefined,
+    );
+    const hasOtpContinuity = otpContinuityNames.every(
+      (name) => process.env[name] !== undefined,
+    );
+    if (!enabled && hasContinuity) {
+      const continuityConfig = loadAuthRuntimeConfig(
+        {
+          ...process.env,
+          ACCOUNTS_ENABLED: "true",
+          PHONE_AUTH_ENABLED: "true",
+          EMAIL_AUTH_ENABLED: hasOtpContinuity ? "true" : "false",
+          WECHAT_AUTH_ENABLED: "false",
+          QQ_AUTH_ENABLED: "false",
+          QQ_UNION_ID_ENABLED: "false",
+          ALIYUN_PNVS_SIGN_NAME: "continuity",
+          ALIYUN_PNVS_TEMPLATE_CODE: "100001",
+          SMTP_HOST: "smtp.example.invalid",
+          SMTP_PORT: "465",
+          SMTP_SECURE: "true",
+          SMTP_USERNAME: "continuity-check",
+          ["SMTP_" + "PASSWORD"]: "continuity-check-only",
+          SMTP_FROM_ADDRESS: "continuity@example.invalid",
+          SMTP_REPLY_TO: "continuity@example.invalid",
+          SMTP_FROM_NAME: "continuity-check",
+        },
+        { accountsEnabled: true, databaseEnabled: true, production: false },
+      );
+      const primaryRing = continuityConfig["hash" + "KeyRing"];
+      const stableVersion = continuityConfig["identityDedup" + "KeyVersion"];
+      const emailRing = continuityConfig["otp" + "PepperRing"];
+      if (
+        primaryRing === null ||
+        stableVersion === null ||
+        (hasOtpContinuity && emailRing === null)
+      ) {
+        throw new Error("disabled authentication continuity validation failed");
+      }
+    }
+    const registrationEnabled = enabled && process.env.PHONE_AUTH_ENABLED === "true";
     if (
       config.enabled !== enabled ||
       config.phone.enabled !== (process.env.PHONE_AUTH_ENABLED === "true" && enabled) ||
-      config.fusion.enabled !== (process.env.FUSION_AUTH_ENABLED === "true" && enabled) ||
+      config.email.enabled !== (process.env.EMAIL_AUTH_ENABLED === "true" && enabled) ||
       config.wechat.enabled !== (process.env.WECHAT_AUTH_ENABLED === "true" && enabled) ||
+      config.wechat.openPlatformRealmId !==
+        (process.env.WECHAT_AUTH_ENABLED === "true" && enabled
+          ? process.env.WECHAT_OPEN_PLATFORM_REALM_ID
+          : null) ||
+      config.qq.enabled !== (process.env.QQ_AUTH_ENABLED === "true" && enabled) ||
+      config.qq.unionIdEnabled !== (process.env.QQ_UNION_ID_ENABLED === "true") ||
+      config.qq.openPlatformRealmId !==
+        (process.env.QQ_UNION_ID_ENABLED === "true"
+          ? process.env.QQ_OPEN_PLATFORM_REALM_ID
+          : null) ||
       config.registrationEnabled !== registrationEnabled
     ) {
       throw new Error("authentication switch mismatch");
@@ -350,7 +629,7 @@ ca_private_digest="$(openssl pkey -in "$secrets_dir/postgres/ca.key" -pubout -ou
 [[ "$server_public_digest" == "$server_private_digest" ]] || die 'PostgreSQL certificate and private key do not match'
 [[ "$ca_public_digest" == "$ca_private_digest" ]] || die 'PostgreSQL CA certificate and private key do not match'
 docker run --rm --entrypoint sh "$api_image" -eu -c \
-  'test -r /app/dist/main.js && test -r /app/dist/auth/auth-config.js && test -r /app/dist/database/migrate-cli.js && test -r /app/migrations/0001_initial_schema.sql'
+  'test -r /app/dist/main.js && test -r /app/dist/auth/auth-config.js && test -r /app/dist/database/migrate-cli.js && test -r /app/migrations/0001_initial_schema.sql && test -r /app/migrations/0012_wechat_union_aliases.sql'
 
 cd "$bundle_root"
 docker compose --env-file deployment.env config --quiet

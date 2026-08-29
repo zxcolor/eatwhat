@@ -91,7 +91,20 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideAuthApi(retrofit: Retrofit): AuthApi = retrofit.create(AuthApi::class.java)
+    fun provideAuthApi(retrofit: Retrofit, client: OkHttpClient): AuthApi = retrofit.newBuilder()
+        .client(deriveAuthClient(client))
+        .build()
+        .create(AuthApi::class.java)
+
+    /**
+     * Email delivery can legitimately consume the server's bounded ten-second
+     * SMTP budget. Keep auth calls bounded, but leave enough client-side margin
+     * for the API to return the authoritative challenge result.
+     */
+    internal fun deriveAuthClient(client: OkHttpClient): OkHttpClient = client.newBuilder()
+        .readTimeout(20, TimeUnit.SECONDS)
+        .callTimeout(20, TimeUnit.SECONDS)
+        .build()
 
     @Provides
     @Singleton

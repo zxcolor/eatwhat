@@ -1,430 +1,239 @@
-# Android 1.0 外部平台与密钥配置手册
+# 外部认证材料一次性清单
 
-更新日期：2026-08-26
+本文只记录需要由项目负责人在第三方控制台取得、并在服务器本地录入的材料。不要把真实密钥、手机号、验证码、正式方案参数或服务器候选配置发到聊天、Issue、PR、截图或 Git 仓库。
 
-## 1. 先看结论
+## 1. 固定产品政策
 
-Android 1.0 当前只需要准备六类外部能力：高德 Web Service、阿里云短信、阿里云
-融合认证、标准 SMTP 邮件、微信开放平台、QQ 互联。邮件不依赖阿里云 DirectMail。
+当前政策固定为 `PHONE_ONLY`，不是运行时开关：
 
-真实密钥不得发到聊天、写进 Android、提交 Git 或放进截图。当前工作区没有
-`.env.local`、真实平台密钥或已启用的微信/QQ AppID；因此本文只能完成配置契约
-和本地安全验证，不能替代平台审核、真实投递或真机登录验收。
+- 手机短信验证码验证成功后可直接创建账号并签发会话；
+- 微信、QQ、邮箱只允许登录已经绑定到现有账号的身份，不能单独建号；
+- App 提供登录后绑定微信；
+- 不提供一键手机号登录、图形验证或上行短信；
+- 客户端只调用自有 HTTPS API，不持有阿里云、SMTP 或 OAuth 服务端密钥。
 
-账号总开关不是拿到一个验证码就能开启。`ACCOUNTS_ENABLED=true` 时，PostgreSQL、
-认证哈希密钥环，以及手机号短信或融合认证至少一条手机通道必须同时就绪。微信是
-独立通道：已有账号的 Fusion 登录不要求微信；但微信关闭时公开
-`registrationEnabled=false`，真实注册端点也失败关闭。OTP pepper 只在短信或邮箱
-验证码启用时需要。邮箱和 QQ 是已有账号的可选登录/绑定方式，不能单独创建账号。
+因此最小可用账号链路必须先完成阿里云短信认证。微信、QQ、邮箱可以分别保持关闭，直到对应材料、服务端部署和真实验收完成。
 
-## 2. 你最终要准备的清单
+## 2. 一次性向项目负责人收集的材料
 
-| 能力 | 平台给你的内容 | 只放服务端的 Secret | 可放 Android 的公开值 |
-|---|---|---|---|
-| 高德 | Web 服务 Key、数字签名私钥、固定出口 IP 白名单 | Key、签名私钥 | 无 |
-| 阿里云短信 | 已审核签名、验证码模板 Code、RAM 角色/临时凭据 | 临时云凭据或本地测试 AK | 无 |
-| 阿里云融合认证 | 方案 Code、全局策略、Alpha 包名/签名登记、RAM 角色 | 临时云凭据或本地测试 AK | SDK AAR；不含云凭据 |
-| SMTP 邮件 | 主机、端口、用户名、SMTP 专用密码/授权码、发件地址 | SMTP 密码/授权码 | 无 |
-| 微信 | 每个 Android 变体的 AppID/AppSecret、包名和签名登记 | AppSecret | AppID |
-| QQ | 每个 Android 变体的 AppID/AppKey、包名和签名登记 | AppKey 受控保存，当前服务端暂不消费 | AppID |
-| 项目内部 | 无，由项目方生成 | HMAC key ring、OTP pepper ring | 无 |
+### 阿里云号码认证短信
 
-## 3. 高德 Web Service
+请提供非敏感配置值：
 
-### 3.1 平台侧
+- 当前控制台“短信认证参数配置”中可用的系统签名原文；
+- 与该签名配套的系统模板 Code，例如控制台当前显示的登录/注册模板；
+- ECS 实例绑定的 RAM 角色名；
+- 已确认套餐/余额、国内手机号发送能力和签名模板配套状态。
 
-1. 在实际运营主体名下创建应用。
-2. 创建“Web 服务”类型 Key，不能拿 Android SDK Key 代替。
-3. 为该 Key 开启数字签名并保存匹配的私钥。
-4. 给生产服务准备固定出口 IP，在高德控制台配置精确白名单。
-5. 开发、预发布、生产使用不同 Key。
-6. 确认技术服务和商业使用范围；当前项目继续遵守 `LIVE_DISPLAY_ONLY`，不跨请求
-   缓存高德 POI，也不把 POI 内容交给模型。
+不要提供 AccessKey。生产环境使用 ECS RAM 角色和 IMDSv2。角色只授予：
 
-官方入口：
-
-- [创建应用和 Key](https://lbs.amap.com/api/webservice/create-project-and-key)
-- [数字签名](https://lbs.amap.com/faq/webservice/webservice-api/basic-configuration/43238)
-- [Key/IP 安全设置](https://lbs.amap.com/faq/quota-key/key/41181/)
-
-### 3.2 服务端字段
-
-```dotenv
-AMAP_ENABLED=true
-AMAP_WEB_SERVICE_KEY=<Web 服务 Key>
-AMAP_WEB_SERVICE_SIGNATURE_PRIVATE_KEY=<与该 Key 匹配的数字签名私钥>
-AMAP_IP_WHITELIST_CONFIGURED=true
-AMAP_TIMEOUT_MS=2200
-DATA_RIGHTS_MODE=LIVE_DISPLAY_ONLY
+```json
+{
+  "Version": "1",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "dypns:SendSmsVerifyCode",
+        "dypns:CheckSmsVerifyCode"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
 ```
 
-`AMAP_IP_WHITELIST_CONFIGURED=true` 只是部署确认，不能代替控制台真正配置白名单。
-Key 和签名私钥都不能进入 APK。
+阿里云在 2026-07-07 上线了新的短信认证签名，并公告历史赠送签名将在 2026-08-31 后停止支持。上线前必须回到控制台确认当前可用签名，不能沿用旧截图或旧部署值。参考：[短信认证服务](https://help.aliyun.com/zh/pnvs/user-guide/sms-authentication-service)、[RAM 授权信息](https://help.aliyun.com/zh/pnvs/developer-reference/api-dypnsapi-2017-05-25-ram)、[签名变更通知](https://help.aliyun.com/zh/pnvs/product-overview/sms-authentication-signature-change-notification)。
 
-### 3.3 真实小流量检查
+### 微信开放平台
 
-```powershell
-.\scripts\run-amap-live-smoke.ps1 `
-  -EnvFile .\.env.local `
-  -ConfirmLiveRequest
-```
+请一次性提供或确认：
 
-该脚本有文件开关和命令行确认两道门禁。通过后仍需检查生产出口 IP、配额、
-APM/代理 query 脱敏和授权范围。
+- Android 应用 AppID；
+- AppSecret，仅进入服务端 Secret；
+- 已审核的 Android 包名与应用签名摘要；
+- Universal Link/开放平台回调配置（若当前 SDK 版本要求）；
+- 稳定的内部 `WECHAT_OPEN_PLATFORM_REALM_ID`；未来小程序只有绑定到同一微信开放平台账号并
+  复用该 realm，才能用 UnionID 与现有移动 App 账号匹配；
+- 可用于“已绑定登录”和“登录后绑定”的真实测试账号。
 
-## 4. 阿里云短信
+AppSecret 不能进入 Android 代码、APK、Gradle 属性或日志。AppID 可作为客户端公开标识，但
+必须与服务端允许值和开放平台配置一致。服务端只保存带密钥的 OpenID/UnionID HMAC，不保存
+原值；realm 不是 Secret，但一旦产生 alias 就属于身份连续性配置，不能在普通发布中更换。
 
-### 4.1 平台侧
+### QQ 互联
 
-1. 完成企业实名认证和短信资质。
-2. 创建并审核短信签名，复制签名原文。
-3. 创建并审核验证码模板，模板变量只保留 `code`，复制 `SMS_...` Code。
-4. 给 API 运行身份授予实际 `SendSms` 最小权限并确认配额。
-5. 生产优先使用 ECS RAM 实例角色或经评审的 OIDC 临时角色，不使用长期 AK。
+请一次性提供或确认：
 
-官方入口：
+- QQ 互联 AppID；
+- QQ 互联 AppKey，只进入服务端 root-only Secret；
+- 已审核的 Android 包名与签名；
+- 是否已具备并启用 UnionID 能力；
+- 稳定内部 `QQ_OPEN_PLATFORM_REALM_ID`；同一 QQ 互联开放平台打通应用集合必须永久复用；
+- 可用于“登录后绑定”和“已绑定登录”的真实测试账号。
 
-- [TypeScript 短信 SDK 示例](https://help.aliyun.com/zh/sms/developer-reference/using-typescript-openapi-example)
-- [短信身份与权限管理](https://help.aliyun.com/zh/sms/identity-management)
-- [SendSms 接口](https://help.aliyun.com/zh/sms/developer-reference/api-dysmsapi-2017-05-25-sendsms)
-- [Node.js 凭据链](https://help.aliyun.com/zh/sdk/developer-reference/v2-manage-node-js-access-credentials)
+Android 使用官方 `loginServerSide` 取得一次性 code。服务端用 AppID/AppKey 通过腾讯官方 token
+端点换票，再调用官方身份接口核对 AppID 并取得 OpenID/可选 UnionID；AppKey 不得进入 Android、
+Gradle、APK、日志、聊天或 Git。启用 QQ 时 root-only `api.env` 必须同时含 `QQ_APP_ID` 与
+`QQ_APP_KEY`。只有 UnionID 能力真实开通、稳定 realm 已锁定、上线前确认旧 QQ binding 聚合数
+为零且服务端/数据库/真实账号全部验收后，才设置 `QQ_UNION_ID_ENABLED=true`。
 
-### 4.2 服务端字段
+实现和验收只以腾讯 QQ 互联官方一手资料为准：
 
-生产 ECS：
+- [Server-Side 登录模式](https://wiki.connect.qq.com/server-side%E7%99%BB%E5%BD%95%E6%A8%A1%E5%BC%8F)；
+- [使用 authorization_code 获取 access_token](https://wiki.connect.qq.com/%E4%BD%BF%E7%94%A8authorization_code%E8%8E%B7%E5%8F%96access_token)；
+- [获取用户 OpenID](https://wiki.connect.qq.com/%E8%8E%B7%E5%8F%96%E7%94%A8%E6%88%B7openid_oauth2-0)；
+- [UnionID 介绍](https://wiki.connect.qq.com/unionid%E4%BB%8B%E7%BB%8D)。
+
+### SMTP 邮箱验证码
+
+请一次性提供或确认：
+
+- SMTP 完整 DNS 主机名；
+- 端口及 TLS 模式；
+- SMTP 登录名；
+- 应用专用密码或 SMTP 授权码；
+- 发件地址与显示名；
+- Reply-To 回复地址；
+- SPF、DKIM、DMARC 的 DNS 检查结果；
+- 可用于“已绑定登录”的真实收件邮箱。
+
+root-only 认证候选必须把应用专用密码命名为 `SMTP_APP_PASSWORD`。Secret 更新器只在服务器
+内存和 root-only 文件边界内把它映射为 `SMTP_PASSWORD`；`api.env` 与 API 运行时只接受
+`SMTP_PASSWORD`，候选同时提供两种名称会被拒绝。当前 DMARC 实测状态为 `false`：Alpha
+阶段把它记录为非阻断缺口，不得写成“已完成”；对外发布前必须完成域名策略和真实投递复核。
+
+## 3. 服务器变量
+
+### 固定开关和公共运行参数
 
 ```dotenv
+ACCOUNTS_ENABLED=true
 PHONE_AUTH_ENABLED=true
-ALIYUN_SMS_SIGN_NAME=<已审核签名原文>
-ALIYUN_SMS_TEMPLATE_CODE=<已审核的 SMS_... Code>
-ALIYUN_SMS_TIMEOUT_MS=1500
-ALIYUN_CREDENTIAL_TIMEOUT_MS=2000
+EMAIL_AUTH_ENABLED=false
+WECHAT_AUTH_ENABLED=false
+QQ_AUTH_ENABLED=false
+QQ_UNION_ID_ENABLED=false
+ALIBABA_CLOUD_ECS_METADATA=<ECS RAM 角色名>
+```
+
+### 手机短信认证
+
+```dotenv
 ALIYUN_CREDENTIAL_ALLOWED_PROVIDER=default/ecs_ram_role
-ALIBABA_CLOUD_ECS_METADATA=<RAM 实例角色名>
-ALIBABA_CLOUD_IMDSV1_DISABLED=true
-ALIBABA_CLOUD_ECS_IMDSV2_ENABLE=true
-ALIBABA_CLOUD_ECS_METADATA_DISABLED=false
+ALIYUN_PNVS_SIGN_NAME=<控制台当前可用签名原文>
+ALIYUN_PNVS_TEMPLATE_CODE=<与签名配套的模板 Code>
+ALIYUN_PNVS_TIMEOUT_MS=1500
 ```
 
-本机确需使用独立最小权限测试 RAM 用户时，`.env.local` 设置：
+服务端调用 `SendSmsVerifyCode` 时使用供应商动态生成验证码，并强制 `ReturnVerifyCode=false`；客户端和 API 响应都不得得到明文验证码。SDK 运行时自动重试必须关闭，请求再显式设置 `AutoRetry=0`，不允许供应商自动切换签名、模板或节点重发；一次受控发送对应一次固定签名/模板调用，便于计费和审计。校验必须调用 `CheckSmsVerifyCode` 并只接受明确的成功结果。短信认证是纯服务端 API，不需要 Android 供应商认证 SDK。
 
-```dotenv
-ALIYUN_CREDENTIAL_ALLOWED_PROVIDER=default/env
-ALIBABA_CLOUD_ECS_METADATA_DISABLED=true
-```
-
-AccessKey 只由受控进程环境注入官方字段
-`ALIBABA_CLOUD_ACCESS_KEY_ID` / `ALIBABA_CLOUD_ACCESS_KEY_SECRET`，不要写入仓库、
-命令行参数或 Android。生产配置会拒绝 `default/env`。
-
-### 4.3 阿里云融合认证
-
-平台侧完成：
-
-1. 在融合认证方案管理中创建 Android 方案，登记 App 名称、包名
-   `com.chishenme.app.alpha` 和 Alpha signer 的 32 位 MD5
-   `7c64a4f134a3ebe121c1fb055c09a70c`。
-2. 采用场景 `100001` 的全局策略，确认一键登录失败可以继续短信/图形验证；不要
-   把依赖宿主自动回填“当前手机号”的节点设为唯一成功路径。
-3. 给 ECS RAM 角色只增加 `dypns:GetFusionAuthToken` 和
-   `dypns:VerifyWithFusionAuthToken`。Android 不持有 RAM 凭据。
-4. 下载 Android Fusion SDK 1.2.15，先核对官方下载包 MD5
-   `fcf7ac166a39b2782a4e7933c0f50226`，再用仓库脚本提取并精确校验主 AAR、
-   `umeng-common` 和 `umeng-asms`；ZIP、AAR 和 demo 均不提交 Git。
-5. 在隐私政策和第三方 SDK 清单分别披露号码认证以及友盟登录安全 SDK 的处理
-   目的、Advertising ID/其他设备标识、Wi-Fi/网络连接状态、设备解锁状态、硬件
-   信息、处理方式和供应商政策；用户同意并主动点击前不初始化。供应商 AAR 自带的
-   `AD_ID`、`CHANGE_WIFI_STATE`、`RECEIVE_USER_PRESENT`、`ACCESS_WIFI_STATE`、
-   `CHANGE_NETWORK_STATE` 与 Fusion source set 的 `READ_PHONE_STATE` 只允许进入
-   显式 Fusion Alpha，不得进入普通 Debug/Fixture/Release/no-op Alpha。
-
-服务端私有配置：
-
-```dotenv
-FUSION_AUTH_ENABLED=true
-ALIYUN_FUSION_SCHEME_CODE=<控制台方案 Code，不是场景 ID 100001>
-ALIYUN_FUSION_PACKAGE_NAME=com.chishenme.app.alpha
-ALIYUN_FUSION_PACKAGE_SIGN=7c64a4f134a3ebe121c1fb055c09a70c
-ALIYUN_FUSION_TOKEN_TTL_SECONDS=900
-ALIYUN_FUSION_TIMEOUT_MS=2000
-```
-
-SDK 只放在仓库忽略目录并通过显式门禁准备：
-
-```powershell
-.\scripts\prepare-fusion-auth-sdk.ps1 `
-  -SdkZipPath "$env:USERPROFILE\Downloads\fusionAuthSDK_APP_Android_v1.2.15_operator_ui_log_static.zip"
-```
-
-脚本通过不等于发布可用。SDK 包名为 1.2.15，但主 AAR 内部元数据仍报告 1.2.8，
-必须向阿里云取得版本一致性说明；最终还需 ARM64、插有中国大陆 SIM 的真机验证
-一键登录、降级节点、用户取消、权限拒绝、弱网、token 刷新和隐私撤回。模拟器
-不能替代这项验收。
-
-融合认证启用时，`AUTH_HASH_KEYS_JSON` 的 retiring 版本还承担跨密钥版本重放检测。
-旧 key 必须至少保留到供应商 token 与本地 flow 的最大 12 小时窗口排空；移除时必须
-按 [`ECS_OPERATIONS_RUNBOOK.md`](./ECS_OPERATIONS_RUNBOOK.md#35-融合认证上线与-hash-key-轮换)
-使用 root-only `update-auth-secrets.sh` 关闭 Fusion、通过候选激活生效、等待 12 小时，
-再以 `--finalize-drain` 核对真实 PostgreSQL 活跃 flow，最后提交移除旧 key 的候选并
-再次激活。不得手工改 env、手工重建、删除排空快照，或只改
-`AUTH_IDENTITY_DEDUP_KEY_VERSION` 后立即删除旧 key。
-
-官方入口：
-
-- [融合认证服务端集成](https://help.aliyun.com/zh/pnvs/developer-reference/the-server-integration-2)
-- [融合认证 Android 客户端接入](https://help.aliyun.com/zh/pnvs/developer-reference/the-android-client-access-3)
-- [全局策略](https://help.aliyun.com/zh/pnvs/user-guide/global-policy/)
-- [合规指南](https://help.aliyun.com/zh/pnvs/security-and-compliance/converged-certification-services-compliance-guide)
-
-## 5. 标准 SMTP 邮件
-
-### 5.1 邮箱服务商侧
-
-1. 选择支持 SMTP 的邮箱或事务邮件服务。
-2. 开启 SMTP，取得主机、端口、用户名和“SMTP 专用密码/授权码”。不要填写邮箱
-   网页登录密码。
-3. 验证发信域名和发件地址，并按服务商要求配置 SPF、DKIM、DMARC。
-4. 明确退信、无效地址和投诉处理方式。
-5. 正式启用前，把实际服务商主体和隐私政策补进 App 第三方服务清单。
-
-Nodemailer 官方说明：SMTP 可通过替换配置切换服务商；465 使用连接即 TLS，
-587/25 使用 STARTTLS；`verify()` 只检查连接、TLS 和认证，不证明指定发件地址会被
-接受。[SMTP transport](https://nodemailer.com/smtp)
-
-### 5.2 服务端字段
-
-465 示例：
-
-```dotenv
-EMAIL_AUTH_ENABLED=true
-SMTP_HOST=smtp.example.com
-SMTP_PORT=465
-SMTP_SECURE=true
-SMTP_USERNAME=no-reply@example.com
-SMTP_PASSWORD=<SMTP 专用密码或授权码>
-SMTP_FROM_ADDRESS=no-reply@example.com
-SMTP_FROM_NAME=吃什么
-SMTP_TIMEOUT_MS=5000
-```
-
-587 或 25 必须设置 `SMTP_SECURE=false`，服务端会强制 STARTTLS；如果服务器不支持
-STARTTLS，发送会失败。工程不提供关闭证书校验、降低 TLS 版本或明文发送的开关。
-
-API 启动时会执行 SMTP `verify()`。首次真实投递仍需用受控测试邮箱检查收件箱、
-垃圾箱、4xx/5xx、退信和发件人接受策略。
-
-## 6. 微信开放平台
-
-### 6.1 平台侧
-
-为每个实际测试/发布变体创建或登记独立移动应用，并登记精确包名和最终 APK
-签名：
-
-| 变体 | 包名 | Android Gradle property | 服务端 |
-|---|---|---|---|
-| Release | `com.chishenme.app` | `CHISHENME_WECHAT_APP_ID` | `WECHAT_APP_ID` / `WECHAT_APP_SECRET` |
-| Debug | `com.chishenme.app.debug` | `CHISHENME_DEBUG_WECHAT_APP_ID` | 联调时填写对应 AppID/Secret |
-| Alpha | `com.chishenme.app.alpha` | `CHISHENME_ALPHA_WECHAT_APP_ID` | 联调时填写对应 AppID/Secret |
-
-AppID 格式必须是 `wx` 加 16 位十六进制字符。服务端和当前 Android 变体必须使用
-同一个平台应用。AppSecret 只放服务端 Secret/KMS。
-
-官方入口：
-
-- [移动应用微信登录开发指南](https://developers.weixin.qq.com/doc/oplatform/Mobile_App/WeChat_Login/Development_Guide.html)
-- [Android 接入与合规指南](https://developers.weixin.qq.com/doc/oplatform/Mobile_App/Access_Guide/Android.html)
-
-### 6.2 服务端字段
+### 微信（启用时才需要）
 
 ```dotenv
 WECHAT_AUTH_ENABLED=true
-WECHAT_APP_ID=<当前变体 AppID>
-WECHAT_APP_SECRET=<当前变体 AppSecret>
+WECHAT_APP_ID=<wx 开头的 18 位 AppID>
+WECHAT_APP_SECRET=<仅服务器持有>
 WECHAT_AUTH_TIMEOUT_MS=2000
 ```
 
-只有 `WECHAT_AUTH_ENABLED=true` 时，ECS 严格候选输入与生产 `api.env` 才能包含并要求
-`WECHAT_APP_ID` / `WECHAT_APP_SECRET`；保持 `false` 时应省略两项，而不是放占位值。
-本机公开 `.env.local.example` 为了展示完整字段会保留空键，但本机启动器不会把空值当作
-已配置 Secret，也不会向运行进程注入它们。
+### QQ（启用时才需要）
 
-## 7. QQ 互联
-
-### 7.1 平台侧
-
-同样为三个包名分别登记移动应用、实际 signer 和 AppID/AppKey：
-
-| 变体 | Android Gradle property | 服务端 |
-|---|---|---|
-| Release | `CHISHENME_QQ_APP_ID` | `QQ_APP_ID` |
-| Debug | `CHISHENME_DEBUG_QQ_APP_ID` | 联调时填对应 `QQ_APP_ID` |
-| Alpha | `CHISHENME_ALPHA_QQ_APP_ID` | 联调时填对应 `QQ_APP_ID` |
-
-QQ AppID 必须是 5–16 位、不以 0 开头的数字。平台发放的 AppKey 先保存在受控密钥
-清单；当前代码不消费 AppKey，不能把它放进 APK，也不要自行发明环境变量。
-
-QQ 当前还有两个发布门禁：必须由腾讯确认移动 SDK access token 通过
-`/oauth2.0/me` 复核的语义，并完成真机恶意 scheme、迟到回调、进程重启、取消、
-换号和 token 注入测试。在此之前保持 `QQ_AUTH_ENABLED=false`。
-
-官方入口：
-
-- [QQ 移动应用接入流程](https://wiki.connect.qq.com/%E7%A7%BB%E5%8A%A8%E5%BA%94%E7%94%A8%E6%8E%A5%E5%85%A5%E6%B5%81%E7%A8%8B)
-- [QQ 登录](https://wiki.connect.qq.com/qq%E7%99%BB%E5%BD%95)
-
-## 8. Android 公开 AppID 与 Alpha / Release 签名
-
-微信/QQ AppID 不是 Secret，可写入用户级 Gradle 属性
-`%USERPROFILE%\.gradle\gradle.properties`：
-
-```properties
-CHISHENME_WECHAT_APP_ID=
-CHISHENME_DEBUG_WECHAT_APP_ID=
-CHISHENME_ALPHA_WECHAT_APP_ID=
-CHISHENME_QQ_APP_ID=
-CHISHENME_DEBUG_QQ_APP_ID=
-CHISHENME_ALPHA_QQ_APP_ID=
+```dotenv
+QQ_AUTH_ENABLED=true
+QQ_UNION_ID_ENABLED=false
+QQ_APP_ID=<5 至 16 位数字 AppID>
+QQ_APP_KEY=<仅 root-only 候选输入和服务端 api.env 持有>
+QQ_AUTH_TIMEOUT_MS=2000
 ```
 
-内部 Alpha 已固定为包名 `com.chishenme.app.alpha` 和长期 signer。仓库只保存公开证书
-身份，不保存 keystore 或密码：
+`deployment.env` 只携带候选 `QQ_OPEN_PLATFORM_REALM_ID`，绝不携带 marker。realm 与非秘密
+marker 的唯一权威是 root:root、`0600` 的
+`/opt/chi-shen-me/shared/auth-identity-state.env`，其中只能有 format version 1、realm、marker 三键；
+它不属于上面的 root-only 认证候选，也不进入 API 环境。共享文件缺失或 marker 需要提升时，只能
+由活动 release 的更新器在 QQ 当前关闭且聚合 QQ binding 为零时原子写入。首次直接启用 UnionID
+会直接写成 `true`；紧急关闭、release 回滚和后续恢复均以该共享值为准，不得回退或重算。
 
-```text
-MD5     7c64a4f134a3ebe121c1fb055c09a70c
-SHA-256 31f21374f2f5d40697efb3c50e14d4e8d228991f6acbcde262e37c72ae4c0289
+### 邮箱（启用时才需要）
+
+```dotenv
+EMAIL_AUTH_ENABLED=true
+AUTH_OTP_PEPPER_ACTIVE_VERSION=otp.v1
+AUTH_OTP_PEPPER_KEYS_JSON={"otp.v1":"<32 字节随机值的规范 Base64>"}
+SMTP_HOST=<完整 DNS 主机名>
+SMTP_PORT=465
+SMTP_SECURE=true
+SMTP_USERNAME=<SMTP 登录名>
+SMTP_APP_PASSWORD=<应用专用密码或授权码，仅 root-only 候选输入>
+SMTP_FROM_ADDRESS=<发件地址>
+SMTP_REPLY_TO=<回复地址>
+SMTP_FROM_NAME=吃什么
 ```
 
-Gradle 默认从仓库外的
-`%LOCALAPPDATA%\ChiShenMe\signing\alpha-signing.properties` 读取本机签名配置。文件格式为：
+邮件 OTP pepper 与身份哈希密钥不能复用。手机号验证码由阿里云生成和核验，不使用本地
+OTP pepper。ECS API 运行时由受审查的 Compose 固定
+`SMTP_TIMEOUT_MS=5000`；它不是认证候选 Secret，不能加入上面的精确字段文件。本机开发
+仍可在受控运行时配置中使用 `SMTP_TIMEOUT_MS`。
 
-```properties
-storeFile=<仓库外的 keystore 绝对路径>
-storePassword=<仅保存在本机的密码>
-keyAlias=chishenme-alpha
-keyPassword=<仅保存在本机的密码>
-storeType=PKCS12
-```
+## 4. 安全录入与激活
 
-该文件名和常见 keystore 扩展名均已被 Git 忽略，但仍必须保存在仓库外；不要把真实密码
-复制进本文档、聊天、终端历史或 Pull Request。需要临时覆盖时，也可在同一进程一次性提供：
+1. 在服务器 root-only 目录创建候选配置，权限必须为 `0600`；不要使用仓库内 `.env`。
+2. 候选必须包含开关所要求的精确字段：关闭的通道不得夹带对应 Secret。
+3. 在新建且尚非 `current` 的候选 release 的 `deploy` 目录运行（不要调用或修改仍在活动的旧版
+   deploy）。工作站的最小 QQ delta 必须先在 ECS root-only 边界内与当前连续性字段及所有已开启
+   通道字段合成为精确完整候选，不能直接交给更新器：
 
-```text
-CHISHENME_ALPHA_STORE_FILE
-CHISHENME_ALPHA_STORE_PASSWORD
-CHISHENME_ALPHA_KEY_ALIAS
-CHISHENME_ALPHA_KEY_PASSWORD
-```
-
-环境变量优先于默认属性文件，四项必须同时存在。缺失、部分配置、错误 alias、过期证书或
-MD5/SHA-256 与固定公开身份不一致时，Alpha 构建会在生成 APK 前失败，绝不回退到 Debug
-signer。Debug、Fixture 与 FixtureTest 继续使用同一测试证书；它们的证书不能登记为 Alpha
-平台身份。
-
-Release 签名材料通过以下进程环境变量提供，keystore 和密码同样不能提交仓库：
-
-```text
-CHISHENME_RELEASE_STORE_FILE
-CHISHENME_RELEASE_STORE_PASSWORD
-CHISHENME_RELEASE_KEY_ALIAS
-CHISHENME_RELEASE_KEY_PASSWORD
-```
-
-Alpha 与 Release 使用不同包名和独立签名生命周期，不能复用 keystore。登记平台签名前，
-从最终 APK 提取真实 signer，不能使用上传证书、Debug 证书或另一个变体证书：
-
-```powershell
-& "$env:ANDROID_HOME\build-tools\36.0.0\apksigner.bat" `
-  verify --verbose --print-certs <最终 APK 绝对路径>
-```
-
-Alpha APK 的输出必须再次匹配上述 MD5 和 SHA-256；最终 Release 则另行固定、备份和登记
-`com.chishenme.app` 对应的 Release 证书。
-
-## 9. 生成项目内部密钥环
-
-这两套密钥不是任何平台发放的，必须独立随机生成；工程现在会拒绝两套 ring 复用
-同一密钥材料。
-
-```powershell
-node .\scripts\generate-auth-keyrings.mjs v1
-```
-
-命令会在当前终端输出五行配置。立即复制到受控 Secret 存储或本机私有
-`.env.local`，清理终端滚屏，不要发到聊天。`AUTH_IDENTITY_DEDUP_KEY_VERSION`
-用于稳定身份去重，普通轮换时不能直接删除或替换；变更前必须做全量回填和冲突
-审计。
-
-## 10. 本机填写与验证顺序
-
-1. 创建私有文件：
-
-   ```powershell
-   Copy-Item .\.env.local.example .\.env.local
+   ```bash
+   sudo /opt/chi-shen-me/releases/<候选 release>/deploy/scripts/update-auth-secrets.sh \
+     --apply --config-file /root/auth-candidate.env
    ```
 
-2. 填写非 Secret 和本机测试 Secret。该文件已被 Git 忽略，但仍是明文，只能用于
-   受控开发机；生产使用 Secret/KMS/RAM 角色。
-3. 先保持所有通道开关为 `false`，逐项取得平台材料。
-4. 开账号前同时准备 PostgreSQL、认证哈希密钥环，以及短信或融合认证至少一条
-   手机通道。只开放已有账号登录的 Fusion-only 示例：
+4. 更新器在锁内只读 `/opt/chi-shen-me/current` 的运行态、schema/ACL、realm 和需要的聚合
+   数据证明；活动 release 与容器在激活前保持不变。普通 `--apply` 会把 transition 设为 `none`，把候选中的
+   `SMTP_APP_PASSWORD` 映射成 `api.env` 的 `SMTP_PASSWORD`，清退旧字段并原子替换
+   `api.env` 与候选 `deployment.env`，再执行无网络的生产配置预检；该更新器进程内的
+   预检失败会自动回滚。
+5. 重新创建 API 容器后，先验证 `/health`、公开 capabilities 和失败关闭，再做真实手机号/微信/QQ/邮箱测试。
+6. 候选文件完成后安全删除；不要把文件内容复制到终端记录、工单或聊天。
 
-   ```dotenv
-   DATABASE_ENABLED=true
-   ACCOUNTS_ENABLED=true
-   PHONE_AUTH_ENABLED=false
-   FUSION_AUTH_ENABLED=true
-   WECHAT_AUTH_ENABLED=false
-   ```
+第 6 步只能在候选激活稳定、回滚窗口关闭后执行。激活器失败时会自动恢复旧 release、
+软链和 API 运行态，但不会恢复已经由更新器提交的共享 `api.env`。启用认证通道前还必须准备
+一份 root-only、关闭目标通道的完整回滚输入，以及固定且通过当前严格 preflight 的兼容 API
+image ID 的独立恢复候选。上一镜像若不具备新配置结构，恢复候选应使用已验证的新镜像并保持
+目标通道关闭，不得放宽字段或运行态门禁。候选与输入保留到观察窗口结束；若激活失败，从恢复候选运行受控
+`update-auth-secrets.sh --apply` 恢复原有通道配置并清退失败通道 Secret，再通过该候选的激活门禁
+重建和验证旧 API。失败候选不得复用；只有 release/runtime 与共享 Secret 都恢复后，才能
+称为完整回滚。QQ UnionID marker 一旦持久化为 `true`，恢复流程也不得把它降回 `false`。
 
-   此配置不填写 `WECHAT_APP_ID` / `WECHAT_APP_SECRET`；公开
-   `registrationEnabled=false`，真实注册请求也必须失败关闭。要开放注册时再单独完成
-   微信资质、包名/签名和真机回调验收，将微信开关改为 `true` 并补齐两项服务端值。
-   如保留短信验证码降级，再把 `PHONE_AUTH_ENABLED=true` 并补齐短信签名、模板与
-   OTP pepper；不能把测试验证码当作生产降级。
+若共享 `api.env` 仍来自 schema 0010 的旧认证方案，必须按运维手册使用 bridge：第一个
+新候选执行 `--legacy-drain`，以 `AUTH_SCHEMA_TRANSITION_MODE=legacy_phone_drain` 且所有账号
+通道关闭的状态激活；它只允许数据库完整或仅缺精确的 `0011_phone_only_auth.sql`，并逐字节
+保留旧认证 Secret 供首次候选失败时重建旧 API。bridge healthy、旧请求排空后，依次完成
+迁移前备份、0011 迁移、角色授权和 ACL/runtime smoke；最后才在第二个候选执行 `--apply`
+并激活 PHONE_ONLY。最终候选失败时只能回到停号 bridge；恢复旧 Fusion 必须恢复迁移前
+数据库，并另行审计恢复旧配置/权限。这些阶段不能合并。
 
-5. 邮箱和 QQ 分别通过真实验收后再单独启用。
-6. 只做结构检查：
+紧急关闭所有账号能力：
 
-   ```powershell
-   .\scripts\start-api-local.ps1 -EnvFile .\.env.local -ValidateOnly
-   ```
+```bash
+sudo /opt/chi-shen-me/releases/<候选 release>/deploy/scripts/update-auth-secrets.sh --disable
+```
 
-7. 启动 API：
+这是可逆的紧急关闭，不是 Secret 销毁：脚本关闭所有认证开关并清退供应商通道字段，但在
+root-only `api.env` 保留身份/会话 HMAC ring、稳定 dedup version 和已有的邮件 OTP pepper
+pair。恢复账号时 `--apply` 必须沿用这些连续性字段；任何 key/version 变化都会在写共享
+`api.env` / `deployment.env` 前拒绝，避免同一手机号因新 dedup 生成第二个账号。若确需删除
+旧 key，必须走单独审查的排空和数据迁移流程。
 
-   ```powershell
-   .\scripts\start-api-local.ps1 -EnvFile .\.env.local
-   ```
+## 5. 上线验收
 
-   启动器先在无运行时 Secret 的最小环境中构建，再只把白名单配置注入运行进程；
-   未批准的父 PowerShell 环境变量不会传给构建或 API。
-8. 完整本地回归：
+- 手机：发送、错误验证码、过期、重复发送、供应商限流、超时、同一 challenge 并发校验、成功后直接建号/会话；
+- 微信：未绑定身份必须失败，已绑定登录成功，登录后绑定成功，重复绑定/抢占失败；
+- QQ：未绑定身份必须失败，登录后主动绑定成功，已绑定登录回原账号；Server-Side code 只能
+  消费一次，AppID/AppKey 换票和 UnionID realm 行为与开关一致；
+- 邮箱：未绑定身份必须失败，已绑定登录成功，错误/过期/重放验证码失败；
+- 隐私：APK 不包含服务器 Secret、供应商认证 SDK、`READ_PHONE_STATE` 或旧认证入口；
+- 日志：不记录完整手机号、验证码、OAuth token、SMTP 密码或密钥材料；
+- 外部条件：RAM/IMDSv2、短信签名模板、SMTP DNS、微信/QQ 控制台状态均以当天真实结果为准。
 
-   ```powershell
-   .\scripts\verify.ps1 -AlphaApiBaseUrl 'https://api.unfinished-era.com/'
-   ```
-
-   该参数是要写入内部 Alpha 的公开 API 根地址。完整门禁会复核它是允许的公网
-   HTTPS URL，并检查生成的 `BuildConfig` 与 APK DEX 确实包含同一地址；这一步
-   不会替代网络访问，也不能证明 DNS 已解析、证书链有效、Nginx 已切流或公网
-   `/health/ready` 可用。上述公网条件必须按下一节另行验收。
-
-## 11. 仍然必须由真实环境完成的验收
-
-- 高德：Key 类型、签名、错误签名、非白名单拒绝、四条调用链、配额和日志脱敏。
-- 短信：RAM 权限、签名/模板归属、真实号码送达、频率限制和回执。
-- 融合认证：方案 Code、Alpha 包名与 signer、RAM 最小权限、全局策略节点、三 AAR
-  哈希、供应商隐私披露，以及 ARM64 + 中国大陆 SIM 真机的一键登录/降级/取消/
-  权限拒绝/弱网/token 刷新矩阵。
-- SMTP：TLS/认证、发件人接受、真实送达、垃圾箱、退信和投诉处理。
-- 微信/QQ：平台审核、包名、最终 signer、真机回调和攻击用例。
-- API 子域：`api.unfinished-era.com` 的独立 DNS、证书、自动续期和宝塔 Nginx
-  vhost；从公网分别确认 `/health` 存活、`/health/ready` 就绪和 `/v1/config`
-  能力声明，再用关闭 Wi-Fi 的真实手机完成核心闭环。
-- 部署恢复：无 Secret 的不可变 bundle 先校验 `SHA256SUMS` 并通过部署预检；
-  数据库备份必须校验清单和 SHA-256，并在隔离数据库完成恢复演练。服务器本地
-  备份不能替代 ECS 快照或异机副本，也不得直接覆盖正在运行的数据库。
-- 运维：Secret/KMS 权限、崩溃转储、APM、代理与出口日志不记录 query、token 或
-  邮箱/手机号。
-
-任何真实凭据如果误入源码、聊天、截图、终端历史或 APK，必须立即在对应平台
-吊销并轮换；只从文件里删除不算修复。
+工程测试通过不等于第三方真实验收完成。每个通道在真实成功、失败、超时和回滚证据齐全前保持关闭。

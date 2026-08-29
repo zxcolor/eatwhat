@@ -11,10 +11,6 @@ import type {
 	DeleteAccountResponse,
 	EmailCodeChallengeResponse,
 	EmailRequestCode,
-	FusionAuthTokenRequest,
-	FusionAuthTokenResponse,
-	FusionAuthVerifyRequest,
-	FusionAuthVerifyResponse,
 	IdentityBinding,
 	IdentityBindingsResponse,
 	LatestAccountExportResponse,
@@ -25,8 +21,6 @@ import type {
 	PhoneCodeChallengeResponse,
 	PhoneRequestCode,
 	RefreshRequest,
-	RegisterPhoneWechatRequest,
-	RegisterFusionWechatRequest,
 	RevokeSessionResponse,
 	SessionsResponse,
 	UnbindIdentityResponse,
@@ -41,6 +35,7 @@ import {
 } from "./auth.repository.js";
 import {
 	type AuthSecretKeyRing,
+	constantTimeHashEquals,
 	generateOAuthState,
 	generateSixDigitOtp,
 	hashAccountDeletionSubject,
@@ -66,16 +61,15 @@ import {
 } from "./auth-errors.js";
 import {
 	EMAIL_OTP_PROVIDER,
-	FUSION_AUTH_PROVIDER,
 	PHONE_OTP_PROVIDER,
 	QQ_IDENTITY_PROVIDER,
 	WECHAT_IDENTITY_PROVIDER,
 } from "./auth-provider.factories.js";
 import type {
+	CompleteOAuthCredentialResult,
 	OAuthProof,
 	OtpProof,
 	SessionIssueDraft,
-	VerifiedFusionPhoneHashes,
 	VerifiedOAuthHashes,
 } from "./auth-workflow.types.js";
 import {
@@ -96,11 +90,8 @@ import {
 import {
 	type OtpDeliveryProvider,
 	OtpDeliveryUnavailableError,
+	type PhoneOtpProvider,
 } from "./providers/otp-delivery.provider.js";
-import {
-	type FusionAuthProvider,
-	FusionAuthUnavailableError,
-} from "./providers/fusion-auth.provider.js";
 
 interface ReadyAuthSecrets {
 	readonly hashKeyRing: AuthSecretKeyRing;
@@ -130,11 +121,9 @@ export class AuthService {
 		@Inject(APP_CONFIG) private readonly config: AppConfig,
 		private readonly repository: AuthRepository,
 		@Inject(PHONE_OTP_PROVIDER)
-		private readonly phoneOtpProvider: OtpDeliveryProvider,
+		private readonly phoneOtpProvider: PhoneOtpProvider,
 		@Inject(EMAIL_OTP_PROVIDER)
 		private readonly emailOtpProvider: OtpDeliveryProvider,
-		@Inject(FUSION_AUTH_PROVIDER)
-		private readonly fusionAuthProvider: FusionAuthProvider,
 		@Inject(WECHAT_IDENTITY_PROVIDER)
 		private readonly wechatIdentityProvider: WechatIdentityProvider,
 		@Inject(QQ_IDENTITY_PROVIDER)
@@ -151,7 +140,9 @@ export class AuthService {
 		clientIp: string,
 	): Promise<PhoneCodeChallengeResponse> {
 		if (input.purpose === "REGISTER") {
-			this.requireRegistrationEnabled("PHONE");
+			if (!this.config.auth.registrationEnabled) {
+				throw new AuthUnavailableException();
+			}
 		} else if (!this.config.auth.phone.enabled) {
 			throw new AuthUnavailableException();
 		}
@@ -185,123 +176,6 @@ export class AuthService {
 		return Object.freeze({ ...challenge, targetType: "EMAIL" as const });
 	}
 
-	async requestFusionToken(
-		input: FusionAuthTokenRequest,
-		clientIp: string,
-	): Promise<FusionAuthTokenResponse> {
-		// REGISTER identifies a standalone phone-proof flow; it does not authorize
-		// account creation. The final registration and REGISTER OAuth paths enforce
-		// registrationEnabled before any provider or repository side effect.
-		const secrets = this.readySecrets();
-		const fusion = this.config.auth.fusion;
-		if (!fusion.enabled || fusion.schemeCode === null) {
-			throw new AuthUnavailableException();
-		}
-		let authToken: string;
-		try {
-			authToken = (await this.fusionAuthProvider.issueToken()).authToken;
-		} catch {
-			throw new AuthUnavailableException();
-		}
-		const createdAt = new Date();
-		const expiresAt = new Date(createdAt.getTime() + fusion.tokenTtlMs);
-		const hashKeyVersion = secrets.hashKeyRing.activeVersion;
-		const flowId = randomUUID();
-		const created = await this.repositoryCall(() =>
-			this.repository.createFusionFlow({
-				id: flowId,
-				purpose: input.purpose,
-				registrationFlowReferenceHash:
-					input.purpose === "REGISTER"
-						? hashSensitiveRateLimitValue(
-								"flow-reference",
-								generateOAuthState(),
-								secrets.hashKeyRing,
-								hashKeyVersion,
-							).value
-						: null,
-				requestIpHash: hashSensitiveRateLimitValue(
-					"ip",
-					clientIp,
-					secrets.hashKeyRing,
-					hashKeyVersion,
-				).value,
-				deviceHash: hashSensitiveRateLimitValue(
-					"device",
-					input.installationId,
-					secrets.hashKeyRing,
-					hashKeyVersion,
-				).value,
-				hashKeyVersion,
-				createdAt,
-				expiresAt,
-				retainUntil: new Date(createdAt.getTime() + 24 * 60 * 60_000),
-			}),
-		);
-		if (!created) throw new AuthUnavailableException();
-		return Object.freeze({
-			flowId,
-			schemeCode: fusion.schemeCode,
-			authToken,
-			expiresAt: expiresAt.toISOString(),
-		});
-	}
-
-	async verifyFusionPhone(
-		input: FusionAuthVerifyRequest,
-	): Promise<FusionAuthVerifyResponse> {
-		const secrets = this.readySecrets();
-		if (!this.config.auth.fusion.enabled) {
-			throw new AuthUnavailableException();
-		}
-		const proof = await this.repositoryCall(() =>
-			this.repository.findFusionProof(
-				input.flowId,
-				"REGISTER",
-				deviceHashValues(input.installationId, secrets.hashKeyRing),
-			),
-		);
-		if (proof === null) {
-			throw new AuthUnauthorizedException("INVALID_CREDENTIALS");
-		}
-		const verifiedPhone = await this.verifyFusionToken(
-			input.verifyToken,
-			proof.hashKeyVersion,
-			secrets,
-			async (verifyTokenHashes, primaryVerifyTokenHash) =>
-				this.repositoryCall(() =>
-					this.repository.claimFusionVerifyToken(
-						proof,
-						verifyTokenHashes,
-						primaryVerifyTokenHash,
-					),
-				),
-			async (verifyTokenHash) => {
-				await this.repositoryCall(() =>
-					this.repository.completeFusionVerification({
-						proof,
-						verifyTokenHash,
-						verifiedPhone: null,
-					}),
-				);
-			},
-		);
-		const result = await this.repositoryCall(() =>
-			this.repository.completeFusionVerification({
-				proof,
-				verifyTokenHash: verifiedPhone.verifyTokenHash,
-				verifiedPhone,
-			}),
-		);
-		if (result.kind !== "SUCCESS") {
-			throw new AuthUnauthorizedException("INVALID_CREDENTIALS");
-		}
-		return Object.freeze({
-			proofId: result.proof.id,
-			expiresAt: result.proof.expiresAt.toISOString(),
-		});
-	}
-
 	async createOAuthState(
 		input: OAuthStateRequest,
 		bearer: string | null,
@@ -313,44 +187,13 @@ export class AuthService {
 		) {
 			throw new AuthUnavailableException();
 		}
-		if (input.purpose === "REGISTER") {
-			this.requireRegistrationEnabled(
-				"phoneProofId" in input ? "FUSION" : "PHONE",
-			);
-		}
 		const secrets = this.readySecrets();
-		const deviceCandidates = hashCandidates(
-			"device",
-			input.installationId,
-			secrets.hashKeyRing,
-		).map((candidate) => candidate.value);
-
-		let hashKeyVersion = secrets.hashKeyRing.activeVersion;
+		const hashKeyVersion = secrets.hashKeyRing.activeVersion;
 		let flowReferenceHash: string;
 		let deviceHash: string;
 		let targetUserId: string | null = null;
 		let operationTargetHash: string | null = null;
-		if (input.purpose === "REGISTER") {
-			const flow =
-				"phoneProofId" in input
-					? await this.repositoryCall(() =>
-							this.repository.findVerifiedFusionProof(
-								input.phoneProofId,
-								deviceCandidates,
-							),
-						)
-					: await this.repositoryCall(() =>
-							this.repository.findRegistrationFlow(
-								input.phoneChallengeId,
-								deviceCandidates,
-							),
-						);
-			if (flow === null)
-				throw new AuthUnauthorizedException("INVALID_CREDENTIALS");
-			hashKeyVersion = flow.hashKeyVersion;
-			flowReferenceHash = flow.registrationFlowReferenceHash;
-			deviceHash = flow.deviceHash;
-		} else if (input.purpose === "BIND") {
+		if (input.purpose === "BIND") {
 			if (bearer === null) throw new AuthUnauthorizedException();
 			const session = await this.authenticatedUserResolver.resolveAccessToken(
 				bearer,
@@ -423,147 +266,6 @@ export class AuthService {
 		}) as OAuthStateResponse;
 	}
 
-	async register(
-		input: RegisterPhoneWechatRequest,
-		clientIp: string,
-	): Promise<AuthTokenResponse> {
-		this.requireRegistrationEnabled("PHONE");
-		const secrets = this.readySecrets();
-		assertDeviceLabel(input.device.label);
-		const deviceCandidates = deviceHashValues(
-			input.device.installationId,
-			secrets.hashKeyRing,
-		);
-		const otpProof = await this.repositoryCall(() =>
-			this.repository.findOtpProof(
-				input.phoneChallengeId,
-				"PHONE",
-				"REGISTER",
-				deviceCandidates,
-			),
-		);
-		const oauthProof = await this.repositoryCall(() =>
-			this.repository.findOAuthProof(
-				hashCandidates(
-					"oauth-state",
-					input.wechatOAuthState,
-					secrets.hashKeyRing,
-				),
-				"WECHAT",
-				"REGISTER",
-				deviceCandidates,
-			),
-		);
-		if (
-			otpProof === null ||
-			oauthProof === null ||
-			otpProof.registrationFlowReferenceHash === null ||
-			otpProof.registrationFlowReferenceHash !== oauthProof.flowReferenceHash ||
-			otpProof.deviceHash !== oauthProof.deviceHash
-		) {
-			throw new AuthUnauthorizedException("INVALID_CREDENTIALS");
-		}
-
-		const otpValid = await verifyOtpCode(
-			input.phoneOtpCode,
-			otpProof.codeHash,
-			otpProof.codeHashKeyVersion,
-			this.readyOtpPepper(secrets),
-		);
-		if (!otpValid) {
-			await this.repositoryCall(() =>
-				this.repository.completeRegistration({
-					newUserId: randomUUID(),
-					otpProof,
-					otpVerificationSucceeded: false,
-					oauthProof,
-					verifiedWechatIdentity: null,
-					session: null,
-				}),
-			);
-			throw new AuthUnauthorizedException("INVALID_CREDENTIALS");
-		}
-
-		const verified = await this.verifyWechat(input.wechatAuthorizationCode);
-		const verifiedHashes = this.identityHashes(verified, secrets);
-		const issued = this.issueSession(
-			input.device,
-			clientIp,
-			otpProof.hashKeyVersion,
-			secrets.hashKeyRing,
-			otpProof.deviceHash,
-		);
-		const result = await this.repositoryCall(() =>
-			this.repository.completeRegistration({
-				newUserId: randomUUID(),
-				otpProof,
-				otpVerificationSucceeded: true,
-				oauthProof,
-				verifiedWechatIdentity: verifiedHashes,
-				session: issued.draft,
-			}),
-		);
-		return this.tokenResponse(result, issued);
-	}
-
-	async registerWithFusion(
-		input: RegisterFusionWechatRequest,
-		clientIp: string,
-	): Promise<AuthTokenResponse> {
-		this.requireRegistrationEnabled("FUSION");
-		const secrets = this.readySecrets();
-		assertDeviceLabel(input.device.label);
-		const deviceCandidates = deviceHashValues(
-			input.device.installationId,
-			secrets.hashKeyRing,
-		);
-		const phoneProof = await this.repositoryCall(() =>
-			this.repository.findVerifiedFusionProof(
-				input.phoneProofId,
-				deviceCandidates,
-			),
-		);
-		const oauthProof = await this.repositoryCall(() =>
-			this.repository.findOAuthProof(
-				hashCandidates(
-					"oauth-state",
-					input.wechatOAuthState,
-					secrets.hashKeyRing,
-				),
-				"WECHAT",
-				"REGISTER",
-				deviceCandidates,
-			),
-		);
-		if (
-			phoneProof === null ||
-			oauthProof === null ||
-			phoneProof.registrationFlowReferenceHash !==
-				oauthProof.flowReferenceHash ||
-			phoneProof.deviceHash !== oauthProof.deviceHash
-		) {
-			throw new AuthUnauthorizedException("INVALID_CREDENTIALS");
-		}
-		const verified = await this.verifyWechat(input.wechatAuthorizationCode);
-		const issued = this.issueSession(
-			input.device,
-			clientIp,
-			phoneProof.hashKeyVersion,
-			secrets.hashKeyRing,
-			phoneProof.deviceHash,
-		);
-		const result = await this.repositoryCall(() =>
-			this.repository.completeFusionRegistration({
-				newUserId: randomUUID(),
-				phoneProof,
-				oauthProof,
-				verifiedWechatIdentity: this.identityHashes(verified, secrets),
-				session: issued.draft,
-			}),
-		);
-		return this.tokenResponse(result, issued);
-	}
-
 	async login(
 		input: LoginRequest,
 		clientIp: string,
@@ -573,9 +275,6 @@ export class AuthService {
 		assertDeviceLabel(input.device.label);
 		if (input.method === "PHONE" || input.method === "EMAIL") {
 			return this.loginWithOtp(input, clientIp, secrets);
-		}
-		if (input.method === "PHONE_FUSION") {
-			return this.loginWithFusion(input, clientIp, secrets);
 		}
 		return this.loginWithOAuth(input, clientIp, secrets);
 	}
@@ -667,6 +366,7 @@ export class AuthService {
 	): Promise<BindIdentityResponse> {
 		if (
 			(input.type === "EMAIL" && !this.config.auth.email.enabled) ||
+			(input.type === "WECHAT" && !this.config.auth.wechat.enabled) ||
 			(input.type === "QQ" && !this.config.auth.qq.enabled)
 		) {
 			throw new AuthUnavailableException();
@@ -681,6 +381,13 @@ export class AuthService {
 				]),
 			);
 			if (!this.bindingProofMatchesSession(proof, session)) {
+				throw new AuthUnauthorizedException("INVALID_CREDENTIALS");
+			}
+			if (
+				proof.verificationMethod !== "LOCAL_HASH" ||
+				proof.codeHash === null ||
+				proof.codeHashKeyVersion === null
+			) {
 				throw new AuthUnauthorizedException("INVALID_CREDENTIALS");
 			}
 			const valid = await verifyOtpCode(
@@ -702,7 +409,7 @@ export class AuthService {
 		const proof = await this.repositoryCall(() =>
 			this.repository.findOAuthProof(
 				hashCandidates("oauth-state", input.oauthState, secrets.hashKeyRing),
-				"QQ",
+				input.type,
 				"BIND",
 				[session.deviceHash],
 			),
@@ -710,7 +417,10 @@ export class AuthService {
 		if (!this.bindingProofMatchesSession(proof, session)) {
 			throw new AuthUnauthorizedException("INVALID_CREDENTIALS");
 		}
-		const verified = await this.verifyQq(input.accessToken);
+		const verified =
+			input.type === "WECHAT"
+				? await this.verifyWechat(input.authorizationCode)
+				: await this.verifyQq(input.authorizationCode);
 		const result = await this.repositoryCall(() =>
 			this.repository.completeOAuthBinding({
 				session,
@@ -1009,31 +719,15 @@ export class AuthService {
 		}
 	}
 
-	private requireRegistrationEnabled(channel: "PHONE" | "FUSION"): void {
-		const mobileEnabled =
-			channel === "PHONE"
-				? this.config.auth.phone.enabled
-				: this.config.auth.fusion.enabled;
-		if (
-			!this.config.auth.registrationEnabled ||
-			!mobileEnabled ||
-			!this.config.auth.wechat.enabled
-		) {
-			throw new AuthUnavailableException();
-		}
-	}
-
 	private requireLoginChannelEnabled(method: LoginRequest["method"]): void {
 		const enabled =
 			method === "PHONE"
 				? this.config.auth.phone.enabled
-				: method === "PHONE_FUSION"
-					? this.config.auth.fusion.enabled
-					: method === "EMAIL"
-						? this.config.auth.email.enabled
-						: method === "WECHAT"
-							? this.config.auth.wechat.enabled
-							: this.config.auth.qq.enabled;
+				: method === "EMAIL"
+					? this.config.auth.email.enabled
+					: method === "WECHAT"
+						? this.config.auth.wechat.enabled
+						: this.config.auth.qq.enabled;
 		if (!enabled) {
 			throw new AuthUnavailableException();
 		}
@@ -1096,9 +790,15 @@ export class AuthService {
 			).value;
 		}
 
-		const code = generateSixDigitOtp();
-		const idempotencyKey = generateOAuthState();
-		const codeHash = await hashOtpCode(code, this.readyOtpPepper(secrets));
+		// PNVS generates and verifies phone codes. Only email challenges retain a
+		// local peppered hash; no usable phone OTP is ever generated or persisted.
+		const code = channel === "EMAIL" ? generateSixDigitOtp() : null;
+		const challengeId = randomUUID();
+		const idempotencyKey = challengeId;
+		const codeHash =
+			code === null
+				? null
+				: await hashOtpCode(code, this.readyOtpPepper(secrets));
 		const createdAt = new Date();
 		const expiresAt = new Date(createdAt.getTime() + this.config.auth.otpTtlMs);
 		const resendAvailableAt = new Date(
@@ -1106,7 +806,7 @@ export class AuthService {
 		);
 		const destinationScope = channel === "PHONE" ? "e164" : "email-lowercase";
 		const draft = Object.freeze({
-			id: randomUUID(),
+			id: challengeId,
 			channel,
 			purpose,
 			destinationLookup: hashIdentityLookup(
@@ -1136,6 +836,10 @@ export class AuthService {
 							hashVersion,
 						).value
 					: null,
+			verificationMethod:
+				channel === "PHONE"
+					? ("ALIYUN_PNVS" as const)
+					: ("LOCAL_HASH" as const),
 			codeHash,
 			idempotencyKeyHash: hashSensitiveRateLimitValue(
 				"idempotency",
@@ -1195,7 +899,12 @@ export class AuthService {
 			);
 			if (!finalized) throw new AuthUnavailableException();
 		} catch (error) {
-			if (!(error instanceof AuthUnavailableException)) {
+			if (
+				error instanceof OtpDeliveryUnavailableError &&
+				(error.reason === "DISABLED" ||
+					error.reason === "INVALID_REQUEST" ||
+					error.reason === "UPSTREAM_REJECTED")
+			) {
 				await this.repositoryCall(() =>
 					this.repository.finalizeOtpDelivery(draft.id, "FAILED", null, null),
 				).catch(() => undefined);
@@ -1221,22 +930,104 @@ export class AuthService {
 		clientIp: string,
 		secrets: ReadyAuthSecrets,
 	): Promise<AuthTokenResponse> {
-		const proof = await this.repositoryCall(() =>
+		const deviceHashes = deviceHashValues(
+			input.device.installationId,
+			secrets.hashKeyRing,
+		);
+		let proof = await this.repositoryCall(() =>
 			this.repository.findOtpProof(
 				input.challengeId,
 				input.method,
 				"LOGIN",
-				deviceHashValues(input.device.installationId, secrets.hashKeyRing),
+				deviceHashes,
 			),
 		);
+		if (
+			proof === null &&
+			input.method === "PHONE" &&
+			this.config.auth.registrationEnabled
+		) {
+			proof = await this.repositoryCall(() =>
+				this.repository.findOtpProof(
+					input.challengeId,
+					"PHONE",
+					"REGISTER",
+					deviceHashes,
+				),
+			);
+		}
 		if (proof === null)
 			throw new AuthUnauthorizedException("INVALID_CREDENTIALS");
-		const valid = await verifyOtpCode(
-			input.otpCode,
-			proof.codeHash,
-			proof.codeHashKeyVersion,
-			this.readyOtpPepper(secrets),
-		);
+
+		let verificationClaimHash: string | null = null;
+		let valid: boolean;
+		if (input.method === "PHONE") {
+			if (
+				proof.verificationMethod !== "ALIYUN_PNVS" ||
+				proof.codeHash !== null ||
+				proof.codeHashKeyVersion !== null
+			) {
+				throw new AuthUnauthorizedException("INVALID_CREDENTIALS");
+			}
+			const destinationHash = hashIdentityLookup(
+				"PHONE",
+				"e164",
+				input.phoneNumber,
+				secrets.hashKeyRing,
+				secrets.identityDedupKeyVersion,
+			).value;
+			const destinationMatches = constantTimeHashEquals(
+				destinationHash,
+				proof.destinationDedupHash,
+			);
+			verificationClaimHash = hashSensitiveRateLimitValue(
+				"idempotency",
+				generateOAuthState(),
+				secrets.hashKeyRing,
+				proof.hashKeyVersion,
+			).value;
+			const claimed = await this.repositoryCall(() =>
+				this.repository.claimPhoneOtpVerification(
+					proof as OtpProof,
+					verificationClaimHash as string,
+					new Date(Date.now() + 30_000),
+				),
+			);
+			if (!claimed) {
+				throw new AuthUnauthorizedException("INVALID_CREDENTIALS");
+			}
+			try {
+				valid = destinationMatches
+					? await this.phoneOtpProvider.verify({
+							destination: input.phoneNumber,
+							code: input.otpCode,
+							idempotencyKey: proof.id,
+						})
+					: false;
+			} catch {
+				await this.repositoryCall(() =>
+					this.repository.releasePhoneOtpVerification(
+						proof as OtpProof,
+						verificationClaimHash as string,
+					),
+				).catch(() => undefined);
+				throw new AuthUnavailableException();
+			}
+		} else {
+			if (
+				proof.verificationMethod !== "LOCAL_HASH" ||
+				proof.codeHash === null ||
+				proof.codeHashKeyVersion === null
+			) {
+				throw new AuthUnauthorizedException("INVALID_CREDENTIALS");
+			}
+			valid = await verifyOtpCode(
+				input.otpCode,
+				proof.codeHash,
+				proof.codeHashKeyVersion,
+				this.readyOtpPepper(secrets),
+			);
+		}
 		const issued = valid
 			? this.issueSession(
 					input.device,
@@ -1251,69 +1042,15 @@ export class AuthService {
 				proof,
 				verificationSucceeded: valid,
 				session: issued?.draft ?? null,
+				newUserId:
+					proof.channel === "PHONE" && proof.purpose === "REGISTER"
+						? randomUUID()
+						: null,
+				verificationClaimHash,
 			}),
 		);
 		if (issued === null)
 			throw new AuthUnauthorizedException("INVALID_CREDENTIALS");
-		return this.tokenResponse(result, issued);
-	}
-
-	private async loginWithFusion(
-		input: Extract<LoginRequest, { method: "PHONE_FUSION" }>,
-		clientIp: string,
-		secrets: ReadyAuthSecrets,
-	): Promise<AuthTokenResponse> {
-		if (!this.config.auth.fusion.enabled) {
-			throw new AuthUnavailableException();
-		}
-		const proof = await this.repositoryCall(() =>
-			this.repository.findFusionProof(
-				input.flowId,
-				"LOGIN",
-				deviceHashValues(input.device.installationId, secrets.hashKeyRing),
-			),
-		);
-		if (proof === null) {
-			throw new AuthUnauthorizedException("INVALID_CREDENTIALS");
-		}
-		const verifiedPhone = await this.verifyFusionToken(
-			input.verifyToken,
-			proof.hashKeyVersion,
-			secrets,
-			async (verifyTokenHashes, primaryVerifyTokenHash) =>
-				this.repositoryCall(() =>
-					this.repository.claimFusionVerifyToken(
-						proof,
-						verifyTokenHashes,
-						primaryVerifyTokenHash,
-					),
-				),
-			async (verifyTokenHash) => {
-				await this.repositoryCall(() =>
-					this.repository.completeFusionLogin({
-						proof,
-						verifyTokenHash,
-						verifiedPhone: null,
-						session: null,
-					}),
-				);
-			},
-		);
-		const issued = this.issueSession(
-			input.device,
-			clientIp,
-			proof.hashKeyVersion,
-			secrets.hashKeyRing,
-			proof.deviceHash,
-		);
-		const result = await this.repositoryCall(() =>
-			this.repository.completeFusionLogin({
-				proof,
-				verifyTokenHash: verifiedPhone.verifyTokenHash,
-				verifiedPhone,
-				session: issued.draft,
-			}),
-		);
 		return this.tokenResponse(result, issued);
 	}
 
@@ -1340,7 +1077,7 @@ export class AuthService {
 		const verified =
 			input.method === "WECHAT"
 				? await this.verifyWechat(input.authorizationCode)
-				: await this.verifyQq(input.accessToken);
+				: await this.verifyQq(input.authorizationCode);
 		const issued = this.issueSession(
 			input.device,
 			clientIp,
@@ -1356,64 +1093,6 @@ export class AuthService {
 			}),
 		);
 		return this.tokenResponse(result, issued);
-	}
-
-	private async verifyFusionToken(
-		verifyToken: string,
-		hashKeyVersion: string,
-		secrets: ReadyAuthSecrets,
-		claimVerifyToken: (
-			verifyTokenHashes: readonly VersionedHash[],
-			primaryVerifyTokenHash: VersionedHash,
-		) => Promise<boolean>,
-		recordInvalidAttempt: (verifyTokenHash: VersionedHash) => Promise<void>,
-	): Promise<VerifiedFusionPhoneHashes> {
-		const verifyTokenHashes = secrets.hashKeyRing.versions().map((version) =>
-			hashSensitiveRateLimitValue(
-				"fusion-verify-token",
-				verifyToken,
-				secrets.hashKeyRing,
-				version,
-			),
-		);
-		const verifyTokenHash = verifyTokenHashes.find(
-			(candidate) => candidate.keyVersion === secrets.identityDedupKeyVersion,
-		);
-		if (verifyTokenHash === undefined) throw new AuthUnavailableException();
-		if (!(await claimVerifyToken(verifyTokenHashes, verifyTokenHash))) {
-			throw new AuthUnauthorizedException("INVALID_CREDENTIALS");
-		}
-		try {
-			const verified = await this.fusionAuthProvider.verifyToken(verifyToken);
-			return Object.freeze({
-				lookup: hashIdentityLookup(
-					"PHONE",
-					"e164",
-					verified.e164PhoneNumber,
-					secrets.hashKeyRing,
-					hashKeyVersion,
-				),
-				dedup: hashIdentityLookup(
-					"PHONE",
-					"e164",
-					verified.e164PhoneNumber,
-					secrets.hashKeyRing,
-					secrets.identityDedupKeyVersion,
-				),
-				maskedPhone: maskPhone(verified.e164PhoneNumber),
-				verifyTokenHash,
-			});
-		} catch (error) {
-			await recordInvalidAttempt(verifyTokenHash);
-			if (
-				error instanceof FusionAuthUnavailableError &&
-				(error.reason === "INVALID_PROOF" ||
-					error.reason === "UPSTREAM_REJECTED")
-			) {
-				throw new AuthUnauthorizedException("INVALID_CREDENTIALS");
-			}
-			throw new AuthUnavailableException();
-		}
 	}
 
 	private issueSession(
@@ -1468,7 +1147,7 @@ export class AuthService {
 	}
 
 	private tokenResponse(
-		result: Awaited<ReturnType<AuthRepository["completeOtpLogin"]>>,
+		result: CompleteOAuthCredentialResult,
 		issued: {
 			readonly draft: SessionIssueDraft;
 			readonly access: IssuedOpaqueToken;
@@ -1477,6 +1156,9 @@ export class AuthService {
 	): AuthTokenResponse {
 		if (result.kind === "IDENTITY_CONFLICT") {
 			throw new AuthConflictException("IDENTITY_BINDING_CONFLICT");
+		}
+		if (result.kind === "IDENTITY_NOT_BOUND") {
+			throw new AuthUnauthorizedException("IDENTITY_NOT_BOUND");
 		}
 		if (result.kind !== "SUCCESS") {
 			throw new AuthUnauthorizedException("INVALID_CREDENTIALS");
@@ -1558,6 +1240,19 @@ export class AuthService {
 		identity: VerifiedExternalIdentity,
 		secrets: ReadyAuthSecrets,
 	): VerifiedOAuthHashes {
+		// Keep each durable lookup AppID-scoped. QQ may use a separately realm-
+		// scoped UnionID only for deduplication; WeChat keeps its existing alias
+		// record. Neither path replaces or impersonates the App-scoped OpenID.
+		const stableDedupSubject =
+			identity.provider === "QQ" && identity.unionSubject !== null
+				? Object.freeze({
+						scope: `open-platform:${this.requireQqOpenPlatformRealmId()}`,
+						value: identity.unionSubject,
+					})
+				: Object.freeze({
+						scope: identity.providerScope,
+						value: identity.subject,
+					});
 		return Object.freeze({
 			lookup: hashIdentityLookup(
 				identity.provider,
@@ -1567,12 +1262,37 @@ export class AuthService {
 			),
 			dedup: hashIdentityLookup(
 				identity.provider,
-				identity.providerScope,
-				identity.subject,
+				stableDedupSubject.scope,
+				stableDedupSubject.value,
 				secrets.hashKeyRing,
 				secrets.identityDedupKeyVersion,
 			),
+			wechatUnionAlias:
+				identity.provider === "WECHAT" && identity.unionSubject !== null
+					? Object.freeze({
+							realmId: this.requireWechatOpenPlatformRealmId(),
+							hash: hashIdentityLookup(
+								"WECHAT",
+								`open-platform:${this.requireWechatOpenPlatformRealmId()}`,
+								identity.unionSubject,
+								secrets.hashKeyRing,
+								secrets.identityDedupKeyVersion,
+							),
+						})
+					: null,
 		});
+	}
+
+	private requireWechatOpenPlatformRealmId(): string {
+		const realmId = this.config.auth.wechat.openPlatformRealmId;
+		if (realmId === null) throw new AuthUnavailableException();
+		return realmId;
+	}
+
+	private requireQqOpenPlatformRealmId(): string {
+		const realmId = this.config.auth.qq.openPlatformRealmId;
+		if (realmId === null) throw new AuthUnavailableException();
+		return realmId;
 	}
 
 	private async verifyWechat(
@@ -1590,10 +1310,12 @@ export class AuthService {
 	}
 
 	private async verifyQq(
-		accessToken: string,
+		authorizationCode: string,
 	): Promise<VerifiedExternalIdentity> {
 		try {
-			const identity = await this.qqIdentityProvider.verify({ accessToken });
+			const identity = await this.qqIdentityProvider.verify({
+				authorizationCode,
+			});
 			if (identity.provider !== "QQ") throw new AuthUnavailableException();
 			return identity;
 		} catch (error) {

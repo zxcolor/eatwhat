@@ -11,15 +11,12 @@ import { AuthService } from "./auth.service.js";
 import { AuthAvailabilityGuard } from "./auth-availability.guard.js";
 import {
 	ALIYUN_CREDENTIAL,
-	ALIYUN_FUSION_CLIENT,
-	ALIYUN_SMS_CLIENT,
+	ALIYUN_PNVS_CLIENT,
 	createEmailOtpProvider,
-	createFusionAuthProvider,
 	createPhoneOtpProvider,
 	createQqIdentityProvider,
 	createWechatIdentityProvider,
 	EMAIL_OTP_PROVIDER,
-	FUSION_AUTH_PROVIDER,
 	PHONE_OTP_PROVIDER,
 	QQ_IDENTITY_PROVIDER,
 	SMTP_CLIENT,
@@ -36,8 +33,7 @@ import {
 } from "./data-export-artifact.reader.js";
 import {
 	createAliyunCredential,
-	createOfficialAliyunFusionClient,
-	createOfficialAliyunSmsClient,
+	createOfficialAliyunPnvsClient,
 } from "./providers/aliyun-official.clients.js";
 import { createVerifiedSmtpTransportClient } from "./providers/smtp-email-otp.provider.js";
 
@@ -76,14 +72,9 @@ import { createVerifiedSmtpTransportClient } from "./providers/smtp-email-otp.pr
 			useFactory: (config: AppConfig) => createAliyunCredential(config),
 		},
 		{
-			provide: ALIYUN_SMS_CLIENT,
+			provide: ALIYUN_PNVS_CLIENT,
 			inject: [APP_CONFIG, ALIYUN_CREDENTIAL],
-			useFactory: createOfficialAliyunSmsClient,
-		},
-		{
-			provide: ALIYUN_FUSION_CLIENT,
-			inject: [APP_CONFIG, ALIYUN_CREDENTIAL],
-			useFactory: createOfficialAliyunFusionClient,
+			useFactory: createOfficialAliyunPnvsClient,
 		},
 		{
 			provide: SMTP_CLIENT,
@@ -92,13 +83,8 @@ import { createVerifiedSmtpTransportClient } from "./providers/smtp-email-otp.pr
 				createVerifiedSmtpTransportClient(config.auth.email),
 		},
 		{
-			provide: FUSION_AUTH_PROVIDER,
-			inject: [APP_CONFIG, { token: ALIYUN_FUSION_CLIENT, optional: true }],
-			useFactory: createFusionAuthProvider,
-		},
-		{
 			provide: PHONE_OTP_PROVIDER,
-			inject: [APP_CONFIG, { token: ALIYUN_SMS_CLIENT, optional: true }],
+			inject: [APP_CONFIG, { token: ALIYUN_PNVS_CLIENT, optional: true }],
 			useFactory: createPhoneOtpProvider,
 		},
 		{
