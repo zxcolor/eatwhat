@@ -14,6 +14,606 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - name: Verify database mutators reject a concurrent mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          repository_root="$PWD"
+          sudo env REPOSITORY_ROOT="$repository_root" bash -c '
+            set -euo pipefail
+            lock_directory=/run/lock/chi-shen-me
+            mutation_lock="$lock_directory/mutation.lock"
+            if [[ -e "$lock_directory" || -L "$lock_directory" ]]; then
+              echo "test lock directory already exists; refusing to alter it" >&2
+              exit 1
+            fi
+            install -d -m 700 "$lock_directory"
+            : >"$mutation_lock"
+            chmod 600 "$mutation_lock"
+            cleanup() {
+              chmod 644 "$REPOSITORY_ROOT/infra/ecs/scripts/preflight-deployment.sh" 2>/dev/null || true
+              rm -f -- \
+                "$lock_directory/postgres-backup.lock" \
+                "$lock_directory/postgres-restore.lock" \
+                "$lock_directory/postgres-rollback.lock" \
+                "$mutation_lock"
+              rmdir -- "$lock_directory" 2>/dev/null || true
+            }
+            trap cleanup EXIT
+            chmod 700 "$REPOSITORY_ROOT/infra/ecs/scripts/preflight-deployment.sh"
+            exec 9<>"$mutation_lock"
+            flock -n 9
+            assert_lock_rejected() {
+              local script="$1"
+              shift
+              local output status
+              set +e
+              output="$(bash "$REPOSITORY_ROOT/$script" "$@" 2>&1)"
+              status=$?
+              set -e
+              [[ "$status" -eq 2 ]] || {
+                echo "$script did not reject the held global lock" >&2
+                exit 1
+              }
+              [[ "$output" == "another deployment mutation, backup or secret update is running" ]] || {
+                echo "$script reached work beyond the held global lock" >&2
+                exit 1
+              }
+            }
+            assert_lock_rejected infra/ecs/scripts/provision-database.sh
+            assert_lock_rejected infra/ecs/scripts/restore-database.sh \
+              /does/not/exist chi_shen_me_restore_20260828t000000z
+            assert_lock_rejected infra/ecs/scripts/rollback-database.sh \
+              /does/not/exist --execute WRONG_ORDER_MUST_FAIL
+            exec 8>&9
+            assert_inherited_lock_reaches_preflight() {
+              local script="$1"
+              shift
+              local output status
+              set +e
+              output="$(bash "$REPOSITORY_ROOT/$script" "$@" 2>&1)"
+              status=$?
+              set -e
+              [[ "$status" -eq 2 ]] || {
+                echo "$script did not reach the expected post-lock preflight rejection" >&2
+                exit 1
+              }
+              [[ "$output" == "unexpected deployment directory: $REPOSITORY_ROOT/infra/ecs" ]] || {
+                echo "$script did not accept the inherited global mutation lock" >&2
+                exit 1
+              }
+            }
+            assert_inherited_lock_reaches_preflight \
+              infra/ecs/scripts/backup-database.sh --mutation-lock-held
+            assert_inherited_lock_reaches_preflight \
+              infra/ecs/scripts/restore-database.sh \
+              /does/not/exist chi_shen_me_restore_20260828t000000z --mutation-lock-held
+          '
+      - name: Reject legacy authentication retirement before the active bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          repository_root="$PWD"
+          sudo env REPOSITORY_ROOT="$repository_root" bash -c '
+            set -euo pipefail
+            test_root=/opt/chi-shen-me
+            lock_directory=/run/lock/chi-shen-me
+            private_input=/root/chi-shen-me-auth-wrong-order.env
+            if [[ -e "$test_root" || -L "$test_root" || -e "$lock_directory" || -L "$lock_directory" || -e "$private_input" ]]; then
+              echo "auth order test path already exists; refusing to alter it" >&2
+              exit 1
+            fi
+            cleanup() {
+              rm -f -- "$private_input"
+              rm -f -- "$lock_directory/auth-secrets.lock" "$lock_directory/mutation.lock"
+              rmdir -- "$lock_directory" 2>/dev/null || true
+              [[ "$test_root" == /opt/chi-shen-me ]] && rm -rf -- "$test_root"
+            }
+            trap cleanup EXIT
+            active_release="$test_root/releases/ci-active"
+            active_deploy="$active_release/deploy"
+            candidate="$test_root/releases/ci-wrong-order/deploy"
+            secrets="$test_root/shared/secrets"
+            install -d -m 700 "$active_deploy/scripts" "$candidate/scripts" "$secrets"
+            install -m 700 "$REPOSITORY_ROOT/infra/ecs/scripts/update-auth-secrets.sh" \
+              "$candidate/scripts/update-auth-secrets.sh"
+            printf "#!/usr/bin/env bash\nexit 0\n" >"$candidate/scripts/preflight-deployment.sh"
+            printf "#!/usr/bin/env bash\nexit 0\n" >"$active_deploy/scripts/verify-runtime.sh"
+            chmod 700 "$candidate/scripts/preflight-deployment.sh"
+            cat >"$active_deploy/deployment.env" <<"EOF"
+          AUTH_SCHEMA_TRANSITION_MODE=none
+          EOF
+            ln -s "$active_release" "$test_root/current"
+            cat >"$candidate/deployment.env" <<"EOF"
+          API_IMAGE=registry.example.invalid/chi-shen-me/api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          AUTH_SCHEMA_TRANSITION_MODE=none
+          ACCOUNTS_ENABLED=false
+          PHONE_AUTH_ENABLED=false
+          EMAIL_AUTH_ENABLED=false
+          WECHAT_AUTH_ENABLED=false
+          QQ_AUTH_ENABLED=false
+          QQ_UNION_ID_ENABLED=false
+          QQ_OPEN_PLATFORM_REALM_ID=eatwhat-qq-primary
+          ALIBABA_CLOUD_ECS_METADATA=ci-role
+          EOF
+            cat >"$secrets/api.env" <<"EOF"
+          DATABASE_URL=postgresql://unused.invalid/unused
+          ALIYUN_FUSION_SCHEME_CODE=legacy-ci-placeholder
+          ALIYUN_FUSION_PACKAGE_NAME=legacy.ci.placeholder
+          ALIYUN_FUSION_PACKAGE_SIGN=legacy-ci-placeholder
+          WECHAT_APP_ID=legacy-ci-placeholder
+          WECHAT_APP_SECRET=legacy-ci-placeholder
+          EOF
+            cat >"$private_input" <<"EOF"
+          ACCOUNTS_ENABLED=true
+          PHONE_AUTH_ENABLED=true
+          EMAIL_AUTH_ENABLED=false
+          WECHAT_AUTH_ENABLED=false
+          QQ_AUTH_ENABLED=false
+          QQ_UNION_ID_ENABLED=false
+          ALIBABA_CLOUD_ECS_METADATA=ci-role
+          AUTH_HASH_ACTIVE_VERSION=hash.v1
+          AUTH_HASH_KEYS_JSON={}
+          AUTH_IDENTITY_DEDUP_KEY_VERSION=hash.v1
+          ALIYUN_PNVS_SIGN_NAME=ci-placeholder
+          ALIYUN_PNVS_TEMPLATE_CODE=100001
+          EOF
+            chown -R root:root "$test_root" "$private_input"
+            find "$test_root" -type d -exec chmod 700 {} +
+            find "$test_root" -type f -exec chmod 600 {} +
+            chmod 600 "$private_input"
+            chmod 700 "$active_deploy/scripts/verify-runtime.sh" \
+              "$candidate/scripts/update-auth-secrets.sh" "$candidate/scripts/preflight-deployment.sh"
+            api_before="$(sha256sum "$secrets/api.env")"
+            deployment_before="$(sha256sum "$candidate/deployment.env")"
+            assert_auth_order_rejected() {
+              local output status
+              set +e
+              output="$("$candidate/scripts/update-auth-secrets.sh" "$@" 2>&1)"
+              status=$?
+              set -e
+              [[ "$status" -eq 2 ]] || {
+                echo "auth updater accepted retirement before bridge activation: $*" >&2
+                exit 1
+              }
+              [[ "$output" == "legacy Fusion, SMS and associated WeChat configuration can only be retired from the active legacy phone drain bridge" ]] || {
+                echo "auth updater did not fail at the pre-mutation bridge gate: $*" >&2
+                exit 1
+              }
+              [[ "$(sha256sum "$secrets/api.env")" == "$api_before" ]] || {
+                echo "shared api.env changed on rejected auth update: $*" >&2
+                exit 1
+              }
+              [[ "$(sha256sum "$candidate/deployment.env")" == "$deployment_before" ]] || {
+                echo "deployment.env changed on rejected auth update: $*" >&2
+                exit 1
+              }
+              ! compgen -G "$secrets/.api.env.*" >/dev/null
+              ! compgen -G "$candidate/.deployment.env.*" >/dev/null
+            }
+            assert_auth_order_rejected --apply --config-file "$private_input"
+            assert_auth_order_rejected --disable
+          '
+      - name: Preserve authentication continuity across email-only and emergency disable
+        shell: bash
+        run: |
+          set -euo pipefail
+          repository_root="$PWD"
+          sudo env REPOSITORY_ROOT="$repository_root" bash -c '
+            set -euo pipefail
+            test_root=/opt/chi-shen-me
+            lock_directory=/run/lock/chi-shen-me
+            same_input=/root/chi-shen-me-auth-continuity-same.env
+            changed_input=/root/chi-shen-me-auth-continuity-changed.env
+            email_input=/root/chi-shen-me-auth-email-enabled.env
+            qq_input=/root/chi-shen-me-auth-qq-enabled.env
+            qq_union_input=/root/chi-shen-me-auth-qq-union-enabled.env
+            qq_marker_override_input=/root/chi-shen-me-auth-qq-marker-override.env
+            qq_missing_key_input=/root/chi-shen-me-auth-qq-missing-key.env
+            runtime_password_input=/root/chi-shen-me-auth-email-runtime-password.env
+            dual_password_input=/root/chi-shen-me-auth-email-dual-password.env
+            legacy_otp_input=/root/chi-shen-me-auth-email-legacy-otp.env
+            fake_bin=/tmp/chi-shen-me-auth-continuity-bin
+            docker_sentinel=/tmp/chi-shen-me-auth-continuity-docker-called
+            qq_count_sentinel=/tmp/chi-shen-me-auth-continuity-qq-count-called
+            qq_identity_state="$test_root/shared/auth-identity-state.env"
+            if [[ -e "$test_root" || -L "$test_root" || -e "$lock_directory" || -L "$lock_directory" ||
+              -e "$same_input" || -e "$changed_input" || -e "$email_input" ||
+                  -e "$qq_input" || -e "$qq_union_input" ||
+                  -e "$qq_marker_override_input" ||
+                  -e "$qq_missing_key_input" ||
+                  -e "$runtime_password_input" || -e "$dual_password_input" ||
+                  -e "$legacy_otp_input" ||
+                  -e "$fake_bin" || -e "$docker_sentinel" ||
+                  -e "$qq_count_sentinel" ]]; then
+              echo "auth continuity test path already exists; refusing to alter it" >&2
+              exit 1
+            fi
+            cleanup() {
+              rm -f -- "$same_input" "$changed_input" "$email_input" \
+                "$qq_input" "$qq_union_input" "$qq_missing_key_input" \
+                "$qq_marker_override_input" \
+                "$runtime_password_input" "$dual_password_input" \
+                "$legacy_otp_input" "$docker_sentinel" "$qq_count_sentinel"
+              rm -rf -- "$fake_bin"
+              rm -f -- "$lock_directory/auth-secrets.lock" "$lock_directory/mutation.lock"
+              rmdir -- "$lock_directory" 2>/dev/null || true
+              [[ "$test_root" == /opt/chi-shen-me ]] && rm -rf -- "$test_root"
+            }
+            trap cleanup EXIT
+            active_release="$test_root/releases/ci-auth-active"
+            active_deploy="$active_release/deploy"
+            candidate="$test_root/releases/ci-auth-continuity/deploy"
+            secrets="$test_root/shared/secrets"
+            install -d -m 700 "$active_deploy/scripts" "$candidate/scripts" \
+              "$test_root/shared" "$secrets" "$fake_bin"
+            install -m 700 "$REPOSITORY_ROOT/infra/ecs/scripts/update-auth-secrets.sh" \
+              "$candidate/scripts/update-auth-secrets.sh"
+            cat >"$candidate/scripts/preflight-deployment.sh" <<"FAKE_PREFLIGHT"
+          #!/usr/bin/env bash
+          set -euo pipefail
+          [[ "${PREFLIGHT_FAIL_FIXTURE:-false}" != "true" ]]
+            FAKE_PREFLIGHT
+            printf "#!/usr/bin/env bash\nexit 0\n" >"$candidate/scripts/verify-runtime.sh"
+            cp -- "$candidate/scripts/verify-runtime.sh" "$active_deploy/scripts/verify-runtime.sh"
+            cat >"$fake_bin/docker" <<"FAKE_DOCKER"
+          #!/usr/bin/env bash
+          set -euo pipefail
+          : >"$DOCKER_SENTINEL"
+          if [[ "${1:-}" == "compose" && "${4:-}" == "ps" && "${6:-}" == "postgres" ]]; then
+            printf "ci-postgres\n"
+            exit 0
+          fi
+          if [[ "${1:-}" == "inspect" ]]; then
+            printf "running/healthy\n"
+            exit 0
+          fi
+          if [[ "${1:-}" == "compose" && "${4:-}" == "exec" ]]; then
+            cat >/dev/null
+            : >"$QQ_COUNT_SENTINEL"
+            printf "%s\n" "${QQ_BINDING_COUNT_FIXTURE:-0}"
+            exit 0
+          fi
+          if [[ "${1:-}" == "run" ]]; then
+            baseline_env=""
+            candidate_env=""
+            shift
+            while [[ "$#" -gt 0 ]]; do
+              if [[ "$1" == "--volume" && "$#" -ge 2 ]]; then
+                case "$2" in
+                  *:/run/auth-baseline.env:ro) baseline_env="${2%%:*}" ;;
+                  *:/run/auth-candidate.env:ro) candidate_env="${2%%:*}" ;;
+                esac
+                shift 2
+              else
+                shift
+              fi
+            done
+            if [[ -n "$baseline_env" && -n "$candidate_env" ]]; then
+              baseline_dedup="$(sed -n "s/^AUTH_IDENTITY_DEDUP_KEY_VERSION=//p" "$baseline_env")"
+              candidate_dedup="$(sed -n "s/^AUTH_IDENTITY_DEDUP_KEY_VERSION=//p" "$candidate_env")"
+              [[ "$baseline_dedup" == "$candidate_dedup" ]] || exit 11
+            fi
+            exit 0
+          fi
+          exit 0
+          FAKE_DOCKER
+            chmod 700 "$candidate/scripts/preflight-deployment.sh" \
+              "$candidate/scripts/verify-runtime.sh" "$fake_bin/docker"
+            cat >"$candidate/deployment.env" <<"EOF"
+          API_IMAGE=registry.example.invalid/chi-shen-me/api@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          AUTH_SCHEMA_TRANSITION_MODE=none
+          ACCOUNTS_ENABLED=true
+          PHONE_AUTH_ENABLED=true
+          EMAIL_AUTH_ENABLED=true
+          WECHAT_AUTH_ENABLED=false
+          QQ_AUTH_ENABLED=false
+          QQ_UNION_ID_ENABLED=false
+          QQ_OPEN_PLATFORM_REALM_ID=eatwhat-qq-primary
+          ALIBABA_CLOUD_ECS_METADATA=ci-role
+          EOF
+            cp -- "$candidate/deployment.env" "$active_deploy/deployment.env"
+            ln -s "$active_release" "$test_root/current"
+            cat >"$secrets/api.env" <<"EOF"
+          DATABASE_URL=postgresql://unused.invalid/unused
+          DATABASE_SSL_CA_BASE64=ci-placeholder
+          AUTH_HASH_ACTIVE_VERSION=hash.v1
+          AUTH_HASH_KEYS_JSON={"hash.v1":"ci-hash-material"}
+          AUTH_IDENTITY_DEDUP_KEY_VERSION=hash.v1
+          AUTH_OTP_PEPPER_ACTIVE_VERSION=otp.v1
+          AUTH_OTP_PEPPER_KEYS_JSON={"otp.v1":"ci-otp-material"}
+          ALIYUN_PNVS_SIGN_NAME=ci-sign
+          ALIYUN_PNVS_TEMPLATE_CODE=100001
+          SMTP_HOST=smtp.example.invalid
+          SMTP_PORT=465
+          SMTP_SECURE=true
+          SMTP_USERNAME=ci-user
+          SMTP_PASSWORD=ci-password
+          SMTP_FROM_ADDRESS=ci@example.invalid
+          SMTP_REPLY_TO=ci@example.invalid
+          SMTP_FROM_NAME=ci
+          EOF
+            cat >"$same_input" <<"EOF"
+          ACCOUNTS_ENABLED=true
+          PHONE_AUTH_ENABLED=true
+          EMAIL_AUTH_ENABLED=false
+          WECHAT_AUTH_ENABLED=false
+          QQ_AUTH_ENABLED=false
+          QQ_UNION_ID_ENABLED=false
+          ALIBABA_CLOUD_ECS_METADATA=ci-role
+          AUTH_HASH_ACTIVE_VERSION=hash.v1
+          AUTH_HASH_KEYS_JSON={"hash.v1":"ci-hash-material"}
+          AUTH_IDENTITY_DEDUP_KEY_VERSION=hash.v1
+          ALIYUN_PNVS_SIGN_NAME=ci-sign
+          ALIYUN_PNVS_TEMPLATE_CODE=100001
+          EOF
+            cat >"$changed_input" <<"EOF"
+          ACCOUNTS_ENABLED=true
+          PHONE_AUTH_ENABLED=true
+          EMAIL_AUTH_ENABLED=false
+          WECHAT_AUTH_ENABLED=false
+          QQ_AUTH_ENABLED=false
+          QQ_UNION_ID_ENABLED=false
+          ALIBABA_CLOUD_ECS_METADATA=ci-role
+          AUTH_HASH_ACTIVE_VERSION=hash.v1
+          AUTH_HASH_KEYS_JSON={"hash.v1":"ci-hash-material"}
+          AUTH_IDENTITY_DEDUP_KEY_VERSION=hash.v2
+          ALIYUN_PNVS_SIGN_NAME=ci-sign
+          ALIYUN_PNVS_TEMPLATE_CODE=100001
+          EOF
+            cat >"$email_input" <<"EOF"
+          ACCOUNTS_ENABLED=true
+          PHONE_AUTH_ENABLED=true
+          EMAIL_AUTH_ENABLED=true
+          WECHAT_AUTH_ENABLED=false
+          QQ_AUTH_ENABLED=false
+          QQ_UNION_ID_ENABLED=false
+          ALIBABA_CLOUD_ECS_METADATA=ci-role
+          AUTH_HASH_ACTIVE_VERSION=hash.v1
+          AUTH_HASH_KEYS_JSON={"hash.v1":"ci-hash-material"}
+          AUTH_IDENTITY_DEDUP_KEY_VERSION=hash.v1
+          ALIYUN_PNVS_SIGN_NAME=ci-sign
+          ALIYUN_PNVS_TEMPLATE_CODE=100001
+          AUTH_OTP_PEPPER_ACTIVE_VERSION=otp.v1
+          AUTH_OTP_PEPPER_KEYS_JSON={"otp.v1":"ci-otp-material"}
+          SMTP_HOST=smtp.example.invalid
+          SMTP_PORT=465
+          SMTP_SECURE=true
+          SMTP_USERNAME=ci-user
+          SMTP_APP_PASSWORD=ci-password
+          SMTP_FROM_ADDRESS=ci@example.invalid
+          SMTP_REPLY_TO=ci@example.invalid
+          SMTP_FROM_NAME=ci
+          EOF
+            qq_app_key_fixture="$(printf "%032d" 0)"
+            cat >"$qq_input" <<"EOF"
+          ACCOUNTS_ENABLED=true
+          PHONE_AUTH_ENABLED=true
+          EMAIL_AUTH_ENABLED=false
+          WECHAT_AUTH_ENABLED=false
+          QQ_AUTH_ENABLED=true
+          QQ_UNION_ID_ENABLED=false
+          ALIBABA_CLOUD_ECS_METADATA=ci-role
+          AUTH_HASH_ACTIVE_VERSION=hash.v1
+          AUTH_HASH_KEYS_JSON={"hash.v1":"ci-hash-material"}
+          AUTH_IDENTITY_DEDUP_KEY_VERSION=hash.v1
+          ALIYUN_PNVS_SIGN_NAME=ci-sign
+          ALIYUN_PNVS_TEMPLATE_CODE=100001
+          QQ_APP_ID=123456789
+          EOF
+            printf "QQ_APP_KEY=%s\n" "$qq_app_key_fixture" >>"$qq_input"
+            sed "s/^QQ_UNION_ID_ENABLED=false$/QQ_UNION_ID_ENABLED=true/" \
+              "$qq_input" >"$qq_union_input"
+            cp -- "$same_input" "$qq_marker_override_input"
+            printf "QQ_UNION_ID_NAMESPACE_INITIALIZED=true\n" >>"$qq_marker_override_input"
+            sed "/^QQ_APP_KEY=/d" "$qq_input" >"$qq_missing_key_input"
+            sed "s/^SMTP_APP_PASSWORD=/SMTP_PASSWORD=/" \
+              "$email_input" >"$runtime_password_input"
+            cp -- "$email_input" "$dual_password_input"
+            printf "SMTP_PASSWORD=forbidden-duplicate-runtime-name\n" >>"$dual_password_input"
+            sed \
+              -e "s/^AUTH_OTP_PEPPER_ACTIVE_VERSION=/EMAIL_OTP_PEPPER_ACTIVE_VERSION=/" \
+              -e "s/^AUTH_OTP_PEPPER_KEYS_JSON=/EMAIL_OTP_PEPPER_KEYS_JSON=/" \
+              "$email_input" >"$legacy_otp_input"
+            chown -R root:root "$test_root" "$same_input" "$changed_input" \
+              "$email_input" "$qq_input" "$qq_union_input" \
+              "$qq_marker_override_input" \
+              "$qq_missing_key_input" \
+              "$runtime_password_input" "$dual_password_input" \
+              "$legacy_otp_input" "$fake_bin"
+            find "$test_root" -type d -exec chmod 700 {} +
+            find "$test_root" -type f -exec chmod 600 {} +
+            chmod 600 "$same_input" "$changed_input" "$email_input" \
+              "$qq_input" "$qq_union_input" "$qq_missing_key_input" \
+              "$qq_marker_override_input" \
+              "$runtime_password_input" "$dual_password_input" "$legacy_otp_input"
+            chmod 700 "$candidate/scripts/update-auth-secrets.sh" \
+              "$candidate/scripts/preflight-deployment.sh" \
+              "$candidate/scripts/verify-runtime.sh" \
+              "$active_deploy/scripts/verify-runtime.sh" "$fake_bin/docker"
+            identity_before="$(grep -E "^(AUTH_HASH_ACTIVE_VERSION|AUTH_HASH_KEYS_JSON|AUTH_IDENTITY_DEDUP_KEY_VERSION)=" "$secrets/api.env")"
+            otp_before="$(grep -E "^(AUTH_OTP_PEPPER_ACTIVE_VERSION|AUTH_OTP_PEPPER_KEYS_JSON)=" "$secrets/api.env")"
+            export DOCKER_SENTINEL="$docker_sentinel"
+            export QQ_COUNT_SENTINEL="$qq_count_sentinel"
+            export PATH="$fake_bin:$PATH"
+            "$candidate/scripts/update-auth-secrets.sh" --apply --config-file "$same_input" >/dev/null
+            [[ "$(grep -E "^(AUTH_HASH_ACTIVE_VERSION|AUTH_HASH_KEYS_JSON|AUTH_IDENTITY_DEDUP_KEY_VERSION)=" "$secrets/api.env")" == "$identity_before" ]]
+            [[ "$(grep -E "^(AUTH_OTP_PEPPER_ACTIVE_VERSION|AUTH_OTP_PEPPER_KEYS_JSON)=" "$secrets/api.env")" == "$otp_before" ]]
+            ! grep -Eq "^SMTP_" "$secrets/api.env"
+            grep -Fxq "ACCOUNTS_ENABLED=true" "$candidate/deployment.env"
+            grep -Fxq "PHONE_AUTH_ENABLED=true" "$candidate/deployment.env"
+            grep -Fxq "EMAIL_AUTH_ENABLED=false" "$candidate/deployment.env"
+            marker_override_api_before="$(sha256sum "$secrets/api.env")"
+            marker_override_deployment_before="$(sha256sum "$candidate/deployment.env")"
+            rm -f -- "$docker_sentinel"
+            set +e
+            "$candidate/scripts/update-auth-secrets.sh" --apply --config-file "$qq_marker_override_input" >/dev/null 2>&1
+            marker_override_status=$?
+            set -e
+            [[ "$marker_override_status" -eq 2 ]]
+            [[ "$(sha256sum "$secrets/api.env")" == "$marker_override_api_before" ]]
+            [[ "$(sha256sum "$candidate/deployment.env")" == "$marker_override_deployment_before" ]]
+            [[ ! -e "$docker_sentinel" ]]
+            [[ ! -e "$qq_identity_state" ]]
+            ! grep -Eq "^QQ_UNION_ID_NAMESPACE_INITIALIZED=" "$candidate/deployment.env"
+
+            "$candidate/scripts/update-auth-secrets.sh" --apply --config-file "$email_input" >/dev/null
+            [[ "$(grep -E "^(AUTH_OTP_PEPPER_ACTIVE_VERSION|AUTH_OTP_PEPPER_KEYS_JSON)=" "$secrets/api.env")" == "$otp_before" ]]
+            grep -Fxq "SMTP_PASSWORD=ci-password" "$secrets/api.env"
+            ! grep -Eq "^SMTP_APP_PASSWORD=" "$secrets/api.env"
+            grep -Fxq "EMAIL_AUTH_ENABLED=true" "$candidate/deployment.env"
+            email_api_enabled="$(sha256sum "$secrets/api.env")"
+            email_deployment_enabled="$(sha256sum "$candidate/deployment.env")"
+
+            for rejected_input in \
+              "$runtime_password_input" "$dual_password_input" "$legacy_otp_input"; do
+              rm -f -- "$docker_sentinel"
+              set +e
+              "$candidate/scripts/update-auth-secrets.sh" --apply --config-file "$rejected_input" >/dev/null 2>&1
+              rejected_status=$?
+              set -e
+              [[ "$rejected_status" -eq 2 ]]
+              [[ "$(sha256sum "$secrets/api.env")" == "$email_api_enabled" ]]
+              [[ "$(sha256sum "$candidate/deployment.env")" == "$email_deployment_enabled" ]]
+              [[ ! -e "$docker_sentinel" ]]
+              ! compgen -G "$secrets/.api.env.*" >/dev/null
+              ! compgen -G "$candidate/.deployment.env.*" >/dev/null
+            done
+
+            qq_missing_key_api_before="$(sha256sum "$secrets/api.env")"
+            qq_missing_key_deployment_before="$(sha256sum "$candidate/deployment.env")"
+            rm -f -- "$docker_sentinel" "$qq_count_sentinel"
+            set +e
+            "$candidate/scripts/update-auth-secrets.sh" --apply --config-file "$qq_missing_key_input" >/dev/null 2>&1
+            qq_missing_key_status=$?
+            set -e
+            [[ "$qq_missing_key_status" -eq 2 ]]
+            [[ "$(sha256sum "$secrets/api.env")" == "$qq_missing_key_api_before" ]]
+            [[ "$(sha256sum "$candidate/deployment.env")" == "$qq_missing_key_deployment_before" ]]
+            [[ ! -e "$docker_sentinel" ]]
+            [[ ! -e "$qq_count_sentinel" ]]
+            [[ ! -e "$qq_identity_state" ]]
+
+            "$candidate/scripts/update-auth-secrets.sh" --apply --config-file "$same_input" >/dev/null
+            grep -Fxq "QQ_AUTH_ENABLED=false" "$candidate/deployment.env"
+            ! grep -Eq "^QQ_UNION_ID_NAMESPACE_INITIALIZED=" "$candidate/deployment.env"
+            [[ ! -e "$qq_identity_state" ]]
+            qq_before_identity_state_api="$(sha256sum "$secrets/api.env")"
+            qq_before_identity_state_deployment="$(sha256sum "$candidate/deployment.env")"
+            export QQ_BINDING_COUNT_FIXTURE=1
+            rm -f -- "$docker_sentinel" "$qq_count_sentinel"
+            set +e
+            qq_nonzero_output="$($candidate/scripts/update-auth-secrets.sh --apply --config-file "$qq_union_input" 2>&1)"
+            qq_nonzero_status=$?
+            set -e
+            [[ "$qq_nonzero_status" -eq 2 ]]
+            grep -Fq "QQ_BINDING_COUNT_BEFORE_IDENTITY_STATE_CHANGE=1" <<<"$qq_nonzero_output"
+            grep -Fq "QQ identity state initialization or UnionID promotion requires zero existing QQ bindings" <<<"$qq_nonzero_output"
+            [[ "$(sha256sum "$secrets/api.env")" == "$qq_before_identity_state_api" ]]
+            [[ "$(sha256sum "$candidate/deployment.env")" == "$qq_before_identity_state_deployment" ]]
+            [[ ! -e "$qq_identity_state" ]]
+            [[ -e "$docker_sentinel" ]]
+            [[ -e "$qq_count_sentinel" ]]
+            ! compgen -G "$test_root/shared/.auth-identity-state.candidate.*" >/dev/null
+
+            export QQ_BINDING_COUNT_FIXTURE=0
+            export PREFLIGHT_FAIL_FIXTURE=true
+            rm -f -- "$docker_sentinel" "$qq_count_sentinel"
+            set +e
+            qq_zero_output="$($candidate/scripts/update-auth-secrets.sh --apply --config-file "$qq_union_input" 2>&1)"
+            qq_zero_status=$?
+            set -e
+            unset PREFLIGHT_FAIL_FIXTURE
+            [[ "$qq_zero_status" -eq 3 ]]
+            grep -Fq "QQ_BINDING_COUNT_BEFORE_IDENTITY_STATE_CHANGE=0" <<<"$qq_zero_output"
+            grep -Fq "updated authentication configuration failed preflight and was rolled back" <<<"$qq_zero_output"
+            [[ "$(sha256sum "$secrets/api.env")" == "$qq_before_identity_state_api" ]]
+            [[ "$(sha256sum "$candidate/deployment.env")" == "$qq_before_identity_state_deployment" ]]
+            [[ "$(stat -c "%a:%u:%g" "$qq_identity_state")" == "600:0:0" ]]
+            cmp -s "$qq_identity_state" <(printf "AUTH_IDENTITY_STATE_FORMAT_VERSION=1\nQQ_OPEN_PLATFORM_REALM_ID=eatwhat-qq-primary\nQQ_UNION_ID_NAMESPACE_INITIALIZED=true\n")
+            ! grep -Eq "^QQ_UNION_ID_NAMESPACE_INITIALIZED=" "$candidate/deployment.env"
+            [[ -e "$qq_count_sentinel" ]]
+            ! compgen -G "$test_root/shared/.auth-identity-state.candidate.*" >/dev/null
+            qq_identity_state_true="$(sha256sum "$qq_identity_state")"
+
+            # This deployment intentionally has no historical marker. Shared true is authoritative.
+            export QQ_BINDING_COUNT_FIXTURE=1
+            rm -f -- "$docker_sentinel" "$qq_count_sentinel"
+            qq_recovery_output="$($candidate/scripts/update-auth-secrets.sh --apply --config-file "$qq_union_input")"
+            ! grep -Fq "QQ_BINDING_COUNT_BEFORE_IDENTITY_STATE_CHANGE=" <<<"$qq_recovery_output"
+            [[ ! -e "$qq_count_sentinel" ]]
+            [[ "$(sha256sum "$qq_identity_state")" == "$qq_identity_state_true" ]]
+            grep -Fxq "QQ_APP_ID=123456789" "$secrets/api.env"
+            grep -Fxq "QQ_APP_KEY=$qq_app_key_fixture" "$secrets/api.env"
+            grep -Fxq "QQ_AUTH_ENABLED=true" "$candidate/deployment.env"
+            grep -Fxq "QQ_UNION_ID_ENABLED=true" "$candidate/deployment.env"
+            ! grep -Eq "^QQ_UNION_ID_NAMESPACE_INITIALIZED=" "$candidate/deployment.env"
+
+            "$candidate/scripts/update-auth-secrets.sh" --disable >/dev/null
+            [[ "$(grep -E "^(AUTH_HASH_ACTIVE_VERSION|AUTH_HASH_KEYS_JSON|AUTH_IDENTITY_DEDUP_KEY_VERSION)=" "$secrets/api.env")" == "$identity_before" ]]
+            [[ "$(grep -E "^(AUTH_OTP_PEPPER_ACTIVE_VERSION|AUTH_OTP_PEPPER_KEYS_JSON)=" "$secrets/api.env")" == "$otp_before" ]]
+            ! grep -Eq "^(ALIYUN_PNVS_|SMTP_|WECHAT_|QQ_APP_(ID|KEY)|ALIYUN_SMS_|ALIYUN_FUSION_)" "$secrets/api.env"
+            grep -Fxq "AUTH_SCHEMA_TRANSITION_MODE=none" "$candidate/deployment.env"
+            for switch_name in ACCOUNTS_ENABLED PHONE_AUTH_ENABLED EMAIL_AUTH_ENABLED WECHAT_AUTH_ENABLED QQ_AUTH_ENABLED QQ_UNION_ID_ENABLED; do
+              grep -Fxq "$switch_name=false" "$candidate/deployment.env"
+            done
+            [[ "$(sha256sum "$qq_identity_state")" == "$qq_identity_state_true" ]]
+            ! grep -Eq "^QQ_UNION_ID_NAMESPACE_INITIALIZED=" "$candidate/deployment.env"
+
+            export QQ_BINDING_COUNT_FIXTURE=1
+            rm -f -- "$qq_count_sentinel"
+            qq_reenable_output="$($candidate/scripts/update-auth-secrets.sh --apply --config-file "$qq_union_input")"
+            ! grep -Fq "QQ_BINDING_COUNT_BEFORE_IDENTITY_STATE_CHANGE=" <<<"$qq_reenable_output"
+            [[ ! -e "$qq_count_sentinel" ]]
+            grep -Fxq "QQ_AUTH_ENABLED=true" "$candidate/deployment.env"
+            grep -Fxq "QQ_UNION_ID_ENABLED=true" "$candidate/deployment.env"
+            [[ "$(sha256sum "$qq_identity_state")" == "$qq_identity_state_true" ]]
+            ! grep -Eq "^QQ_UNION_ID_NAMESPACE_INITIALIZED=" "$candidate/deployment.env"
+            qq_union_reenabled_api="$(sha256sum "$secrets/api.env")"
+            qq_union_reenabled_deployment="$(sha256sum "$candidate/deployment.env")"
+            rm -f -- "$docker_sentinel" "$qq_count_sentinel"
+            set +e
+            qq_nonunion_output="$($candidate/scripts/update-auth-secrets.sh --apply --config-file "$qq_input" 2>&1)"
+            qq_nonunion_status=$?
+            set -e
+            [[ "$qq_nonunion_status" -eq 2 ]]
+            grep -Fq "initialized QQ UnionID namespace requires UnionID whenever QQ authentication is enabled" <<<"$qq_nonunion_output"
+            [[ "$(sha256sum "$secrets/api.env")" == "$qq_union_reenabled_api" ]]
+            [[ "$(sha256sum "$candidate/deployment.env")" == "$qq_union_reenabled_deployment" ]]
+            [[ "$(sha256sum "$qq_identity_state")" == "$qq_identity_state_true" ]]
+            [[ ! -e "$docker_sentinel" ]]
+            [[ ! -e "$qq_count_sentinel" ]]
+
+            "$candidate/scripts/update-auth-secrets.sh" --disable >/dev/null
+            [[ "$(sha256sum "$qq_identity_state")" == "$qq_identity_state_true" ]]
+            ! grep -Eq "^QQ_UNION_ID_NAMESPACE_INITIALIZED=" "$candidate/deployment.env"
+            api_disabled="$(sha256sum "$secrets/api.env")"
+            deployment_disabled="$(sha256sum "$candidate/deployment.env")"
+            identity_state_disabled="$(sha256sum "$qq_identity_state")"
+            rm -f -- "$docker_sentinel"
+            set +e
+            mismatch_output="$($candidate/scripts/update-auth-secrets.sh --apply --config-file "$changed_input" 2>&1)"
+            mismatch_status=$?
+            set -e
+            [[ "$mismatch_status" -eq 2 ]]
+            [[ "$mismatch_output" == "reenabling disabled accounts must preserve authentication identity/session continuity: AUTH_IDENTITY_DEDUP_KEY_VERSION" ]]
+            [[ "$(sha256sum "$secrets/api.env")" == "$api_disabled" ]]
+            [[ "$(sha256sum "$candidate/deployment.env")" == "$deployment_disabled" ]]
+            [[ "$(sha256sum "$qq_identity_state")" == "$identity_state_disabled" ]]
+            [[ ! -e "$docker_sentinel" ]]
+            ! compgen -G "$secrets/.api.env.*" >/dev/null
+            ! compgen -G "$candidate/.deployment.env.*" >/dev/null
+            "$candidate/scripts/update-auth-secrets.sh" --apply --config-file "$same_input" >/dev/null
+            [[ -e "$docker_sentinel" ]]
+            [[ "$(grep -E "^(AUTH_HASH_ACTIVE_VERSION|AUTH_HASH_KEYS_JSON|AUTH_IDENTITY_DEDUP_KEY_VERSION)=" "$secrets/api.env")" == "$identity_before" ]]
+            [[ "$(grep -E "^(AUTH_OTP_PEPPER_ACTIVE_VERSION|AUTH_OTP_PEPPER_KEYS_JSON)=" "$secrets/api.env")" == "$otp_before" ]]
+            grep -Fxq "ACCOUNTS_ENABLED=true" "$candidate/deployment.env"
+            grep -Fxq "PHONE_AUTH_ENABLED=true" "$candidate/deployment.env"
+            [[ "$(sha256sum "$qq_identity_state")" == "$qq_identity_state_true" ]]
+            ! grep -Eq "^QQ_UNION_ID_NAMESPACE_INITIALIZED=" "$candidate/deployment.env"
+            grep -Fq "release must preserve the shared QQ Open Platform realm" \
+              "$REPOSITORY_ROOT/infra/ecs/scripts/preflight-deployment.sh"
+          '
       - uses: pnpm/action-setup@v4
         with:
           version: 11.17.0
@@ -26,6 +626,82 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      - name: Verify UnionID bridge and WeChat realm configuration fixtures
+        run: |
+          node --input-type=module <<'NODE'
+          import { loadAuthRuntimeConfig } from "./apps/api/dist/auth/auth-config.js";
+          import { loadDatabaseConfig } from "./apps/api/dist/database/database-config.js";
+
+          const pending = loadDatabaseConfig({
+            DATABASE_ENABLED: "false",
+            AUTH_SCHEMA_TRANSITION_MODE: "wechat_union_aliases_pending",
+            WECHAT_AUTH_ENABLED: "false",
+          }, "test");
+          if (pending.authSchemaTransitionMode !== "wechat_union_aliases_pending") {
+            throw new Error("UnionID bridge mode was not retained");
+          }
+          let unsafePendingRejected = false;
+          try {
+            loadDatabaseConfig({
+              DATABASE_ENABLED: "false",
+              AUTH_SCHEMA_TRANSITION_MODE: "wechat_union_aliases_pending",
+              WECHAT_AUTH_ENABLED: "true",
+            }, "test");
+          } catch (error) {
+            unsafePendingRejected = String(error).includes(
+              "wechat_union_aliases_pending 时必须关闭 WECHAT_AUTH_ENABLED",
+            );
+          }
+          if (!unsafePendingRejected) {
+            throw new Error("UnionID bridge mode accepted enabled WeChat authentication");
+          }
+
+          const hashKey = Buffer.alloc(32, 9).toString("base64");
+          const validWechat = {
+            PHONE_AUTH_ENABLED: "true",
+            EMAIL_AUTH_ENABLED: "false",
+            WECHAT_AUTH_ENABLED: "true",
+            QQ_AUTH_ENABLED: "false",
+            QQ_UNION_ID_ENABLED: "false",
+            AUTH_HASH_ACTIVE_VERSION: "hash.v1",
+            AUTH_HASH_KEYS_JSON: JSON.stringify({ "hash.v1": hashKey }),
+            AUTH_IDENTITY_DEDUP_KEY_VERSION: "hash.v1",
+            ALIYUN_CREDENTIAL_ALLOWED_PROVIDER: "default/ecs_ram_role",
+            ALIYUN_PNVS_SIGN_NAME: "吃什么",
+            ALIYUN_PNVS_TEMPLATE_CODE: "100001",
+            WECHAT_APP_ID: "wx0123456789abcdef",
+            WECHAT_APP_SECRET: "ci-placeholder-not-a-real-secret",
+            WECHAT_OPEN_PLATFORM_REALM_ID: "eatwhat-primary",
+          };
+          const options = {
+            accountsEnabled: true,
+            databaseEnabled: true,
+            production: true,
+          };
+          const configured = loadAuthRuntimeConfig(validWechat, options);
+          if (
+            !configured.wechat.enabled ||
+            configured.wechat.openPlatformRealmId !== "eatwhat-primary"
+          ) {
+            throw new Error("enabled WeChat configuration lost its Open Platform realm");
+          }
+          for (const invalid of [
+            Object.fromEntries(
+              Object.entries(validWechat).filter(
+                ([name]) => name !== "WECHAT_OPEN_PLATFORM_REALM_ID",
+              ),
+            ),
+            { ...validWechat, WECHAT_OPEN_PLATFORM_REALM_ID: "EatWhat-Primary" },
+          ]) {
+            let rejected = false;
+            try {
+              loadAuthRuntimeConfig(invalid, options);
+            } catch {
+              rejected = true;
+            }
+            if (!rejected) throw new Error("invalid WeChat realm configuration was accepted");
+          }
+          NODE
 
   postgres-integration:
     runs-on: ubuntu-24.04
@@ -122,7 +798,7 @@ jobs:
           fi
           export PGUSER=postgres PGPASSWORD=ci-bootstrap-password
           psql -X -v ON_ERROR_STOP=1 -c \
-            "GRANT UPDATE (destination_hash) ON public.otp_challenges TO api_runtime"
+            "GRANT UPDATE (destination_hash) ON public.otp_challenges TO api_runtime; GRANT SELECT ON public.users TO PUBLIC; GRANT UPDATE (destination_hash) ON public.otp_challenges TO PUBLIC"
           export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
           psql -X -v migration_owner=schema_migrator \
             -v runtime_role=api_runtime -v maintenance_role=retention_worker \
@@ -130,7 +806,37 @@ jobs:
             -f infra/postgres/role-grants.sql
           export PGUSER=postgres PGPASSWORD=ci-bootstrap-password
           test "$(psql -X -At -c "SELECT has_column_privilege('api_runtime','public.otp_challenges','destination_hash','UPDATE')")" = "f"
+          test "$(psql -X -At -c "SELECT has_table_privilege('retention_worker','public.users','SELECT')")" = "f"
+          test "$(psql -X -At -c "SELECT has_column_privilege('retention_worker','public.otp_challenges','destination_hash','UPDATE')")" = "f"
           test "$(psql -X -At -c "SELECT has_table_privilege('api_runtime','public.users','SELECT')")" = "t"
+          test "$(psql -X -At -c "SELECT count(*) || '|' || max(version) || '|' || max(name) FILTER (WHERE version=12) FROM public.schema_migrations")" = "12|12|wechat_union_aliases"
+          for role in api_runtime retention_worker admin_api_runtime data_export_worker; do
+            test "$(psql -X -At -c "SELECT count(*) FROM unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) AS checked(privilege_name) WHERE has_table_privilege('$role','public.wechat_union_aliases',privilege_name)")" = "0"
+            test "$(psql -X -At -c "SELECT count(*) FROM unnest(ARRAY['SELECT','INSERT','UPDATE','REFERENCES']) AS checked(privilege_name) WHERE has_any_column_privilege('$role','public.wechat_union_aliases',privilege_name)")" = "0"
+          done
+          test "$(psql -X -At -c "SELECT count(*) FROM pg_class AS relation CROSS JOIN LATERAL aclexplode(COALESCE(relation.relacl,acldefault('r',relation.relowner))) AS acl WHERE relation.oid='public.wechat_union_aliases'::regclass AND acl.grantee=0")" = "0"
+          for function_name in \
+            'public.consume_oauth_state_with_wechat_union(uuid,character varying,character varying,character varying,character varying,uuid,character varying,character varying,character varying,character varying,character varying,character varying,character varying,character varying)' \
+            'public.record_wechat_union_alias_from_consumed_state(uuid,uuid)' \
+            'public.bind_oauth_identity_with_wechat_union_from_consumed_state(uuid,uuid,character varying,character varying,character varying,character varying)'; do
+            test "$(psql -X -At -c "SELECT has_function_privilege('api_runtime','$function_name','EXECUTE')")" = "t"
+            for forbidden_role in retention_worker admin_api_runtime data_export_worker; do
+              test "$(psql -X -At -c "SELECT has_function_privilege('$forbidden_role','$function_name','EXECUTE')")" = "f"
+            done
+            test "$(psql -X -At -c "SELECT count(*) FROM pg_proc AS procedure CROSS JOIN LATERAL aclexplode(COALESCE(procedure.proacl,acldefault('f',procedure.proowner))) AS acl WHERE procedure.oid='$function_name'::regprocedure AND acl.grantee=0 AND acl.privilege_type='EXECUTE'")" = "0"
+          done
+          for function_name in \
+            'public.preview_fusion_auth_retention_cleanup()' \
+            'public.execute_fusion_auth_retention_cleanup()'; do
+            test "$(psql -X -At -c "SELECT has_function_privilege('retention_worker','$function_name','EXECUTE')")" = "t"
+            for forbidden_role in api_runtime admin_api_runtime data_export_worker; do
+              test "$(psql -X -At -c "SELECT has_function_privilege('$forbidden_role','$function_name','EXECUTE')")" = "f"
+            done
+          done
+          export PGUSER=retention_worker PGPASSWORD=ci-maintenance-password
+          test "$(psql -X -At -c "SELECT policy_code || '|' || affected_count FROM public.preview_fusion_auth_retention_cleanup()")" = "FUSION_AUTH_24H|0"
+          test "$(psql -X -At -c "SELECT policy_code || '|' || affected_count FROM public.execute_fusion_auth_retention_cleanup()")" = "FUSION_AUTH_24H|0"
+          export PGUSER=postgres PGPASSWORD=ci-bootstrap-password
           sed 's/public.coverage_areas/public.deliberately_missing_relation/' \
             infra/postgres/role-grants.sql >/tmp/failing-role-grants.sql
           export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
@@ -143,7 +849,284 @@ jobs:
           fi
           export PGUSER=postgres PGPASSWORD=ci-bootstrap-password
           test "$(psql -X -At -c "SELECT has_table_privilege('api_runtime','public.users','SELECT')")" = "t"
-      - name: Prove fusion VerifyToken replay claims are serial and concurrent safe
+      - name: Exercise atomic WeChat UnionID alias persistence and conflicts
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: "5432"
+          PGDATABASE: chi_shen_me_ci
+        run: |
+          set -euo pipefail
+          export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          INSERT INTO public.users (id) VALUES
+            ('14700000-0000-4000-8000-000000000001'),
+            ('14700000-0000-4000-8000-000000000002');
+          SQL
+
+          export PGUSER=api_runtime PGPASSWORD=ci-runtime-password
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          INSERT INTO public.oauth_states (
+            id, provider, purpose, state_hash, state_hash_algorithm,
+            flow_reference_hash, operation_target_hash, target_user_id,
+            device_hash, hash_key_version, expires_at, retain_until
+          ) VALUES (
+            '14800000-0000-4000-8000-000000000001','WECHAT','BIND',
+            repeat('0',63)||'1','HMAC-SHA256',repeat('0',63)||'2',
+            repeat('0',63)||'3','14700000-0000-4000-8000-000000000001',
+            repeat('0',63)||'4','ci-v1',now()+interval '10 minutes',
+            now()+interval '1 hour'
+          );
+          SELECT public.consume_oauth_state_with_wechat_union(
+            '14800000-0000-4000-8000-000000000001','WECHAT','BIND',
+            repeat('0',63)||'2',repeat('0',63)||'3',
+            '14700000-0000-4000-8000-000000000001',repeat('0',63)||'4',
+            repeat('0',63)||'5','ci-v1',repeat('0',63)||'6','ci-dedup-v1',
+            'eatwhat-primary',repeat('0',63)||'7','ci-union-v1'
+          ) AS first_consumed \gset
+          \if :first_consumed
+          \else
+            DO $ci_fail$ BEGIN RAISE EXCEPTION 'first WeChat UnionID proof was not consumed'; END $ci_fail$;
+          \endif
+          SELECT public.bind_oauth_identity_with_wechat_union_from_consumed_state(
+            '14700000-0000-4000-8000-000000000001',
+            '14800000-0000-4000-8000-000000000001','WECHAT',
+            repeat('0',63)||'2',repeat('0',63)||'3',repeat('0',63)||'4'
+          ) IS NOT NULL AS first_bound \gset
+          \if :first_bound
+          \else
+            DO $ci_fail$ BEGIN RAISE EXCEPTION 'first WeChat UnionID binding failed'; END $ci_fail$;
+          \endif
+          SELECT id::text AS first_binding_id
+            FROM public.identity_bindings
+            WHERE user_id='14700000-0000-4000-8000-000000000001'
+              AND identity_type='WECHAT' AND lookup_hash=repeat('0',63)||'5'
+              AND revoked_at IS NULL \gset
+          SELECT public.record_wechat_union_alias_from_consumed_state(
+            '14800000-0000-4000-8000-000000000001', :'first_binding_id'::uuid
+          ) AS same_alias_recorded \gset
+          \if :same_alias_recorded
+          \else
+            DO $ci_fail$ BEGIN RAISE EXCEPTION 'same verified UnionID alias was not idempotent'; END $ci_fail$;
+          \endif
+
+          INSERT INTO public.oauth_states (
+            id, provider, purpose, state_hash, state_hash_algorithm,
+            flow_reference_hash, operation_target_hash, target_user_id,
+            device_hash, hash_key_version, expires_at, retain_until
+          ) VALUES (
+            '14800000-0000-4000-8000-000000000002','WECHAT','BIND',
+            repeat('1',63)||'1','HMAC-SHA256',repeat('1',63)||'2',
+            repeat('1',63)||'3','14700000-0000-4000-8000-000000000002',
+            repeat('1',63)||'4','ci-v1',now()+interval '10 minutes',
+            now()+interval '1 hour'
+          );
+          SELECT public.consume_oauth_state_with_wechat_union(
+            '14800000-0000-4000-8000-000000000002','WECHAT','BIND',
+            repeat('1',63)||'2',repeat('1',63)||'3',
+            '14700000-0000-4000-8000-000000000002',repeat('1',63)||'4',
+            repeat('1',63)||'5','ci-v1',repeat('1',63)||'6','ci-dedup-v1',
+            'eatwhat-primary',repeat('0',63)||'7','ci-union-v1'
+          ) AS conflicting_consumed \gset
+          \if :conflicting_consumed
+          \else
+            DO $ci_fail$ BEGIN RAISE EXCEPTION 'conflicting WeChat UnionID proof was not sealed'; END $ci_fail$;
+          \endif
+          SELECT public.bind_oauth_identity_with_wechat_union_from_consumed_state(
+            '14700000-0000-4000-8000-000000000002',
+            '14800000-0000-4000-8000-000000000002','WECHAT',
+            repeat('1',63)||'2',repeat('1',63)||'3',repeat('1',63)||'4'
+          ) IS NULL AS conflict_rejected \gset
+          \if :conflict_rejected
+          \else
+            DO $ci_fail$ BEGIN RAISE EXCEPTION 'one UnionID alias was assigned to two users'; END $ci_fail$;
+          \endif
+          SQL
+
+          if psql -X -v ON_ERROR_STOP=1 -c \
+            "SELECT count(*) FROM public.wechat_union_aliases" >/tmp/union-alias-runtime-read.log 2>&1; then
+            echo "API runtime can read raw WeChat UnionID alias hashes" >&2
+            exit 1
+          fi
+
+          export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM public.wechat_union_aliases WHERE realm_id='eatwhat-primary' AND union_hash=repeat('0',63)||'7' AND user_id='14700000-0000-4000-8000-000000000001'")" = "1"
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM public.identity_bindings WHERE user_id='14700000-0000-4000-8000-000000000002' AND identity_type='WECHAT'")" = "0"
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM public.oauth_states WHERE id='14800000-0000-4000-8000-000000000002' AND binding_claimed_at IS NULL")" = "1"
+
+          first_binding_id="$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT identity_binding_id FROM public.wechat_union_aliases WHERE user_id='14700000-0000-4000-8000-000000000001'")"
+          export PGUSER=api_runtime PGPASSWORD=ci-runtime-password
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT public.revoke_non_primary_identity_binding('$first_binding_id','14700000-0000-4000-8000-000000000001')")" = "t"
+          export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM public.wechat_union_aliases WHERE identity_binding_id='$first_binding_id'")" = "1"
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM public.identity_bindings WHERE id='$first_binding_id' AND revoked_at IS NOT NULL")" = "1"
+      - name: Exercise schema 0010 ACL restore, 0011 PHONE and 0012 UnionID grants
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: "5432"
+          LEGACY_DATABASE_URL: postgresql://schema_migrator:ci-migrator-password@127.0.0.1:5432/chi_shen_me_legacy_acl_ci?sslmode=disable
+        run: |
+          set -euo pipefail
+          export PGUSER=postgres PGPASSWORD=ci-bootstrap-password PGDATABASE=postgres
+          psql -X -v ON_ERROR_STOP=1 -c \
+            "CREATE DATABASE chi_shen_me_legacy_acl_ci OWNER schema_migrator TEMPLATE template0 ENCODING 'UTF8'"
+          export PGDATABASE=chi_shen_me_legacy_acl_ci
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          ALTER SCHEMA public OWNER TO schema_migrator;
+          GRANT CONNECT ON DATABASE chi_shen_me_legacy_acl_ci
+            TO schema_migrator, api_runtime, retention_worker,
+               admin_api_runtime, data_export_worker;
+          SQL
+          psql -X -v migration_owner=schema_migrator \
+            -v runtime_role=api_runtime -v maintenance_role=retention_worker \
+            -f infra/postgres/bootstrap-extensions.sql
+          pnpm --filter @chi-shen-me/api exec node --input-type=module <<'NODE'
+          import { Client } from "pg";
+          import { loadMigrationPlan } from "./dist/database/migration-plan.js";
+          import { runMigrationsWithClient } from "./dist/database/migration-runner.js";
+          const client = new Client({ connectionString: process.env.LEGACY_DATABASE_URL });
+          await client.connect();
+          try {
+            const plan = await loadMigrationPlan();
+            const result = await runMigrationsWithClient(client, plan.slice(0, 10));
+            if (result.currentVersion !== 10) throw new Error("legacy migration did not stop at 0010");
+          } finally {
+            await client.end();
+          }
+          NODE
+          export PGUSER=postgres PGPASSWORD=ci-bootstrap-password
+          psql -X -v ON_ERROR_STOP=1 -c \
+            "GRANT SELECT ON public.users TO PUBLIC; GRANT UPDATE (destination_hash) ON public.otp_challenges TO PUBLIC"
+          export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
+          psql -X -v migration_owner=schema_migrator \
+            -v runtime_role=api_runtime -v maintenance_role=retention_worker \
+            -v admin_runtime_role=admin_api_runtime -v export_worker_role=data_export_worker \
+            -f infra/postgres/role-grants.sql
+          psql -X -v migration_owner=schema_migrator \
+            -v runtime_role=api_runtime -v maintenance_role=retention_worker \
+            -v admin_runtime_role=admin_api_runtime -v export_worker_role=data_export_worker \
+            -f infra/postgres/role-grants.sql
+          export PGUSER=postgres PGPASSWORD=ci-bootstrap-password
+          test "$(psql -X -At -c "SELECT count(*) || '|' || max(version) || '|' || max(name) FILTER (WHERE version=10) FROM public.schema_migrations")" = "10|10|fusion_phone_auth"
+          test "$(psql -X -At -c "SELECT has_table_privilege('api_runtime','public.fusion_auth_flows','SELECT')")" = "t"
+          test "$(psql -X -At -c "SELECT has_table_privilege('retention_worker','public.users','SELECT')")" = "f"
+          test "$(psql -X -At -c "SELECT has_column_privilege('retention_worker','public.otp_challenges','destination_hash','UPDATE')")" = "f"
+          for legacy_function in \
+            'public.bind_qq_identity_from_consumed_oauth_state(uuid,uuid,character varying,character varying,character varying)' \
+            'public.register_phone_wechat_account(uuid,uuid,uuid,character varying,character varying)' \
+            'public.register_fusion_phone_wechat_account(uuid,uuid,uuid,character varying,character varying)'; do
+            test "$(psql -X -At -c "SELECT has_function_privilege('api_runtime','$legacy_function','EXECUTE')")" = "t"
+          done
+          test -z "$(psql -X -At -c "SELECT to_regprocedure('public.claim_otp_verification_lease(uuid,character varying,uuid,character varying,character varying,character varying,timestamp with time zone)')")"
+
+          export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          INSERT INTO public.otp_challenges (
+            id, channel, purpose, destination_hash, destination_hash_algorithm,
+            destination_hash_key_version, destination_dedup_hash,
+            destination_dedup_hash_algorithm, destination_dedup_key_version,
+            masked_destination, registration_flow_reference_hash,
+            code_hash, code_hash_algorithm, code_hash_key_version,
+            idempotency_key_hash, hash_key_version, request_ip_hash, device_hash,
+            retain_until
+          ) VALUES (
+            '14200000-0000-4000-8000-000000000001','PHONE','REGISTER',repeat('1',64),
+            'HMAC-SHA256','ci-v1',repeat('2',64),'HMAC-SHA256','ci-dedup-v1',
+            '+86138****0010',repeat('3',64),repeat('4',64),'ARGON2ID-PEPPERED',
+            'ci-v1',repeat('5',64),'ci-v1',repeat('6',64),repeat('7',64),
+            now()+interval '1 day'
+          );
+          SELECT public.finalize_otp_delivery(
+            '14200000-0000-4000-8000-000000000001','SENT',repeat('8',64),
+            now()+interval '5 minutes'
+          );
+          SELECT public.record_otp_verification_attempt(
+            '14200000-0000-4000-8000-000000000001','REGISTER',NULL,NULL,
+            repeat('7',64),true
+          );
+          BEGIN;
+          SELECT set_config('chi_shen_me.otp_state_transition','enabled',true);
+          UPDATE public.otp_challenges
+            SET expires_at=consumed_at+interval '1 millisecond'
+            WHERE id='14200000-0000-4000-8000-000000000001';
+          COMMIT;
+          SELECT pg_sleep(0.01);
+          SQL
+          pnpm --filter @chi-shen-me/api exec node --input-type=module <<'NODE'
+          import { Client } from "pg";
+          import { loadMigrationPlan } from "./dist/database/migration-plan.js";
+          import { runMigrationsWithClient } from "./dist/database/migration-runner.js";
+          const client = new Client({ connectionString: process.env.LEGACY_DATABASE_URL });
+          await client.connect();
+          try {
+            const plan = await loadMigrationPlan();
+            const result = await runMigrationsWithClient(client, plan.slice(0, 11));
+            if (result.currentVersion !== 11) throw new Error("cutover migration did not reach 0011");
+          } finally {
+            await client.end();
+          }
+          NODE
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$
+          DECLARE legacy public.otp_challenges%ROWTYPE;
+          BEGIN
+            SELECT * INTO legacy FROM public.otp_challenges
+              WHERE id='14200000-0000-4000-8000-000000000001';
+            IF legacy.verification_method <> 'LEGACY_INVALIDATED'
+              OR legacy.delivery_status <> 'FAILED'
+              OR legacy.code_hash IS NOT NULL
+              OR legacy.provider_request_hash IS NOT NULL
+              OR legacy.sent_at IS NOT NULL OR legacy.expires_at IS NOT NULL
+              OR legacy.consumed_at IS NULL
+              OR legacy.registration_claimed_at IS NOT NULL THEN
+              RAISE EXCEPTION 'legacy PHONE proof was not safely invalidated';
+            END IF;
+            IF public.register_phone_account_from_consumed_otp(
+              '14200000-0000-4000-8000-000000000002', legacy.id, legacy.device_hash
+            ) THEN RAISE EXCEPTION 'legacy PHONE proof remained redeemable'; END IF;
+          END $$;
+          SQL
+          if psql -X -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO public.otp_challenges (channel,purpose,destination_hash,destination_hash_algorithm,destination_hash_key_version,destination_dedup_hash,destination_dedup_hash_algorithm,destination_dedup_key_version,masked_destination,registration_flow_reference_hash,verification_method,idempotency_key_hash,hash_key_version,request_ip_hash,device_hash,retain_until) VALUES ('PHONE','REGISTER',repeat('a',64),'HMAC-SHA256','ci-v1',repeat('b',64),'HMAC-SHA256','ci-dedup-v1','+86138****0011',repeat('c',64),'LEGACY_INVALIDATED',repeat('d',64),'ci-v1',repeat('e',64),repeat('f',64),now()+interval '1 day')" >/tmp/legacy-sentinel-insert.log 2>&1; then
+            echo "schema 0011 accepted a newly inserted legacy sentinel" >&2
+            exit 1
+          fi
+          psql -X -v migration_owner=schema_migrator \
+            -v runtime_role=api_runtime -v maintenance_role=retention_worker \
+            -v admin_runtime_role=admin_api_runtime -v export_worker_role=data_export_worker \
+            -f infra/postgres/role-grants.sql
+          export PGUSER=postgres PGPASSWORD=ci-bootstrap-password
+          test "$(psql -X -At -c "SELECT count(*) || '|' || max(version) || '|' || max(name) FILTER (WHERE version=11) FROM public.schema_migrations")" = "11|11|phone_only_auth"
+          test "$(psql -X -At -c "SELECT has_table_privilege('api_runtime','public.fusion_auth_flows','SELECT')")" = "f"
+          test "$(psql -X -At -c "SELECT has_function_privilege('api_runtime','public.register_phone_account_from_consumed_otp(uuid,uuid,character varying)','EXECUTE')")" = "t"
+          test "$(psql -X -At -c "SELECT to_regclass('public.wechat_union_aliases') IS NULL")" = "t"
+          test -z "$(psql -X -At -c "SELECT to_regprocedure('public.consume_oauth_state_with_wechat_union(uuid,character varying,character varying,character varying,character varying,uuid,character varying,character varying,character varying,character varying,character varying,character varying,character varying,character varying)')")"
+
+          pnpm --filter @chi-shen-me/api exec node --input-type=module <<'NODE'
+          import { Client } from "pg";
+          import { loadMigrationPlan } from "./dist/database/migration-plan.js";
+          import { runMigrationsWithClient } from "./dist/database/migration-runner.js";
+          const client = new Client({ connectionString: process.env.LEGACY_DATABASE_URL });
+          await client.connect();
+          try {
+            const result = await runMigrationsWithClient(client, await loadMigrationPlan());
+            if (result.currentVersion !== 12) throw new Error("UnionID migration did not reach 0012");
+          } finally {
+            await client.end();
+          }
+          NODE
+          export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
+          psql -X -v migration_owner=schema_migrator \
+            -v runtime_role=api_runtime -v maintenance_role=retention_worker \
+            -v admin_runtime_role=admin_api_runtime -v export_worker_role=data_export_worker \
+            -f infra/postgres/role-grants.sql
+          export PGUSER=postgres PGPASSWORD=ci-bootstrap-password
+          test "$(psql -X -At -c "SELECT count(*) || '|' || max(version) || '|' || max(name) FILTER (WHERE version=12) FROM public.schema_migrations")" = "12|12|wechat_union_aliases"
+          test "$(psql -X -At -c "SELECT to_regclass('public.wechat_union_aliases') IS NOT NULL")" = "t"
+          test "$(psql -X -At -c "SELECT has_table_privilege('api_runtime','public.wechat_union_aliases','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')")" = "f"
+          test "$(psql -X -At -c "SELECT has_function_privilege('api_runtime','public.consume_oauth_state_with_wechat_union(uuid,character varying,character varying,character varying,character varying,uuid,character varying,character varying,character varying,character varying,character varying,character varying,character varying,character varying)','EXECUTE')")" = "t"
+          test "$(psql -X -At -c "SELECT has_function_privilege('api_runtime','public.record_wechat_union_alias_from_consumed_state(uuid,uuid)','EXECUTE')")" = "t"
+          test "$(psql -X -At -c "SELECT has_function_privilege('api_runtime','public.bind_oauth_identity_with_wechat_union_from_consumed_state(uuid,uuid,character varying,character varying,character varying,character varying)','EXECUTE')")" = "t"
+      - name: Exercise PNVS verification leases and PHONE_ONLY registration
         env:
           PGHOST: 127.0.0.1
           PGPORT: "5432"
@@ -151,66 +1134,214 @@ jobs:
           PGUSER: api_runtime
           PGPASSWORD: ci-runtime-password
         run: |
+          set -euo pipefail
           psql -X -v ON_ERROR_STOP=1 <<'SQL'
-          INSERT INTO public.fusion_auth_flows (
-            id, purpose, request_ip_hash, device_hash, hash_key_version,
-            created_at, expires_at, retain_until
+          INSERT INTO public.otp_challenges (
+            id, channel, purpose, destination_hash, destination_hash_algorithm,
+            destination_hash_key_version, destination_dedup_hash,
+            destination_dedup_hash_algorithm, destination_dedup_key_version,
+            masked_destination, registration_flow_reference_hash,
+            verification_method, code_hash, code_hash_algorithm,
+            code_hash_key_version, idempotency_key_hash, hash_key_version,
+            request_ip_hash, device_hash, retain_until
           ) VALUES
-            ('14100000-0000-4000-8000-000000000001', 'LOGIN', repeat('1',64), repeat('2',64), 'flow-v1', now(), now()+interval '5 minutes', now()+interval '24 hours'),
-            ('14100000-0000-4000-8000-000000000002', 'LOGIN', repeat('3',64), repeat('4',64), 'flow-v2', now(), now()+interval '5 minutes', now()+interval '24 hours');
-          SELECT public.claim_fusion_auth_verify_token(
-            '14100000-0000-4000-8000-000000000001', 'LOGIN', repeat('2',64),
-            'flow-v1', ARRAY[repeat('a',64),repeat('b',64)]::varchar[],
-            ARRAY['replay-v1','replay-v2']::varchar[], repeat('a',64), 'replay-v1'
+            ('14100000-0000-4000-8000-000000000001','PHONE','REGISTER',repeat('a',64),
+             'HMAC-SHA256','ci-v1',repeat('b',64),'HMAC-SHA256','ci-dedup-v1',
+             '+86138****1001',repeat('c',64),'ALIYUN_PNVS',NULL,NULL,NULL,
+             encode(digest('ci-resend-old','sha256'),'hex'),'ci-v1',repeat('d',64),
+             repeat('1',64),now()+interval '1 day'),
+            ('14100000-0000-4000-8000-000000000002','PHONE','LOGIN',repeat('a',64),
+             'HMAC-SHA256','ci-v1',repeat('b',64),'HMAC-SHA256','ci-dedup-v1',
+             '+86138****1001',NULL,'ALIYUN_PNVS',NULL,NULL,NULL,
+             encode(digest('ci-resend-new','sha256'),'hex'),'ci-v1',repeat('e',64),
+             repeat('2',64),now()+interval '1 day'),
+            ('14100000-0000-4000-8000-000000000003','PHONE','LOGIN',repeat('3',64),
+             'HMAC-SHA256','ci-v1',repeat('4',64),'HMAC-SHA256','ci-dedup-v1',
+             '+86138****1003',NULL,'ALIYUN_PNVS',NULL,NULL,NULL,
+             encode(digest('ci-resend-other','sha256'),'hex'),'ci-v1',repeat('5',64),
+             repeat('6',64),now()+interval '1 day'),
+            ('14100000-0000-4000-8000-000000000004','EMAIL','LOGIN',repeat('7',64),
+             'HMAC-SHA256','ci-v1',repeat('b',64),'HMAC-SHA256','ci-dedup-v1',
+             'a***@example.com',NULL,'LOCAL_HASH',repeat('8',64),
+             'ARGON2ID-PEPPERED','ci-v1',
+             encode(digest('ci-resend-email','sha256'),'hex'),'ci-v1',repeat('9',64),
+             repeat('a',64),now()+interval '1 day');
+          DO $$ BEGIN
+            IF NOT public.finalize_otp_delivery(
+              '14100000-0000-4000-8000-000000000001','SENT',repeat('a',64),
+              now()+interval '5 minutes'
+            ) OR NOT public.finalize_otp_delivery(
+              '14100000-0000-4000-8000-000000000003','SENT',repeat('b',64),
+              now()+interval '5 minutes'
+            ) OR NOT public.finalize_otp_delivery(
+              '14100000-0000-4000-8000-000000000004','SENT',repeat('c',64),
+              now()+interval '5 minutes'
+            ) THEN RAISE EXCEPTION 'resend setup delivery failed'; END IF;
+            IF NOT public.claim_otp_verification_lease(
+              '14100000-0000-4000-8000-000000000001','REGISTER',NULL,NULL,
+              repeat('1',64),repeat('f',64),now()+interval '30 seconds'
+            ) THEN RAISE EXCEPTION 'old resend lease setup failed'; END IF;
+            IF NOT public.supersede_phone_otp_challenges_for_send(
+              '14100000-0000-4000-8000-000000000002'
+            ) THEN RAISE EXCEPTION 'PNVS resend preparation failed'; END IF;
+            IF EXISTS (
+              SELECT 1 FROM public.otp_challenges
+              WHERE id='14100000-0000-4000-8000-000000000001'
+                AND delivery_status <> 'FAILED'
+            ) OR NOT EXISTS (
+              SELECT 1 FROM public.otp_challenges
+              WHERE id='14100000-0000-4000-8000-000000000002'
+                AND delivery_status='PENDING'
+            ) OR NOT EXISTS (
+              SELECT 1 FROM public.otp_challenges
+              WHERE id IN (
+                '14100000-0000-4000-8000-000000000003',
+                '14100000-0000-4000-8000-000000000004'
+              ) AND delivery_status='SENT'
+              GROUP BY delivery_status HAVING count(*)=2
+            ) THEN RAISE EXCEPTION 'PNVS resend boundary was not isolated'; END IF;
+            IF public.claim_otp_verification_lease(
+              '14100000-0000-4000-8000-000000000001','REGISTER',NULL,NULL,
+              repeat('1',64),repeat('0',64),now()+interval '30 seconds'
+            ) THEN RAISE EXCEPTION 'superseded PHONE challenge remained claimable'; END IF;
+            IF NOT public.finalize_otp_delivery(
+              '14100000-0000-4000-8000-000000000002','SENT',repeat('d',64),
+              now()+interval '5 minutes'
+            ) THEN RAISE EXCEPTION 'replacement PHONE delivery failed'; END IF;
+            IF public.finalize_otp_delivery(
+              '14100000-0000-4000-8000-000000000001','SENT',repeat('e',64),
+              now()+interval '5 minutes'
+            ) THEN RAISE EXCEPTION 'late superseded delivery revived'; END IF;
+          END $$;
+          SQL
+          test "$(PGUSER=postgres PGPASSWORD=ci-bootstrap-password psql -X -At -c \
+            "SELECT count(*) FROM public.otp_verification_leases WHERE challenge_id='14100000-0000-4000-8000-000000000001'")" = "0"
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          INSERT INTO public.otp_challenges (
+            id, channel, purpose, destination_hash, destination_hash_algorithm,
+            destination_hash_key_version, destination_dedup_hash,
+            destination_dedup_hash_algorithm, destination_dedup_key_version,
+            masked_destination, registration_flow_reference_hash,
+            verification_method, idempotency_key_hash, hash_key_version,
+            request_ip_hash, device_hash, retain_until
+          ) VALUES
+            ('14300000-0000-4000-8000-000000000001','PHONE','REGISTER',repeat('1',64),
+             'HMAC-SHA256','ci-v1',repeat('2',64),'HMAC-SHA256','ci-dedup-v1',
+             '+86138****0001',repeat('3',64),'ALIYUN_PNVS',repeat('4',64),'ci-v1',
+             repeat('5',64),repeat('6',64),now()+interval '1 day'),
+            ('14300000-0000-4000-8000-000000000002','PHONE','LOGIN',repeat('7',64),
+             'HMAC-SHA256','ci-v1',repeat('8',64),'HMAC-SHA256','ci-dedup-v1',
+             '+86138****0002',NULL,'ALIYUN_PNVS',repeat('9',64),'ci-v1',
+             repeat('a',64),repeat('b',64),now()+interval '1 day');
+          SELECT public.finalize_otp_delivery(
+            '14300000-0000-4000-8000-000000000001','SENT',repeat('c',64),now()+interval '5 minutes'
+          ) AS register_delivered \gset
+          SELECT public.finalize_otp_delivery(
+            '14300000-0000-4000-8000-000000000002','SENT',repeat('d',64),now()+interval '5 minutes'
+          ) AS concurrent_delivered \gset
+          SELECT public.record_otp_verification_attempt(
+            '14300000-0000-4000-8000-000000000001','REGISTER',NULL,NULL,
+            repeat('6',64),true
+          ) AS legacy_phone_bypass \gset
+          SELECT attempts = 0 AND consumed_at IS NULL AS legacy_phone_unchanged
+            FROM public.otp_challenges
+            WHERE id='14300000-0000-4000-8000-000000000001' \gset
+          SELECT public.claim_otp_verification_lease(
+            '14300000-0000-4000-8000-000000000001','REGISTER',NULL,NULL,
+            repeat('6',64),repeat('e',64),clock_timestamp()+interval '30 seconds'
           ) AS first_claim \gset
-          SELECT public.claim_fusion_auth_verify_token(
-            '14100000-0000-4000-8000-000000000002', 'LOGIN', repeat('4',64),
-            'flow-v2', ARRAY[repeat('a',64),repeat('b',64)]::varchar[],
-            ARRAY['replay-v1','replay-v2']::varchar[], repeat('b',64), 'replay-v2'
-          ) AS replay_claim \gset
+          SELECT public.claim_otp_verification_lease(
+            '14300000-0000-4000-8000-000000000001','REGISTER',NULL,NULL,
+            repeat('6',64),repeat('f',64),clock_timestamp()+interval '30 seconds'
+          ) AS duplicate_claim \gset
+          SELECT public.complete_otp_verification_lease(
+            '14300000-0000-4000-8000-000000000001','REGISTER',NULL,NULL,
+            repeat('6',64),repeat('0',64),true
+          ) AS wrong_claim_completed \gset
+          SELECT public.complete_otp_verification_lease(
+            '14300000-0000-4000-8000-000000000001','REGISTER',NULL,NULL,
+            repeat('6',64),repeat('e',64),false
+          ) AS failed_code_completed \gset
+          SELECT attempts = 1 AND consumed_at IS NULL AS failed_code_charged
+            FROM public.otp_challenges
+            WHERE id='14300000-0000-4000-8000-000000000001' \gset
+          SELECT public.claim_otp_verification_lease(
+            '14300000-0000-4000-8000-000000000001','REGISTER',NULL,NULL,
+            repeat('6',64),repeat('f',64),clock_timestamp()+interval '30 seconds'
+          ) AS retry_claim \gset
+          SELECT public.complete_otp_verification_lease(
+            '14300000-0000-4000-8000-000000000001','REGISTER',NULL,NULL,
+            repeat('6',64),repeat('f',64),true
+          ) AS verified \gset
+          SELECT public.register_phone_account_from_consumed_otp(
+            '14300000-0000-4000-8000-000000000003',
+            '14300000-0000-4000-8000-000000000001',repeat('6',64)
+          ) AS registered \gset
+          SELECT public.register_phone_account_from_consumed_otp(
+            '14300000-0000-4000-8000-000000000004',
+            '14300000-0000-4000-8000-000000000001',repeat('6',64)
+          ) AS registration_replayed \gset
+          \if :register_delivered
+          \else
+            DO $ci_fail$ BEGIN RAISE EXCEPTION 'PNVS registration delivery failed'; END $ci_fail$;
+          \endif
+          \if :concurrent_delivered
+          \else
+            DO $ci_fail$ BEGIN RAISE EXCEPTION 'PNVS concurrent delivery failed'; END $ci_fail$;
+          \endif
+          \if :legacy_phone_bypass
+            DO $ci_fail$ BEGIN RAISE EXCEPTION 'legacy local OTP function bypassed PNVS verification'; END $ci_fail$;
+          \endif
+          \if :legacy_phone_unchanged
+          \else
+            DO $ci_fail$ BEGIN RAISE EXCEPTION 'legacy local OTP function mutated a PNVS challenge'; END $ci_fail$;
+          \endif
           \if :first_claim
           \else
-            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'first fusion token claim failed'; END $ci_fail$;
+            DO $ci_fail$ BEGIN RAISE EXCEPTION 'first PNVS lease claim failed'; END $ci_fail$;
           \endif
-          \if :replay_claim
-            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'serial fusion token replay succeeded'; END $ci_fail$;
+          \if :duplicate_claim
+            DO $ci_fail$ BEGIN RAISE EXCEPTION 'duplicate PNVS lease claim succeeded'; END $ci_fail$;
           \endif
-          SELECT count(*) = 1 AS replay_consumed
-          FROM public.fusion_auth_flows
-          WHERE id = '14100000-0000-4000-8000-000000000002'
-            AND consumed_at IS NOT NULL AND attempts = 1
-          \gset
-          \if :replay_consumed
+          \if :wrong_claim_completed
+            DO $ci_fail$ BEGIN RAISE EXCEPTION 'wrong PNVS lease owner completed verification'; END $ci_fail$;
+          \endif
+          \if :failed_code_completed
+            DO $ci_fail$ BEGIN RAISE EXCEPTION 'failed PNVS code was accepted'; END $ci_fail$;
+          \endif
+          \if :failed_code_charged
           \else
-            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'serial replay flow was not consumed'; END $ci_fail$;
+            DO $ci_fail$ BEGIN RAISE EXCEPTION 'failed PNVS code did not charge exactly one attempt'; END $ci_fail$;
           \endif
-          SELECT public.claim_fusion_auth_verify_token(
-            '14100000-0000-4000-8000-000000000002', 'LOGIN', repeat('4',64),
-            'flow-v2', ARRAY[repeat('d',64),repeat('e',64)]::varchar[],
-            ARRAY['replay-v1','replay-v2']::varchar[], repeat('d',64), 'replay-v1'
-          ) AS retry_claim \gset
           \if :retry_claim
-            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'consumed replay flow was retried'; END $ci_fail$;
+          \else
+            DO $ci_fail$ BEGIN RAISE EXCEPTION 'released PNVS challenge could not be retried'; END $ci_fail$;
           \endif
-
-          INSERT INTO public.fusion_auth_flows (
-            id, purpose, request_ip_hash, device_hash, hash_key_version,
-            created_at, expires_at, retain_until
-          ) VALUES
-            ('14200000-0000-4000-8000-000000000001', 'LOGIN', repeat('5',64), repeat('6',64), 'flow-v1', now(), now()+interval '5 minutes', now()+interval '24 hours'),
-            ('14200000-0000-4000-8000-000000000002', 'LOGIN', repeat('7',64), repeat('8',64), 'flow-v2', now(), now()+interval '5 minutes', now()+interval '24 hours');
+          \if :verified
+          \else
+            DO $ci_fail$ BEGIN RAISE EXCEPTION 'valid PNVS verification was not consumed'; END $ci_fail$;
+          \endif
+          \if :registered
+          \else
+            DO $ci_fail$ BEGIN RAISE EXCEPTION 'PHONE_ONLY account registration failed'; END $ci_fail$;
+          \endif
+          \if :registration_replayed
+            DO $ci_fail$ BEGIN RAISE EXCEPTION 'PHONE_ONLY registration proof replayed'; END $ci_fail$;
+          \endif
           SQL
-          psql -X -At -v ON_ERROR_STOP=1 -c "SELECT public.claim_fusion_auth_verify_token('14200000-0000-4000-8000-000000000001','LOGIN',repeat('6',64),'flow-v1',ARRAY[repeat('c',64),repeat('d',64)]::varchar[],ARRAY['replay-v1','replay-v2']::varchar[],repeat('c',64),'replay-v1')" >/tmp/fusion-claim-a &
+
+          psql -X -At -v ON_ERROR_STOP=1 -c "SELECT public.claim_otp_verification_lease('14300000-0000-4000-8000-000000000002','LOGIN',NULL,NULL,repeat('b',64),repeat('1',64),clock_timestamp()+interval '30 seconds')" >/tmp/pnvs-lease-a &
           claim_a=$!
-          psql -X -At -v ON_ERROR_STOP=1 -c "SELECT public.claim_fusion_auth_verify_token('14200000-0000-4000-8000-000000000002','LOGIN',repeat('8',64),'flow-v2',ARRAY[repeat('c',64),repeat('d',64)]::varchar[],ARRAY['replay-v1','replay-v2']::varchar[],repeat('d',64),'replay-v2')" >/tmp/fusion-claim-b &
+          psql -X -At -v ON_ERROR_STOP=1 -c "SELECT public.claim_otp_verification_lease('14300000-0000-4000-8000-000000000002','LOGIN',NULL,NULL,repeat('b',64),repeat('2',64),clock_timestamp()+interval '30 seconds')" >/tmp/pnvs-lease-b &
           claim_b=$!
           wait "$claim_a"
           wait "$claim_b"
-          test "$(cat /tmp/fusion-claim-a /tmp/fusion-claim-b | grep -c '^t$')" = "1"
-          test "$(cat /tmp/fusion-claim-a /tmp/fusion-claim-b | grep -c '^f$')" = "1"
-          export PGUSER=postgres PGPASSWORD=ci-bootstrap-password
-          test "$(psql -X -At -c "SELECT count(*) FROM public.fusion_auth_verify_token_claims WHERE flow_id IN ('14200000-0000-4000-8000-000000000001','14200000-0000-4000-8000-000000000002')")" = "2"
-          test "$(psql -X -At -c "SELECT count(*) FROM public.fusion_auth_flows WHERE id IN ('14200000-0000-4000-8000-000000000001','14200000-0000-4000-8000-000000000002') AND consumed_at IS NOT NULL AND attempts=1")" = "1"
+          test "$(cat /tmp/pnvs-lease-a /tmp/pnvs-lease-b | grep -c '^t$')" = "1"
+          test "$(cat /tmp/pnvs-lease-a /tmp/pnvs-lease-b | grep -c '^f$')" = "1"
+          release_a="$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT public.release_otp_verification_lease('14300000-0000-4000-8000-000000000002',repeat('1',64))")"
+          release_b="$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT public.release_otp_verification_lease('14300000-0000-4000-8000-000000000002',repeat('2',64))")"
+          test "$(printf '%s\n%s\n' "$release_a" "$release_b" | grep -c '^t$')" = "1"
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT attempts FROM public.otp_challenges WHERE id='14300000-0000-4000-8000-000000000002'")" = "0"
       - name: Exercise fenced data export delivery and least-privilege ACLs
         env:
           PGHOST: 127.0.0.1
@@ -1082,9 +2213,9 @@ jobs:
             code_hash_key_version, idempotency_key_hash, hash_key_version,
             request_ip_hash, device_hash, retain_until
           ) VALUES (
-            '30000000-0000-0000-0000-000000000001', 'PHONE', 'LOGIN',
+            '30000000-0000-0000-0000-000000000001', 'EMAIL', 'LOGIN',
             repeat('1',64), 'HMAC-SHA256', 'ci-v1', repeat('2',64),
-            'HMAC-SHA256', 'ci-dedup-v1', '+86138****1234', repeat('x',64),
+            'HMAC-SHA256', 'ci-dedup-v1', 'c***@example.com', repeat('x',64),
             'ARGON2ID-PEPPERED', 'ci-v1', repeat('3',64), 'ci-v1',
             repeat('4',64), repeat('5',64), now() + interval '1 hour'
           );
@@ -1137,44 +2268,34 @@ jobs:
             id, channel, purpose, destination_hash, destination_hash_algorithm,
             destination_hash_key_version, destination_dedup_hash,
             destination_dedup_hash_algorithm, destination_dedup_key_version,
-            masked_destination, registration_flow_reference_hash, code_hash,
-            code_hash_algorithm, code_hash_key_version, idempotency_key_hash,
-            hash_key_version, request_ip_hash, device_hash, retain_until
+            masked_destination, registration_flow_reference_hash,
+            verification_method, idempotency_key_hash, hash_key_version,
+            request_ip_hash, device_hash, retain_until
           ) VALUES (
             '30000000-0000-0000-0000-000000000002', 'PHONE', 'REGISTER',
             repeat('a',64), 'HMAC-SHA256', 'ci-v1', repeat('b',64),
             'HMAC-SHA256', 'ci-dedup-v1', '+86139****5678', repeat('f',64),
-            repeat('y',64), 'ARGON2ID-PEPPERED', 'ci-v1', repeat('c',64),
-            'ci-v1', repeat('d',64), repeat('e',64), now() + interval '1 hour'
+            'ALIYUN_PNVS', repeat('c',64), 'ci-v1', repeat('d',64),
+            repeat('e',64), now() + interval '1 hour'
           );
           SELECT public.finalize_otp_delivery(
             '30000000-0000-0000-0000-000000000002', 'SENT', repeat('1',64), now() + interval '10 minutes'
           ) AS register_delivered \gset
-          SELECT public.record_otp_verification_attempt(
-            '30000000-0000-0000-0000-000000000002', 'REGISTER', NULL, NULL, repeat('e',64), true
+          SELECT public.claim_otp_verification_lease(
+            '30000000-0000-0000-0000-000000000002','REGISTER',NULL,NULL,
+            repeat('e',64),repeat('9',64),clock_timestamp()+interval '30 seconds'
+          ) AS register_claimed \gset
+          SELECT public.complete_otp_verification_lease(
+            '30000000-0000-0000-0000-000000000002','REGISTER',NULL,NULL,
+            repeat('e',64),repeat('9',64),true
           ) AS register_phone_consumed \gset
-          INSERT INTO public.oauth_states (
-            id, provider, purpose, state_hash, state_hash_algorithm,
-            flow_reference_hash, device_hash, hash_key_version, expires_at, retain_until
-          ) VALUES (
-            '40000000-0000-0000-0000-000000000002', 'WECHAT', 'REGISTER',
-            repeat('e',64), 'HMAC-SHA256', repeat('f',64), repeat('e',64),
-            'ci-v1', now() + interval '10 minutes', now() + interval '1 hour'
-          );
-          SELECT public.consume_oauth_state(
-            '40000000-0000-0000-0000-000000000002', 'WECHAT', 'REGISTER',
-            repeat('f',64), NULL, NULL, repeat('e',64),
-            repeat('9',64), 'ci-v1', repeat('0',64), 'ci-dedup-v1'
-          ) AS register_oauth_consumed \gset
-          SELECT public.register_phone_wechat_account(
+          SELECT public.register_phone_account_from_consumed_otp(
             '10000000-0000-0000-0000-000000000003',
-            '30000000-0000-0000-0000-000000000002',
-            '40000000-0000-0000-0000-000000000002', repeat('f',64), repeat('e',64)
-          ) AS registration_claimed \gset
-          SELECT public.register_phone_wechat_account(
+            '30000000-0000-0000-0000-000000000002',repeat('e',64)
+          ) AS registration_succeeded \gset
+          SELECT public.register_phone_account_from_consumed_otp(
             '10000000-0000-0000-0000-000000000004',
-            '30000000-0000-0000-0000-000000000002',
-            '40000000-0000-0000-0000-000000000002', repeat('f',64), repeat('e',64)
+            '30000000-0000-0000-0000-000000000002',repeat('e',64)
           ) AS registration_replayed \gset
           \if :register_delivered
           \else
@@ -1184,13 +2305,13 @@ jobs:
           \else
             DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: registration phone proof was not consumed'; END $ci_fail$;
           \endif
-          \if :register_oauth_consumed
+          \if :register_claimed
           \else
-            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: registration OAuth proof was not consumed'; END $ci_fail$;
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: registration phone lease was not claimed'; END $ci_fail$;
           \endif
-          \if :registration_claimed
+          \if :registration_succeeded
           \else
-            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: registration proofs did not claim the account'; END $ci_fail$;
+            DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: consumed phone proof did not create the account'; END $ci_fail$;
           \endif
           \if :registration_replayed
             DO $ci_fail$ BEGIN RAISE EXCEPTION USING MESSAGE = 'CI assertion failed: registration proof replay unexpectedly succeeded'; END $ci_fail$;
@@ -1250,21 +2371,21 @@ jobs:
               '10000000-0000-0000-0000-000000000001',
               '30000000-0000-0000-0000-000000000003',repeat('6',64),repeat('7',64)
             ) IS NOT NULL THEN RAISE EXCEPTION 'email proof replayed'; END IF;
-            IF public.bind_qq_identity_from_consumed_oauth_state(
+            IF public.bind_oauth_identity_from_consumed_state(
               '10000000-0000-0000-0000-000000000003',
-              '40000000-0000-0000-0000-000000000003',repeat('8',64),repeat('6',64),repeat('7',64)
+              '40000000-0000-0000-0000-000000000003','QQ',repeat('8',64),repeat('6',64),repeat('7',64)
             ) IS NOT NULL THEN RAISE EXCEPTION 'QQ proof crossed user boundary'; END IF;
-            bound_id := public.bind_qq_identity_from_consumed_oauth_state(
+            bound_id := public.bind_oauth_identity_from_consumed_state(
               '10000000-0000-0000-0000-000000000001',
-              '40000000-0000-0000-0000-000000000003',repeat('8',64),repeat('6',64),repeat('7',64)
+              '40000000-0000-0000-0000-000000000003','QQ',repeat('8',64),repeat('6',64),repeat('7',64)
             );
             IF bound_id IS NULL OR NOT EXISTS (
               SELECT 1 FROM public.identity_bindings WHERE id=bound_id
                 AND lookup_hash=repeat('c',64) AND dedup_hash=repeat('d',64)
             ) THEN RAISE EXCEPTION 'sealed QQ proof was not bound'; END IF;
-            IF public.bind_qq_identity_from_consumed_oauth_state(
+            IF public.bind_oauth_identity_from_consumed_state(
               '10000000-0000-0000-0000-000000000001',
-              '40000000-0000-0000-0000-000000000003',repeat('8',64),repeat('6',64),repeat('7',64)
+              '40000000-0000-0000-0000-000000000003','QQ',repeat('8',64),repeat('6',64),repeat('7',64)
             ) IS NOT NULL THEN RAISE EXCEPTION 'QQ proof replayed'; END IF;
           END $$;
           INSERT INTO public.auth_session_families (
@@ -1534,6 +2655,7 @@ jobs:
           DATABASE_ENABLED: "true"
           DATABASE_URL: postgresql://api_runtime:ci-runtime-password@127.0.0.1:5432/chi_shen_me_ci
           DATABASE_SSL_MODE: disable
+          AUTH_SCHEMA_TRANSITION_MODE: none
           ALLOW_DEMO_DATA: "true"
         run: |
           node apps/api/dist/main.js >/tmp/api-runtime.log 2>&1 &
@@ -1576,40 +2698,59 @@ jobs:
           fi
           "$sdkmanager" "platforms;android-36" "build-tools;36.0.0"
       - run: chmod +x gradlew
+      - name: Test Android build-logic security policies
+        run: ./gradlew -p buildSrc test --stacktrace
+      - name: Reject Fusion SDK, phone-state permission, and legacy auth UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -RInE --include='*.kt' --include='*.java' --include='*.xml' --include='*.kts' \
+            'com\.alicom\.fusion|AlicomFusion|FusionAuth|fusionauth-[^[:space:]]*\.aar|umeng-(common|asms)[^[:space:]]*\.aar|android\.permission\.READ_PHONE_STATE|一键登录|图形验证' \
+            app/src app/build.gradle.kts; then
+            echo "Fusion SDK, READ_PHONE_STATE, or legacy authentication UI remains in Android source" >&2
+            exit 1
+          fi
       - name: Verify cloud Debug
         run: >-
           ./gradlew testDebugUnitTest lintDebug assembleDebug
-          verifyNoFusionVariantConfiguration verifyNoFusionDebugManifest
-          verifyNoFusionDebugPackage
           --stacktrace
-      - name: Verify no-op Release manifest
+      - name: Verify Release manifest
         run: >-
-          ./gradlew verifyNoFusionReleaseManifest
+          ./gradlew processReleaseMainManifest
           -PCHISHENME_API_BASE_URL=https://api.unfinished-era.com/
           --stacktrace
       - name: Assemble isolated Fixture test artifacts
         run: >-
           ./gradlew assembleFixture assembleFixtureAndroidTest
-          verifyNoFusionFixtureManifest verifyNoFusionFixturePackage
           --stacktrace
-      - name: Verify Fusion Alpha cannot silently omit pinned SDKs
+      - name: Reject Fusion contents in generated APKs
         shell: bash
         run: |
-          log_file="$(mktemp)"
-          trap 'rm -f "$log_file"' EXIT
-          set +e
-          ./gradlew verifyFusionAlphaPackage \
-            -PCHISHENME_ALPHA_API_BASE_URL=https://api.unfinished-era.com/ \
-            -PCHISHENME_REQUIRE_FUSION_SDK=true \
-            --no-daemon >"$log_file" 2>&1
-          status=$?
-          set -e
-          cat "$log_file"
-          if [[ $status -eq 0 ]]; then
-            echo "Fusion Alpha unexpectedly built without locally prepared pinned AARs" >&2
-            exit 1
-          fi
-          grep -Fq '[FUSION_SDK_MISSING]' "$log_file"
+          set -euo pipefail
+          build_tools="${ANDROID_SDK_ROOT:?}/build-tools/36.0.0"
+          for apk in app/build/outputs/apk/debug/app-debug.apk \
+            app/build/outputs/apk/fixture/app-fixture.apk \
+            app/build/outputs/apk/androidTest/fixture/app-fixture-androidTest.apk; do
+            manifest="$($build_tools/aapt2 dump xmltree --file AndroidManifest.xml "$apk")"
+            if grep -Eqi 'android\.permission\.READ_PHONE_STATE|com\.alicom\.fusion|AlicomFusion|FusionAuth' <<<"$manifest"; then
+              echo "$apk contains a Fusion component or READ_PHONE_STATE" >&2
+              exit 1
+            fi
+            if unzip -Z1 "$apk" | grep -Eqi 'fusionauth|umeng-(common|asms)'; then
+              echo "$apk packages a removed Fusion artifact" >&2
+              exit 1
+            fi
+            while IFS= read -r dex_entry; do
+              dex_file="$(mktemp)"
+              unzip -p "$apk" "$dex_entry" >"$dex_file"
+              if "$build_tools/dexdump" -d "$dex_file" | grep -Eqi 'com[\./]alicom[\./]fusion|AlicomFusion|FusionAuth|一键登录|图形验证'; then
+                rm -f "$dex_file"
+                echo "$apk DEX contains removed Fusion code or legacy UI text" >&2
+                exit 1
+              fi
+              rm -f "$dex_file"
+            done < <(unzip -Z1 "$apk" | grep -E '^classes([0-9]+)?\.dex$')
+          done
       - name: Verify unsigned Alpha fails closed
         shell: bash
         run: |
@@ -1632,9 +2773,33 @@ jobs:
       - name: Verify unsigned release fails closed
         shell: bash
         run: |
-          if ./gradlew validateReleaseConfiguration \
-            -PCHISHENME_API_BASE_URL=https://api.example.invalid/ \
-            --no-daemon; then
-            echo "Release validation unexpectedly accepted missing signing material" >&2
-            exit 1
-          fi
+          set -euo pipefail
+          assert_unsigned_release_rejected() {
+            local label="$1"
+            shift
+            local log_file
+            log_file="$(mktemp)"
+            set +e
+            ./gradlew "$@" \
+              -PCHISHENME_API_BASE_URL=https://api.unfinished-era.com/ \
+              --no-daemon >"$log_file" 2>&1
+            local status=$?
+            set -e
+            cat "$log_file"
+            if [[ $status -eq 0 ]]; then
+              rm -f "$log_file"
+              echo "$label unexpectedly accepted missing signing material" >&2
+              exit 1
+            fi
+            if ! grep -Fq '[RELEASE_SIGNING_MISSING]' "$log_file"; then
+              rm -f "$log_file"
+              echo "$label failed for a reason other than missing Release signing" >&2
+              exit 1
+            fi
+            rm -f "$log_file"
+          }
+          assert_unsigned_release_rejected assemble assembleRelease
+          assert_unsigned_release_rejected bundle bundleRelease
+          assert_unsigned_release_rejected mixed processReleaseMainManifest assembleRelease
+          test ! -e app/build/outputs/apk/release/app-release.apk
+          test ! -e app/build/outputs/bundle/release/app-release.aab

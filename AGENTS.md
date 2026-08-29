@@ -40,7 +40,10 @@
 
 ## 验证与交付
 
-- 优先运行与改动直接相关的测试；合并前运行完整验证：
+- 优先运行与改动直接相关的测试；合并前先在当前进程通过
+  `CHISHENME_ALPHA_WECHAT_APP_ID`、`CHISHENME_ALPHA_QQ_APP_ID` 注入受控的 Alpha
+  微信与 QQ 公开 AppID（不得使用微信 AppSecret 或 QQ AppKey），
+  再运行完整验证：
   `./scripts/verify.ps1 -AlphaApiBaseUrl 'https://api.unfinished-era.com/'`。
 - 不为了让测试通过而降低既有门禁。失败时记录真实错误和未完成项。
 - 交付说明必须列出已运行的命令、结果、未运行的检查及原因。

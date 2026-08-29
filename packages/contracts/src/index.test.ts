@@ -13,10 +13,6 @@ import {
 	FavoriteMutationRequestSchema,
 	FavoriteRecordSchema,
 	FeatureConfigSchema,
-	FusionAuthTokenRequestSchema,
-	FusionAuthTokenResponseSchema,
-	FusionAuthVerifyRequestSchema,
-	FusionAuthVerifyResponseSchema,
 	IdentityBindingSchema,
 	LatestAccountExportResponseSchema,
 	ListFavoritesQuerySchema,
@@ -32,14 +28,12 @@ import {
 	PRIVATE_FEEDBACK_STORAGE_TYPE_BY_PUBLIC_TYPE,
 	PrivateFeedbackRecordSchema,
 	PrivateFeedbackTypeSchema,
-	ServiceCapabilitiesSchema,
 	RECOMMENDATION_HISTORY_STORAGE_EVENT_BY_ACTION,
 	RecommendationContextSchema,
 	RecommendationEventSchema,
 	RecommendationHistoryItemSchema,
 	RecommendationResultSchema,
-	RegisterFusionWechatRequestSchema,
-	RegisterPhoneWechatRequestSchema,
+	ServiceCapabilitiesSchema,
 	SupportFeedbackCategorySchema,
 	SupportFeedbackRequestSchema,
 	SupportFeedbackResponseSchema,
@@ -744,17 +738,14 @@ describe("Account contracts", () => {
 		appVersion: "1.0.0-alpha.1",
 	};
 
-	it("allows registration only through verified phone plus WeChat", () => {
+	it("allows account creation only through an ordinary phone challenge", () => {
 		expect(
-			RegisterPhoneWechatRequestSchema.safeParse({
-				phoneChallengeId: challengeId,
-				phoneOtpCode: "123456",
-				wechatOAuthState: state,
-				wechatAuthorizationCode: "WechatCode123456",
-				device,
+			PhoneRequestCodeSchema.safeParse({
+				phoneNumber: "+8613800138000",
+				purpose: "REGISTER",
+				installationId,
 			}).success,
 		).toBe(true);
-
 		expect(
 			EmailRequestCodeSchema.safeParse({
 				email: "user@example.com",
@@ -764,29 +755,23 @@ describe("Account contracts", () => {
 		).toBe(false);
 		expect(
 			OAuthStateRequestSchema.safeParse({
-				provider: "QQ",
+				provider: "WECHAT",
 				purpose: "REGISTER",
 				installationId,
-				phoneChallengeId: challengeId,
 			}).success,
 		).toBe(false);
-
-		const registrationShape = JSON.stringify(
-			RegisterPhoneWechatRequestSchema.toJSONSchema({ io: "input" }),
-		);
-		expect(registrationShape).not.toMatch(/EMAIL|QQ|email|accessToken|openId/u);
 	});
 
-	it("accepts PHONE/fusion/WECHAT and already-bound EMAIL/QQ login shapes", () => {
+	it("accepts PHONE/WECHAT and already-bound EMAIL/QQ login shapes", () => {
 		const requests = [
-			{ method: "PHONE", challengeId, otpCode: "123456", device },
-			{ method: "EMAIL", challengeId, otpCode: "123456", device },
 			{
-				method: "PHONE_FUSION",
-				flowId: challengeId,
-				verifyToken: "FusionVerifyToken_1234567890",
+				method: "PHONE",
+				challengeId,
+				otpCode: "123456",
+				phoneNumber: "+8613800138000",
 				device,
 			},
+			{ method: "EMAIL", challengeId, otpCode: "123456", device },
 			{
 				method: "WECHAT",
 				oauthState: state,
@@ -796,134 +781,32 @@ describe("Account contracts", () => {
 			{
 				method: "QQ",
 				oauthState: state,
-				accessToken: "QqAccessToken1234567890",
+				authorizationCode: "QqAuthorizationCode123456",
 				device,
 			},
 		];
 		for (const request of requests) {
 			expect(LoginRequestSchema.safeParse(request).success).toBe(true);
 		}
-	});
-
-	it("keeps fusion provider configuration server-owned for login and registration proofs", () => {
 		expect(
-			FusionAuthTokenRequestSchema.safeParse({
-				purpose: "LOGIN",
-				installationId,
-			}).success,
-		).toBe(true);
-		expect(
-			FusionAuthTokenRequestSchema.safeParse({
-				purpose: "REGISTER",
-				installationId,
-			}).success,
-		).toBe(true);
-
-		for (const forbidden of [
-			{ schemeCode: "scheme-1" },
-			{ packageName: "com.example.app" },
-			{ packageSign: "0".repeat(32) },
-			{ durationSeconds: 900 },
-			{ phoneNumber: "+8613800138000" },
-		]) {
-			expect(
-				FusionAuthTokenRequestSchema.safeParse({
-					purpose: "LOGIN",
-					installationId,
-					...forbidden,
-				}).success,
-			).toBe(false);
-		}
-
-		expect(
-			FusionAuthTokenResponseSchema.safeParse({
+			LoginRequestSchema.safeParse({
+				method: "PHONE_FUSION",
 				flowId: challengeId,
-				schemeCode: "fusion_scheme_1",
-				authToken: "FusionAuthToken_1234567890",
-				expiresAt: "2026-08-26T03:00:00.000Z",
-			}).success,
-		).toBe(true);
-		expect(
-			FusionAuthTokenResponseSchema.safeParse({
-				flowId: challengeId,
-				schemeCode: "invalid scheme",
-				authToken: "FusionAuthToken_1234567890",
-				expiresAt: "2026-08-26T03:00:00.000Z",
-			}).success,
-		).toBe(false);
-	});
-
-	it("accepts a short-lived registration proof and requires WeChat for account creation", () => {
-		const verifyRequest = {
-			flowId: challengeId,
-			verifyToken: "FusionVerifyToken_1234567890",
-			installationId,
-		};
-		expect(FusionAuthVerifyRequestSchema.safeParse(verifyRequest).success).toBe(
-			true,
-		);
-		expect(
-			FusionAuthVerifyResponseSchema.safeParse({
-				proofId: challengeId,
-				expiresAt: "2026-08-26T03:00:00.000Z",
-			}).success,
-		).toBe(true);
-		expect(
-			FusionAuthVerifyResponseSchema.safeParse({
-				proofId: challengeId,
-				maskedPhone: "+86138****8000",
-				expiresAt: "2026-08-26T03:00:00.000Z",
-			}).success,
-		).toBe(false);
-		expect(
-			RegisterFusionWechatRequestSchema.safeParse({
-				phoneProofId: challengeId,
-				wechatOAuthState: state,
-				wechatAuthorizationCode: "WechatCode123456",
+				verifyToken: "retired",
 				device,
 			}).success,
-		).toBe(true);
+		).toBe(false);
 		expect(
-			RegisterFusionWechatRequestSchema.safeParse({
-				phoneProofId: challengeId,
+			LoginRequestSchema.safeParse({
+				method: "PHONE",
+				challengeId,
+				otpCode: "123456",
 				device,
 			}).success,
 		).toBe(false);
 	});
 
-	it("bounds fusion verification credentials and rejects undeclared fields", () => {
-		const request = {
-			method: "PHONE_FUSION" as const,
-			flowId: challengeId,
-			verifyToken: "FusionVerifyToken_1234567890",
-			device,
-		};
-		expect(LoginRequestSchema.safeParse(request).success).toBe(true);
-		expect(
-			LoginRequestSchema.safeParse({ ...request, schemeCode: "client-owned" })
-				.success,
-		).toBe(false);
-		expect(
-			LoginRequestSchema.safeParse({ ...request, verifyToken: "x" }).success,
-		).toBe(true);
-		expect(
-			LoginRequestSchema.safeParse({ ...request, verifyToken: "" }).success,
-		).toBe(false);
-		expect(
-			LoginRequestSchema.safeParse({
-				...request,
-				verifyToken: `valid-prefix-${String.fromCharCode(0)}-invalid`,
-			}).success,
-		).toBe(false);
-		expect(
-			LoginRequestSchema.safeParse({
-				...request,
-				verifyToken: "A".repeat(4_097),
-			}).success,
-		).toBe(false);
-	});
-
-	it("fails fusion capability closed when older responses omit it", () => {
+	it("publishes capabilities without a retired Fusion switch", () => {
 		const capabilities = {
 			accountsEnabled: true,
 			registrationEnabled: true,
@@ -933,13 +816,13 @@ describe("Account contracts", () => {
 			qqEnabled: false,
 			dataExportEnabled: false,
 		};
-		expect(AuthCapabilitiesSchema.parse(capabilities).fusionEnabled).toBe(false);
+		expect(AuthCapabilitiesSchema.parse(capabilities)).toEqual(capabilities);
 		expect(
-			AuthCapabilitiesSchema.parse({
+			AuthCapabilitiesSchema.safeParse({
 				...capabilities,
 				fusionEnabled: true,
-			}).fusionEnabled,
-		).toBe(true);
+			}).success,
+		).toBe(false);
 	});
 
 	it("exposes only the Android 1.0 identity-purpose matrix", () => {
@@ -974,26 +857,9 @@ describe("Account contracts", () => {
 		}
 
 		for (const [request, allowed] of [
-			[
-				{
-					provider: "WECHAT",
-					purpose: "REGISTER",
-					installationId,
-					phoneChallengeId: challengeId,
-				},
-				true,
-			],
-			[
-				{
-					provider: "WECHAT",
-					purpose: "REGISTER",
-					installationId,
-					phoneProofId: challengeId,
-				},
-				true,
-			],
 			[{ provider: "WECHAT", purpose: "LOGIN", installationId }, true],
-			[{ provider: "WECHAT", purpose: "BIND", installationId }, false],
+			[{ provider: "WECHAT", purpose: "BIND", installationId }, true],
+			[{ provider: "WECHAT", purpose: "REGISTER", installationId }, false],
 			[{ provider: "QQ", purpose: "REGISTER", installationId }, false],
 			[{ provider: "QQ", purpose: "LOGIN", installationId }, true],
 			[{ provider: "QQ", purpose: "BIND", installationId }, true],
@@ -1010,13 +876,13 @@ describe("Account contracts", () => {
 					oauthState: state,
 					authorizationCode: "WechatCode123456",
 				},
-				false,
+				true,
 			],
 			[
 				{
 					type: "QQ",
 					oauthState: state,
-					accessToken: "QqAccessToken1234567890",
+					authorizationCode: "QqAuthorizationCode123456",
 				},
 				true,
 			],
@@ -1053,13 +919,55 @@ describe("Account contracts", () => {
 				appSecret: "must-never-cross-the-wire",
 			}).success,
 		).toBe(false);
+		const qqLogin = {
+			method: "QQ" as const,
+			oauthState: state,
+			authorizationCode: "QqAuthorizationCode123456",
+			device,
+		};
+		for (const forbiddenField of [
+			{ accessToken: "QqAccessToken1234567890" },
+			{ openId: "client-must-not-assert-subject" },
+			{ providerPayload: "must-not-cross-the-wire" },
+		]) {
+			expect(
+				LoginRequestSchema.safeParse({
+					...qqLogin,
+					...forbiddenField,
+				}).success,
+			).toBe(false);
+		}
 		expect(
 			LoginRequestSchema.safeParse({
 				method: "QQ",
 				oauthState: state,
 				accessToken: "QqAccessToken1234567890",
-				openId: "client-must-not-assert-subject",
 				device,
+			}).success,
+		).toBe(false);
+
+		const qqBinding = {
+			type: "QQ" as const,
+			oauthState: state,
+			authorizationCode: "QqAuthorizationCode123456",
+		};
+		for (const forbiddenField of [
+			{ accessToken: "QqAccessToken1234567890" },
+			{ openId: "client-must-not-assert-subject" },
+			{ providerPayload: "must-not-cross-the-wire" },
+		]) {
+			expect(
+				BindIdentityRequestSchema.safeParse({
+					...qqBinding,
+					...forbiddenField,
+				}).success,
+			).toBe(false);
+		}
+		expect(
+			BindIdentityRequestSchema.safeParse({
+				type: "QQ",
+				oauthState: state,
+				accessToken: "QqAccessToken1234567890",
 			}).success,
 		).toBe(false);
 	});
@@ -1077,25 +985,24 @@ describe("Account contracts", () => {
 				method: "PHONE",
 				challengeId,
 				otpCode: "12345",
+				phoneNumber: "+8613800138000",
 				device,
 			}).success,
 		).toBe(false);
 		expect(
 			OAuthStateRequestSchema.safeParse({
 				provider: "WECHAT",
-				purpose: "REGISTER",
+				purpose: "LOGIN",
 				installationId,
-				phoneChallengeId: challengeId,
 				extra: true,
 			}).success,
 		).toBe(false);
 		expect(
 			OAuthStateRequestSchema.safeParse({
 				provider: "WECHAT",
-				purpose: "REGISTER",
+				purpose: "LOGIN",
 				installationId,
 				phoneChallengeId: challengeId,
-				phoneProofId: challengeId,
 			}).success,
 		).toBe(false);
 		expect(

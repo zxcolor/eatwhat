@@ -1,5 +1,6 @@
 package com.chishenme.app.feature.consent
 
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -9,37 +10,32 @@ class ThirdPartyServiceDisclosureTest {
         val disclosure = THIRD_PARTY_SERVICE_DISCLOSURE
 
         assertTrue(disclosure.contains("阿里云计算有限公司"))
-        assertTrue(disclosure.contains("短信服务（SMS）"))
+        assertTrue(disclosure.contains("号码认证服务短信认证（PNVS）"))
         assertTrue(disclosure.contains("标准 SMTP 服务"))
-        assertTrue(disclosure.contains("邮箱验证码能力默认关闭"))
+        assertTrue(disclosure.contains("阿里邮箱企业版"))
         assertTrue(disclosure.contains("同意隐私文件并主动点击获取验证码"))
-        assertTrue(disclosure.contains("手机号或邮箱地址及本次 6 位验证码"))
+        assertTrue(disclosure.contains("验证码由阿里云动态生成"))
+        assertTrue(disclosure.contains("仅为本次校验短暂处理你输入的验证码"))
+        assertTrue(disclosure.contains("不会把明文验证码写入响应、日志或数据库"))
+        assertTrue(disclosure.contains("转交阿里云校验"))
+        assertFalse(disclosure.contains("自有 API 与 Android 均不获取明文手机号验证码"))
+        assertTrue(disclosure.contains("邮箱地址和本次 6 位验证码"))
         assertTrue(disclosure.contains("自有后端"))
         assertTrue(disclosure.contains("阿里云隐私政策"))
-        assertTrue(disclosure.contains("必须补充实际 SMTP 服务商主体和隐私政策"))
-        assertTrue(disclosure.contains("阿里云融合认证 Android SDK"))
+        assertTrue(disclosure.contains("已有账号登录或新号直接创建账号"))
     }
 
     @Test
-    fun `discloses delayed Fusion and Umeng risk SDK collection and server retention`() {
+    fun `removed carrier auth and risk SDK disclosures do not remain`() {
         val disclosure = THIRD_PARTY_SERVICE_DISCLOSURE
 
-        assertTrue(disclosure.contains("主动点击一键登录或一键注册"))
-        assertTrue(disclosure.contains("READ_PHONE_STATE"))
-        assertTrue(disclosure.contains("CHANGE_WIFI_STATE"))
-        assertTrue(disclosure.contains("ACCESS_WIFI_STATE"))
-        assertTrue(disclosure.contains("CHANGE_NETWORK_STATE"))
-        assertTrue(disclosure.contains("RECEIVE_USER_PRESENT"))
-        assertTrue(disclosure.contains("AD_ID"))
-        assertTrue(disclosure.contains("友盟登录安全 SDK"))
-        assertTrue(disclosure.contains("IMEI、MAC、Android ID"))
-        assertTrue(disclosure.contains("Advertising ID（广告标识符）"))
-        assertTrue(disclosure.contains("不用于广告投放、广告画像"))
-        assertTrue(disclosure.contains("ICCID、SIM IMSI"))
-        assertTrue(disclosure.contains("完整手机号仅作瞬时校验"))
-        assertTrue(disclosure.contains("不可逆手机号哈希、掩码及最长 24 小时"))
-        assertTrue(disclosure.contains("手机号单因子不能创建账号"))
-        assertTrue(disclosure.contains("撤回隐私同意、取消、页面销毁、应用进入后台或配置变化"))
+        listOf(
+            "融合认证",
+            "一键" + "登录",
+            "图形认证",
+            "READ_PHONE_STATE",
+            "友盟登录安全 SDK",
+        ).forEach { removed -> assertFalse(disclosure.contains(removed)) }
     }
 
     @Test
@@ -65,12 +61,17 @@ class ThirdPartyServiceDisclosureTest {
 
         assertTrue(disclosure.contains("微信开放平台登录由深圳市腾讯计算机系统有限公司提供"))
         assertTrue(disclosure.contains("Android OpenSDK 6.8.40"))
-        assertTrue(disclosure.contains("主动点击微信登录或微信注册后才初始化 SDK"))
+        assertTrue(disclosure.contains("主动点击微信登录或登录后绑定微信时才初始化 SDK"))
         assertTrue(disclosure.contains("snsapi_userinfo"))
         assertTrue(disclosure.contains("state 和一次性临时 authorization code"))
-        assertTrue(disclosure.contains("只把 authorization code 交给自有后端"))
+        assertTrue(disclosure.contains("原 state 和 authorization code 一并交给自有后端"))
+        assertTrue(disclosure.contains("不提交原始 SDK 回调对象或客户端声称的 OpenID"))
+        assertTrue(disclosure.contains("一次性消费 state 并核对用途与设备"))
         assertTrue(disclosure.contains("AppID/AppSecret"))
-        assertTrue(disclosure.contains("OpenID 及可选 UnionID"))
+        assertTrue(disclosure.contains("校验 snsapi_userinfo 与 OpenID"))
+        assertTrue(disclosure.contains("仅按 AppID + OpenID 识别本移动应用内的微信身份"))
+        assertTrue(disclosure.contains("不因缺少 UnionID 拒绝有效身份"))
+        assertTrue(disclosure.contains("不利用 UnionID 静默合并账号"))
         assertTrue(disclosure.contains("access token 和 refresh token 不返回 Android"))
         assertTrue(
             disclosure.contains(
@@ -89,10 +90,21 @@ class ThirdPartyServiceDisclosureTest {
         assertTrue(disclosure.contains("主动点击 QQ 登录或绑定后才初始化 SDK"))
         assertTrue(disclosure.contains("get_simple_userinfo"))
         assertTrue(disclosure.contains("设备型号以及 QQ/TIM 是否安装"))
-        assertTrue(disclosure.contains("Android 只读取本次临时 access token"))
+        assertTrue(disclosure.contains("Android 使用 loginServerSide 模式"))
+        assertTrue(disclosure.contains("历史名为 access_token 的兼容字段"))
+        assertTrue(disclosure.contains("本次一次性 authorization code"))
+        assertTrue(disclosure.contains("不承载可直接访问 QQ API 的 access token"))
         assertTrue(disclosure.contains("不采信客户端返回的 OpenID"))
+        assertTrue(disclosure.contains("只把本次 state 与 authorization code 交给自有后端"))
+        assertTrue(disclosure.contains("使用同一 AppID 与仅保存在服务端的 AppKey"))
+        assertTrue(disclosure.contains("先把 authorization code 换成提供方 access token"))
         assertTrue(disclosure.contains("client_id 与本 App 的 AppID 完全一致"))
-        assertTrue(disclosure.contains("临时凭证不写入本机、日志或界面"))
+        assertTrue(disclosure.contains("要求合法 UnionID 并用于稳定身份去重"))
+        assertTrue(disclosure.contains("QQ 身份只能登录已绑定账号，不会静默合并"))
+        assertTrue(disclosure.contains("authorization code 只在 Android 与后端内存中短暂处理"))
+        assertTrue(disclosure.contains("提供方 access token 和 refresh token 不返回 Android"))
+        assertTrue(disclosure.contains("三类临时凭证均不写入本机、日志、数据库或界面"))
+        assertFalse(disclosure.contains("Android 只读取本次临时 access token"))
         assertTrue(
             disclosure.contains(
                 "https://wiki.connect.qq.com/qq%E4%BA%92%E8%81%94sdk%E9%9A%90%E7%A7%81" +

@@ -55,6 +55,14 @@ $script:RequiredMappings = @(
         BundleRelative = 'scripts/activate-candidate-release.sh'
     },
     [pscustomobject]@{
+        SourceRelative = 'infra/ecs/scripts/assert-phone-only-bridge-runtime.sh'
+        BundleRelative = 'scripts/assert-phone-only-bridge-runtime.sh'
+    },
+    [pscustomobject]@{
+        SourceRelative = 'infra/ecs/scripts/assert-wechat-union-aliases-bridge-runtime.sh'
+        BundleRelative = 'scripts/assert-wechat-union-aliases-bridge-runtime.sh'
+    },
+    [pscustomobject]@{
         SourceRelative = 'infra/ecs/scripts/backup-database.sh'
         BundleRelative = 'scripts/backup-database.sh'
     },
@@ -422,12 +430,6 @@ function Test-SafePlaceholderValue {
         $trimmed -in @('default/ecs_ram_role', 'default/oidc_role_arn')) {
         return $true
     }
-    if ($Name -ceq 'ALIYUN_FUSION_TOKEN_TTL_SECONDS' -and
-        $trimmed -match '^(?:[0-9]{3,5})$') {
-        $ttl = [int]$trimmed
-        return $ttl -ge 900 -and $ttl -le 43200
-    }
-
     return $false
 }
 
@@ -514,14 +516,41 @@ function Assert-EcsOperationalGates {
     $compose = [System.IO.File]::ReadAllText(
         (Join-Path -Path $BundleRoot -ChildPath 'compose.yml')
     )
+    $deploymentExample = [System.IO.File]::ReadAllText(
+        (Join-Path -Path $BundleRoot -ChildPath 'deployment.env.example')
+    )
     if ([System.Text.RegularExpressions.Regex]::Matches(
             $compose,
             '(?m)^\s*pull_policy:\s+never\s*$'
-        ).Count -ne 4 -or
+         ).Count -ne 4 -or
         -not $compose.Contains('POSTGRES_VOLUME_NAME') -or
         -not $compose.Contains('external: true') -or
+        -not $compose.Contains('SMTP_TIMEOUT_MS: "5000"') -or
+        -not $compose.Contains('WECHAT_OPEN_PLATFORM_REALM_ID: "${WECHAT_OPEN_PLATFORM_REALM_ID:?WECHAT_OPEN_PLATFORM_REALM_ID is required}"') -or
+        -not $compose.Contains('QQ_OPEN_PLATFORM_REALM_ID: "${QQ_OPEN_PLATFORM_REALM_ID:?QQ_OPEN_PLATFORM_REALM_ID is required}"') -or
         -not $compose.Contains('cap_drop:')) {
         throw 'ECS Compose is missing offline image, protected volume or capability gates.'
+    }
+    $realmAssignments = [System.Text.RegularExpressions.Regex]::Matches(
+        $deploymentExample,
+        '(?m)^WECHAT_OPEN_PLATFORM_REALM_ID=(?<realm>[^\r\n]+)$'
+    )
+    if ($realmAssignments.Count -ne 1 -or
+        $realmAssignments[0].Groups['realm'].Value -notmatch '^[a-z0-9][a-z0-9._-]{0,63}$' -or
+        -not $deploymentExample.Contains('wechat_union_aliases_pending')) {
+        throw 'Deployment example must define one stable WeChat Open Platform realm and document the Union alias bridge mode.'
+    }
+    $qqRealmAssignments = [System.Text.RegularExpressions.Regex]::Matches(
+        $deploymentExample,
+        '(?m)^QQ_OPEN_PLATFORM_REALM_ID=(?<realm>[^\r\n]+)$'
+    )
+    if ($qqRealmAssignments.Count -ne 1 -or
+        $qqRealmAssignments[0].Groups['realm'].Value -notmatch '^[a-z0-9][a-z0-9._-]{0,63}$') {
+        throw 'Deployment example must define one stable QQ Open Platform realm.'
+    }
+    if ($deploymentExample -match '(?m)^QQ_UNION_ID_NAMESPACE_INITIALIZED=' -or
+        $compose.Contains('QQ_UNION_ID_NAMESPACE_INITIALIZED')) {
+        throw 'QQ UnionID namespace state must live only in the shared identity-state file, not deployment.env or Compose.'
     }
 
     $scriptsRoot = Join-Path -Path $BundleRoot -ChildPath 'scripts'
@@ -541,7 +570,7 @@ function Assert-EcsOperationalGates {
             '(?im)\bdocker\s+compose\b[^\r\n]*\bdown\b[^\r\n]*\s-v(?:\s|$)',
             '(?im)\bdocker\s+volume\s+(?:rm|prune)\b',
             '(?im)\bdocker\s+(?:system|image|builder)\s+prune\b',
-            '(?im)^\s*set\s+\+x\s*$',
+            '(?im)^\s*set\s+[+-]x\s*$',
             '(?im)\bcurl\b[^\r\n]*--insecure\b',
             '(?im)\bfind\b[^\r\n]*-delete\b'
         )) {
@@ -714,6 +743,21 @@ function Assert-EcsOperationalGates {
     $backup = [System.IO.File]::ReadAllText(
         (Join-Path -Path $BundleRoot -ChildPath 'scripts/backup-database.sh')
     )
+    $verifyBackup = [System.IO.File]::ReadAllText(
+        (Join-Path -Path $BundleRoot -ChildPath 'scripts/verify-database-backup.sh')
+    )
+    $phoneOnlyBridgeRuntime = [System.IO.File]::ReadAllText(
+        (Join-Path -Path $BundleRoot -ChildPath 'scripts/assert-phone-only-bridge-runtime.sh')
+    )
+    $wechatUnionAliasesBridgeRuntime = [System.IO.File]::ReadAllText(
+        (Join-Path -Path $BundleRoot -ChildPath 'scripts/assert-wechat-union-aliases-bridge-runtime.sh')
+    )
+    $runtimeVerifier = [System.IO.File]::ReadAllText(
+        (Join-Path -Path $BundleRoot -ChildPath 'scripts/verify-runtime.sh')
+    )
+    $provision = [System.IO.File]::ReadAllText(
+        (Join-Path -Path $BundleRoot -ChildPath 'scripts/provision-database.sh')
+    )
     $restore = [System.IO.File]::ReadAllText(
         (Join-Path -Path $BundleRoot -ChildPath 'scripts/restore-database.sh')
     )
@@ -735,23 +779,246 @@ function Assert-EcsOperationalGates {
     $releaseActivation = [System.IO.File]::ReadAllText(
         (Join-Path -Path $BundleRoot -ChildPath 'scripts/activate-candidate-release.sh')
     )
+    foreach ($required in @(
+        "current_link='/opt/chi-shen-me/current'",
+        'AUTH_SCHEMA_TRANSITION_MODE=legacy_phone_drain',
+        'ACCOUNTS_ENABLED PHONE_AUTH_ENABLED EMAIL_AUTH_ENABLED WECHAT_AUTH_ENABLED',
+        'QQ_AUTH_ENABLED QQ_UNION_ID_ENABLED',
+        "docker inspect --format '{{.Image}}'",
+        'active bridge API container image differs from deployment.env',
+        'active bridge API container environment mismatch'
+    )) {
+        if (-not $phoneOnlyBridgeRuntime.Contains($required)) {
+            throw "Phone-only bridge runtime assertion is missing a safety gate: $required"
+        }
+    }
+    foreach ($required in @(
+        "current_link='/opt/chi-shen-me/current'",
+        'AUTH_SCHEMA_TRANSITION_MODE)" == ''wechat_union_aliases_pending''',
+        'WECHAT_AUTH_ENABLED)" == ''false''',
+        "docker inspect --format '{{.Image}}'",
+        'active bridge API container image differs from deployment.env',
+        'AUTH_SCHEMA_TRANSITION_MODE=wechat_union_aliases_pending',
+        'WECHAT_AUTH_ENABLED=false',
+        'active bridge API container environment mismatch',
+        '"$script_dir/verify-runtime.sh" >/dev/null',
+        'WECHAT_UNION_ALIASES_BRIDGE_RUNTIME=OK'
+    )) {
+        if (-not $wechatUnionAliasesBridgeRuntime.Contains($required)) {
+            throw "WeChat Union alias bridge runtime assertion is missing a safety gate: $required"
+        }
+    }
+    foreach ($required in @(
+        'AUTH_SCHEMA_TRANSITION_MODE',
+        'SHARED_STATE_DIRECTORY',
+        'WECHAT_OPEN_PLATFORM_REALM_ID',
+        'QQ_OPEN_PLATFORM_REALM_ID',
+        'auth-identity-state.env',
+        'AUTH_IDENTITY_STATE_FORMAT_VERSION',
+        'QQ_UNION_ID_NAMESPACE_INITIALIZED',
+        'shared QQ identity state must be a root-only regular file',
+        'shared QQ identity state must contain exactly three settings',
+        'shared QQ identity realm differs from deployment.env',
+        'QQ authentication requires initialized shared identity state',
+        'wechat_union_aliases_pending requires WECHAT_AUTH_ENABLED=false',
+        'initialized QQ UnionID namespace requires UnionID whenever QQ authentication is enabled',
+        'assert_api_container_env "AUTH_SCHEMA_TRANSITION_MODE=$expected_schema_transition_mode"',
+        'assert_api_container_env "WECHAT_OPEN_PLATFORM_REALM_ID=$expected_wechat_realm_id"',
+        'assert_api_container_env "WECHAT_AUTH_ENABLED=$expected_wechat_enabled"',
+        'assert_api_container_env "QQ_OPEN_PLATFORM_REALM_ID=$expected_qq_realm_id"',
+        'assert_api_container_env "QQ_AUTH_ENABLED=$expected_qq_enabled"',
+        'assert_api_container_env "QQ_UNION_ID_ENABLED=$expected_qq_union_id_enabled"',
+        'public authentication capabilities do not match deployment.env'
+    )) {
+        if (-not $runtimeVerifier.Contains($required)) {
+            throw "Runtime verifier is missing an authentication identity-continuity gate: $required"
+        }
+    }
     if (-not $backup.Contains("backup_root='/opt/chi-shen-me/backups/postgres'") -or
         -not $backup.Contains('--format=custom') -or
         -not $backup.Contains('pg_restore --list') -or
         -not $backup.Contains('sha256sum --check --strict') -or
+        -not $backup.Contains('database backups must run from the active release') -or
+        -not $backup.Contains('SCHEMA_MIGRATIONS.txt') -or
+        -not $backup.Contains('ROLE_GRANTS.sql') -or
+        -not $backup.Contains('phone_only_cutover_facts=') -or
+        -not $backup.Contains("clock_timestamp() - interval '15 minutes'") -or
         -not $backup.Contains('mutation_lock="$lock_directory/mutation.lock"') -or
+        -not $backup.Contains("if [[ `"`$mutation_lock_inherited`" == 'true' ]]") -or
+        -not $backup.Contains('readlink -f -- "/proc/$$/fd/8"') -or
         -not $backup.Contains('flock -n 8')) {
         throw 'PostgreSQL backup script is missing its exact path, custom dump or integrity gates.'
     }
+    foreach ($required in @(
+        'SCHEMA_MIGRATIONS.txt',
+        'ROLE_GRANTS.sql',
+        'actual_file_count',
+        'actual_entry_count',
+        'backup checksum manifest must contain exactly five entries',
+        'backup migration ledger count differs from metadata',
+        'backup role-grant snapshot is invalid',
+        'cmp -s "$generated_list" "$backup_dir/RESTORE_LIST.txt"'
+    )) {
+        if (-not $verifyBackup.Contains($required)) {
+            throw "PostgreSQL backup verifier is missing a schema/ACL integrity gate: $required"
+        }
+    }
+    foreach ($required in @(
+        "lock_directory='/run/lock/chi-shen-me'",
+        'mutation_lock="$lock_directory/mutation.lock"',
+        "'700:0:0'",
+        "'600:0:0'",
+        'exec 8<>"$mutation_lock"',
+        "flock -n 8 || die 'another deployment mutation, backup or secret update is running'"
+    )) {
+        if (-not $provision.Contains($required)) {
+            throw "Database provisioner is missing its global mutation lock gate: $required"
+        }
+    }
+    $provisionLock = 'flock -n 8 || die'
+    $provisionPreflight = '"$script_dir/preflight-deployment.sh" >/dev/null'
+    $provisionDatabaseStart = 'docker compose --env-file deployment.env up -d postgres'
+    if ([regex]::Matches($provision, [regex]::Escape($provisionLock)).Count -ne 1 -or
+        $provision.IndexOf($provisionLock, [System.StringComparison]::Ordinal) -gt
+            $provision.IndexOf($provisionPreflight, [System.StringComparison]::Ordinal) -or
+        $provision.IndexOf($provisionPreflight, [System.StringComparison]::Ordinal) -gt
+            $provision.IndexOf($provisionDatabaseStart, [System.StringComparison]::Ordinal)) {
+        throw 'Database provisioner must reject a concurrent deployment mutation before preflight or database work.'
+    }
     if (-not $restore.Contains('chi_shen_me_restore_') -or
         -not $restore.Contains('--single-transaction') -or
-        -not $restore.Contains('--role=schema_migrator')) {
+        -not $restore.Contains('--role=schema_migrator') -or
+        -not $restore.Contains('mutation_lock="$lock_directory/mutation.lock"') -or
+        -not $restore.Contains('restore_lock="$lock_directory/postgres-restore.lock"') -or
+        -not $restore.Contains('readlink -f -- "/proc/$$/fd/8"') -or
+        -not $restore.Contains("flock -n 8 || die 'another deployment mutation, backup or secret update is running'")) {
         throw 'PostgreSQL restore script is missing its isolated target or transactional role gates.'
     }
     if (-not $rollback.Contains('ROLLBACK_chi_shen_me_FROM_') -or
         -not $rollback.Contains('PRESERVED_PREVIOUS_DATABASE') -or
+        -not $rollback.Contains('mutation_lock="$lock_directory/mutation.lock"') -or
+        -not $rollback.Contains('rollback_lock="$lock_directory/postgres-rollback.lock"') -or
+        -not $rollback.Contains("flock -n 8 || die 'another deployment mutation, backup or secret update is running'") -or
+        -not $rollback.Contains('backup-database.sh" --mutation-lock-held') -or
+        -not $rollback.Contains('restore-database.sh" "$backup_dir" "$restore_database" --mutation-lock-held') -or
+        -not $rollback.Contains('assert-phone-only-bridge-runtime.sh" >/dev/null') -or
+        -not $rollback.Contains('assert-wechat-union-aliases-bridge-runtime.sh" >/dev/null') -or
         $rollback -match '(?im)\bDROP\s+DATABASE\b') {
         throw 'PostgreSQL rollback must require confirmation and preserve the previous database.'
+    }
+    if (-not $provision.Contains('assert-phone-only-bridge-runtime.sh" >/dev/null') -or
+        $provision.IndexOf('assert-phone-only-bridge-runtime.sh" >/dev/null', [System.StringComparison]::Ordinal) -gt
+            $provision.IndexOf('backup-database.sh" --mutation-lock-held', [System.StringComparison]::Ordinal) -or
+        $rollback.IndexOf('assert-phone-only-bridge-runtime.sh" >/dev/null', [System.StringComparison]::Ordinal) -gt
+            $rollback.IndexOf('backup-database.sh" --mutation-lock-held', [System.StringComparison]::Ordinal)) {
+        throw 'Provision and rollback must verify the active bridge container before any safety backup or mutation.'
+    }
+    if (-not $provision.Contains('assert-wechat-union-aliases-bridge-runtime.sh" >/dev/null') -or
+        $provision.IndexOf('assert-wechat-union-aliases-bridge-runtime.sh" >/dev/null', [System.StringComparison]::Ordinal) -gt
+            $provision.IndexOf('wechat_union_aliases_cutover_backup="$(sed', [System.StringComparison]::Ordinal) -or
+        $rollback.IndexOf('assert-wechat-union-aliases-bridge-runtime.sh" >/dev/null', [System.StringComparison]::Ordinal) -gt
+            $rollback.IndexOf('backup-database.sh" --mutation-lock-held', [System.StringComparison]::Ordinal)) {
+        throw 'Schema 0012 cutover and rollback must verify the active WeChat Union alias bridge before backup or mutation.'
+    }
+    foreach ($required in @(
+        '--phone-only-cutover',
+        "'10|1|10|fusion_phone_auth'",
+        'backup-database.sh" --mutation-lock-held',
+        'verify-database-backup.sh" "$phone_only_cutover_backup"',
+        'SCHEMA_MIGRATIONS.txt',
+        'cat "$bundle_root/sql/role-grants.sql"',
+        "clock_timestamp() - interval '15 minutes'",
+        'legacy authentication proof state changed after the cutover backup'
+    )) {
+        if (-not $provision.Contains($required)) {
+            throw "PHONE_ONLY provisioner is missing a cutover safety gate: $required"
+        }
+    }
+    if ([regex]::Matches(
+            $provision,
+            [regex]::Escape('read_active_auth_proof_count)')
+        ).Count -lt 2) {
+        throw 'PHONE_ONLY provisioner must check redeemable proofs both before and after its verified backup.'
+    }
+    foreach ($required in @(
+        '--wechat-union-aliases-cutover',
+        'schema 0011 requires explicit --wechat-union-aliases-cutover',
+        "'11|1|11|phone_only_auth'",
+        'WeChat Union alias cutover backup was not produced by the active bridge',
+        'WeChat Union alias cutover backup migration ledger does not have 11 rows',
+        '^11\|phone_only_auth\|[0-9a-f]{64}$',
+        "'12|1|12|wechat_union_aliases'",
+        'WeChat Union alias cutover did not reach exact schema 0012',
+        "to_regclass('public.wechat_union_aliases') IS NOT NULL",
+        "to_regprocedure('public.consume_oauth_state_with_wechat_union",
+        "to_regprocedure('public.record_wechat_union_alias_from_consumed_state",
+        "to_regprocedure('public.bind_oauth_identity_with_wechat_union_from_consumed_state",
+        "NOT has_table_privilege('api_runtime', 'public.wechat_union_aliases'",
+        "NOT has_table_privilege('retention_worker', 'public.wechat_union_aliases'",
+        "NOT has_table_privilege('admin_api_runtime', 'public.wechat_union_aliases'",
+        "NOT has_table_privilege('data_export_worker', 'public.wechat_union_aliases'",
+        "WHERE privilege.grantee = 0",
+        "WHERE NOT routine.prosecdef",
+        "routine.proowner <> 'schema_migrator'::regrole",
+        "'search_path=pg_catalog, public' = ANY(routine.proconfig)",
+        "NOT has_function_privilege('api_runtime', routine.oid, 'EXECUTE')",
+        "has_function_privilege('retention_worker', routine.oid, 'EXECUTE')",
+        "has_function_privilege('admin_api_runtime', routine.oid, 'EXECUTE')",
+        "has_function_privilege('data_export_worker', routine.oid, 'EXECUTE')",
+        'privilege.grantee = 0',
+        "privilege.privilege_type = 'EXECUTE'",
+        'NOT EXISTS (SELECT 1 FROM public.wechat_union_aliases)',
+        'WeChat Union alias schema or least-privilege ACL verification failed',
+        'WECHAT_UNION_ALIASES_CUTOVER_BACKUP=%s'
+    )) {
+        if (-not $provision.Contains($required)) {
+            throw "WeChat Union alias provisioner is missing a schema 0011 to 0012 cutover or ACL gate: $required"
+        }
+    }
+    foreach ($required in @(
+        'rollback-database.sh [--wechat-union-aliases]',
+        "rollback_kind='wechat-union-aliases'",
+        'WeChat Union alias rollback backup was not produced by the active bridge',
+        'WeChat Union alias rollback requires an exact schema 0011 backup',
+        'WeChat Union alias rollback backup ledger does not have 11 rows',
+        '^11\|phone_only_auth\|[0-9a-f]{64}$',
+        "count(*) = 12 AND min(version) = 1 AND max(version) = 12",
+        "bool_or(version = 12 AND name = 'wechat_union_aliases')",
+        "to_regclass('public.wechat_union_aliases') IS NOT NULL",
+        'NOT EXISTS (SELECT 1 FROM public.wechat_union_aliases)',
+        'schema 0012 downgrade is forbidden after any WeChat Union alias was stored'
+    )) {
+        if (-not $rollback.Contains($required)) {
+            throw "PostgreSQL rollback is missing a schema 0012 to 0011 Union alias safety gate: $required"
+        }
+    }
+    foreach ($required in @(
+        'cat "$backup_dir/ROLE_GRANTS.sql"',
+        'cmp -s "$restored_ledger" "$backup_dir/SCHEMA_MIGRATIONS.txt"'
+    )) {
+        if (-not $restore.Contains($required)) {
+            throw "PostgreSQL restore is missing a schema-matched ACL or ledger gate: $required"
+        }
+    }
+    $restoreGlobalLock = 'exec 8<>"$mutation_lock"'
+    $restorePreflight = '"$script_dir/preflight-deployment.sh" >/dev/null'
+    $restoreCreate = 'CREATE DATABASE :"target"'
+    if ($restore.IndexOf($restoreGlobalLock, [System.StringComparison]::Ordinal) -lt 0 -or
+        $restore.IndexOf($restoreGlobalLock, [System.StringComparison]::Ordinal) -gt
+            $restore.IndexOf($restorePreflight, [System.StringComparison]::Ordinal) -or
+        $restore.IndexOf($restorePreflight, [System.StringComparison]::Ordinal) -gt
+            $restore.IndexOf($restoreCreate, [System.StringComparison]::Ordinal)) {
+        throw 'PostgreSQL restore must hold the global mutation lock before preflight and database creation.'
+    }
+    $rollbackGlobalLock = 'exec 8<>"$mutation_lock"'
+    $rollbackPreflight = '"$script_dir/preflight-deployment.sh" >/dev/null'
+    $rollbackSafetyBackup = 'backup-database.sh" --mutation-lock-held'
+    if ($rollback.IndexOf($rollbackGlobalLock, [System.StringComparison]::Ordinal) -lt 0 -or
+        $rollback.IndexOf($rollbackGlobalLock, [System.StringComparison]::Ordinal) -gt
+            $rollback.IndexOf($rollbackPreflight, [System.StringComparison]::Ordinal) -or
+        $rollback.IndexOf($rollbackPreflight, [System.StringComparison]::Ordinal) -gt
+            $rollback.IndexOf($rollbackSafetyBackup, [System.StringComparison]::Ordinal)) {
+        throw 'PostgreSQL rollback must hold the global mutation lock across backup, restore and activation.'
     }
     if (-not $amap.Contains('--ip-whitelist-confirmed') -or
         -not $amap.Contains('API_RECREATE_REQUIRED=true') -or
@@ -762,44 +1029,318 @@ function Assert-EcsOperationalGates {
     }
     foreach ($required in @(
         'update-auth-secrets.sh --apply --config-file FILE',
-        'readonly FUSION_DRAIN_SECONDS=43200',
-        'drain_state="$secrets_dir/auth-key-drain.env"',
+        'update-auth-secrets.sh --disable',
+        'update-auth-secrets.sh --legacy-drain',
         'mutation_lock="$lock_directory/mutation.lock"',
         'flock -n 8',
         'updated authentication configuration failed preflight and was rolled back',
+        "target_schema_transition_mode='legacy_phone_drain'",
+        'legacy bridge must preserve the shared api.env byte-for-byte',
+        'SHARED_API_ENV_PRESERVED=true',
+        'assert_phone_only_cutover_ready',
+        'assert_wechat_union_aliases_ready',
+        'resolve_active_deploy',
+        'active_deploy="$(resolve_active_deploy)"',
+        '[[ "$active_deploy" != "$bundle_root" ]]',
+        'authentication changes must be prepared in a non-active candidate release',
+        'if [[ "$mode" != ''--legacy-drain'' ]]; then',
+        "current_link='/opt/chi-shen-me/current'",
+        'legacy Fusion, SMS and associated WeChat configuration can only be retired from the active legacy phone drain bridge',
+        'phone-only migration and least-privilege ACL smoke must pass before updating authentication configuration',
+        'preview_fusion_auth_retention_cleanup',
+        "baseline_identity_config_present='true'",
+        'const retiresLegacyPhone = [',
         'AUTH_IDENTITY_DEDUP_KEY_VERSION changes require a dedicated audited migration',
-        'accounts require SMS phone auth or FusionAuth',
-        '[[ "$target_wechat_auth_enabled" == ''true'' || "$target_wechat_auth_enabled" == ''false'' ]]',
+        'emergency disable must preserve authentication identity/session continuity',
+        'emergency disable must preserve email OTP continuity',
+        'identity_continuity_names=(',
+        'otp_continuity_names=(',
+        'reenabling disabled accounts must preserve authentication identity/session continuity',
+        'disabling email authentication must preserve email OTP continuity',
+        'PHONE_ONLY accounts require PHONE_AUTH_ENABLED=true',
+        'QQ_UNION_ID_ENABLED requires QQ_AUTH_ENABLED=true',
+        "shared_state_directory='/opt/chi-shen-me/shared'",
+        'qq_identity_state_file="$shared_state_directory/auth-identity-state.env"',
+        'assert_root_directory "$shared_state_directory" 700',
+        'assert_qq_identity_state_change_ready',
+        'persist_qq_identity_state',
+        'candidate="$(mktemp "$shared_state_directory/.auth-identity-state.candidate.XXXXXX")"',
+        'AUTH_IDENTITY_STATE_FORMAT_VERSION=1',
+        'printf ''QQ_OPEN_PLATFORM_REALM_ID=%s\n''',
+        'printf ''QQ_UNION_ID_NAMESPACE_INITIALIZED=%s\n''',
+        'chown root:root "$candidate"',
+        'chmod 600 "$candidate"',
+        'mv -Tf -- "$candidate" "$qq_identity_state_file"',
+        'assert_exact_env_keys "$qq_identity_state_file"',
+        'QQ_BINDING_COUNT_BEFORE_IDENTITY_STATE_CHANGE=',
+        "SELECT count(*) FROM public.identity_bindings WHERE identity_type = 'QQ';",
+        'QQ identity state initialization or UnionID promotion requires the active QQ channel to be disabled',
+        'QQ identity state initialization or UnionID promotion requires zero existing QQ bindings',
+        'active QQ authentication state is missing its shared identity anchor',
+        'candidate release differs from the shared QQ Open Platform realm',
+        'candidate release must preserve the active WeChat Open Platform realm',
+        'candidate release must preserve the active QQ Open Platform realm',
+        'active release has a duplicate QQ Open Platform realm',
+        'QQ identity state requires a stable candidate Open Platform realm',
+        'active_qq_auth_enabled="$(read_env_value "$active_deploy/deployment.env" QQ_AUTH_ENABLED)"',
+        'active_qq_union_id_enabled="$(read_env_value "$active_deploy/deployment.env" QQ_UNION_ID_ENABLED)"',
+        'shared QQ identity state has an unsupported format version',
+        'target_qq_union_id_namespace_initialized="$current_qq_union_id_namespace_initialized"',
+        'target_qq_union_id_namespace_initialized="$target_qq_union_id_enabled"',
+        "target_qq_union_id_namespace_initialized='true'",
+        'sync -f "$shared_state_directory"',
+        'A shared QQ identity-state initialization',
+        'initialized QQ UnionID namespace requires UnionID whenever QQ authentication is enabled',
+        'AUTH_OTP_PEPPER_ACTIVE_VERSION AUTH_OTP_PEPPER_KEYS_JSON',
+        'ALIYUN_PNVS_SIGN_NAME ALIYUN_PNVS_TEMPLATE_CODE',
+        'if [[ "$target_email_auth_enabled" == ''true'' ]]; then',
+        'SMTP_HOST SMTP_PORT SMTP_SECURE SMTP_USERNAME SMTP_APP_PASSWORD',
+        'SMTP_FROM_ADDRESS SMTP_REPLY_TO SMTP_FROM_NAME',
+        '!/^SMTP_APP_PASSWORD=/',
+        'read_env_value "$config_file" SMTP_APP_PASSWORD',
+        'printf ''SMTP_PASSWORD=%s\n''',
+        '"$target_email_auth_enabled" == ''false'' && "$baseline_otp_count" -eq "${#otp_continuity_names[@]}"',
         'if [[ "$target_wechat_auth_enabled" == ''true'' ]]; then',
         'input_names+=(WECHAT_APP_ID WECHAT_APP_SECRET)',
-        'SELECT count(*) FROM public.fusion_auth_flows WHERE consumed_at IS NULL AND expires_at > clock_timestamp()',
-        'active FusionAuth flows still block key removal',
-        'authentication keys must drain for at least 12 hours before removal',
-        'AUTH_KEY_DRAIN_STATE_RETAINED=true',
-        "drain_action='replace-candidate'",
-        'build_drain_candidate "$api_candidate" "$drain_timestamp"',
+        'if [[ "$target_qq_auth_enabled" == ''true'' ]]; then',
+        'input_names+=(QQ_APP_ID QQ_APP_KEY)',
+        'activate the final schema 0012 release before updating authentication configuration',
+        'WeChat authentication requires the final non-transition schema 0012 release',
+        'active_realm="$(read_env_value "$active_deploy/deployment.env" WECHAT_OPEN_PLATFORM_REALM_ID)"',
+        'WeChat authentication requires a stable Open Platform realm',
+        '-v expected_wechat_realm="$1"',
+        "WHERE realm_id <> :'expected_wechat_realm'",
+        "count(*) = 12 AND min(version) = 1 AND max(version) = 12",
+        "bool_or(version = 12 AND name = 'wechat_union_aliases')",
+        "to_regclass('public.wechat_union_aliases') IS NOT NULL",
+        "has_function_privilege(",
+        "'public.consume_oauth_state_with_wechat_union",
+        "'public.record_wechat_union_alias_from_consumed_state",
+        "'public.bind_oauth_identity_with_wechat_union_from_consumed_state",
+        "NOT has_table_privilege(",
+        "WHERE NOT routine.prosecdef",
+        "routine.proowner <> 'schema_migrator'::regrole",
+        "'search_path=pg_catalog, public' = ANY(routine.proconfig)",
+        "NOT has_function_privilege('api_runtime', routine.oid, 'EXECUTE')",
+        "has_function_privilege('retention_worker', routine.oid, 'EXECUTE')",
+        "has_function_privilege('admin_api_runtime', routine.oid, 'EXECUTE')",
+        "has_function_privilege('data_export_worker', routine.oid, 'EXECUTE')",
+        'privilege.grantee = 0',
+        "privilege.privilege_type = 'EXECUTE'",
+        'schema 0012 and WeChat Union alias least-privilege ACL smoke must pass before enabling WeChat',
         'API_RECREATE_REQUIRED=true'
     )) {
         if (-not $auth.Contains($required)) {
             throw "Authentication secret updater is missing a safety gate: $required"
         }
     }
+    if ($auth.Contains('[[ "$active_deploy" == "$bundle_root" ]]') -or
+        $auth.Contains('WeChat authentication must be enabled from the active immutable release') -or
+        $auth.Contains('QQ identity state must be changed from the active immutable release') -or
+        [regex]::IsMatch(
+            $auth,
+            'assert_qq_identity_state_change_ready\s+\\\s*\n\s*"\$current_qq_auth_enabled"'
+        )) {
+        throw 'Authentication updates must validate the active release without writing its deployment bundle.'
+    }
+    if ([regex]::IsMatch($auth, '(?m)\[\[[^\r\n]*==[ \t]*\r?\n')) {
+        throw 'Authentication updater contains a split conditional comparison that Bash cannot parse.'
+    }
+    $authWeChatReadiness = [regex]::Match(
+        $auth,
+        '(?s)assert_wechat_union_aliases_ready\(\) \{(?<body>.*?)\n\}'
+    )
+    if (-not $authWeChatReadiness.Success -or
+        -not $authWeChatReadiness.Groups['body'].Value.Contains(
+            'candidate release must preserve the active WeChat Open Platform realm'
+        ) -or
+        -not $authWeChatReadiness.Groups['body'].Value.Contains('cd "$active_deploy"')) {
+        throw 'WeChat readiness must inspect active schema/runtime state while preserving the candidate realm.'
+    }
+    $authQqReadiness = [regex]::Match(
+        $auth,
+        '(?s)assert_qq_identity_state_change_ready\(\) \{(?<body>.*?)\n\}'
+    )
+    $authQqReadinessBody = $authQqReadiness.Groups['body'].Value
+    $authQqActiveSwitchRead = 'active_qq_auth_enabled="$(read_env_value "$active_deploy/deployment.env" QQ_AUTH_ENABLED)"'
+    $authQqActiveUnionRead = 'active_qq_union_id_enabled="$(read_env_value "$active_deploy/deployment.env" QQ_UNION_ID_ENABLED)"'
+    $authQqBindingQuery = "SELECT count(*) FROM public.identity_bindings WHERE identity_type = 'QQ';"
+    if (-not $authQqReadiness.Success -or
+        -not $authQqReadiness.Groups['body'].Value.Contains(
+            $authQqActiveSwitchRead
+        ) -or
+        -not $authQqReadiness.Groups['body'].Value.Contains(
+            $authQqActiveUnionRead
+        ) -or
+        -not $authQqReadiness.Groups['body'].Value.Contains(
+            'candidate release must preserve the active QQ Open Platform realm'
+        ) -or
+        -not $authQqReadiness.Groups['body'].Value.Contains(
+            'grep -E ''^QQ_OPEN_PLATFORM_REALM_ID='' "$active_deploy/deployment.env" || true'
+        ) -or
+        -not $authQqReadiness.Groups['body'].Value.Contains('cd "$active_deploy"') -or
+        $authQqReadiness.Groups['body'].Value.Contains('$current_qq_auth_enabled') -or
+        $authQqReadiness.Groups['body'].Value.Contains('$current_qq_union_id_enabled') -or
+        $authQqReadinessBody.IndexOf($authQqActiveSwitchRead, [System.StringComparison]::Ordinal) -gt
+            $authQqReadinessBody.IndexOf($authQqBindingQuery, [System.StringComparison]::Ordinal) -or
+        $authQqReadinessBody.IndexOf($authQqActiveUnionRead, [System.StringComparison]::Ordinal) -gt
+            $authQqReadinessBody.IndexOf($authQqBindingQuery, [System.StringComparison]::Ordinal)) {
+        throw 'QQ identity-state changes must prove the active release is disabled and query its database without trusting candidate switches.'
+    }
+    if ($auth.Contains('EMAIL_OTP_PEPPER_')) {
+        throw 'Authentication secret updater must reject the retired EMAIL_OTP_PEPPER_* field names.'
+    }
+    $authDeploymentCandidateBlock = [regex]::Match(
+        $auth,
+        '(?s)awk ''\s+!/\^AUTH_SCHEMA_TRANSITION_MODE=/.*?\} >>"\$deployment_candidate"'
+    )
+    if (-not $authDeploymentCandidateBlock.Success -or
+        $authDeploymentCandidateBlock.Groups[0].Value.Contains(
+            'QQ_UNION_ID_NAMESPACE_INITIALIZED'
+        )) {
+        throw 'Authentication updater must never copy the shared QQ marker into deployment.env.'
+    }
+    $authCutoverGate = 'assert_phone_only_cutover_ready "$retires_legacy_auth_configuration"'
+    $authApiCandidate = 'api_candidate="$(mktemp'
+    $authApiReplacement = 'mv -f -- "$api_candidate" "$api_env"'
+    if ($auth.IndexOf($authCutoverGate, [System.StringComparison]::Ordinal) -lt 0 -or
+        $auth.IndexOf($authCutoverGate, [System.StringComparison]::Ordinal) -gt
+            $auth.IndexOf($authApiCandidate, [System.StringComparison]::Ordinal) -or
+        $auth.IndexOf($authCutoverGate, [System.StringComparison]::Ordinal) -gt
+            $auth.IndexOf($authApiReplacement, [System.StringComparison]::Ordinal)) {
+        throw 'Authentication cutover proof must pass before creating or replacing the shared api.env candidate.'
+    }
+    $authUnionPendingGate = 'if [[ "$mode" != ''--legacy-drain'' && "$current_schema_transition_mode" == ''wechat_union_aliases_pending'' ]]; then'
+    $authUnionEnableGate = 'if [[ "$mode" == ''--apply'' && "$target_wechat_auth_enabled" == ''true'' ]]; then'
+    $authUnionReadyCall = '  assert_wechat_union_aliases_ready'
+    if ([regex]::Matches($auth, [regex]::Escape('assert_wechat_union_aliases_ready')).Count -ne 2 -or
+        $auth.IndexOf($authUnionPendingGate, [System.StringComparison]::Ordinal) -lt 0 -or
+        $auth.IndexOf($authUnionEnableGate, [System.StringComparison]::Ordinal) -lt 0 -or
+        $auth.IndexOf($authUnionReadyCall, [System.StringComparison]::Ordinal) -lt
+            $auth.IndexOf($authUnionEnableGate, [System.StringComparison]::Ordinal) -or
+        $auth.IndexOf($authUnionPendingGate, [System.StringComparison]::Ordinal) -gt
+            $auth.IndexOf($authApiCandidate, [System.StringComparison]::Ordinal) -or
+        $auth.IndexOf($authUnionReadyCall, [System.StringComparison]::Ordinal) -gt
+            $auth.IndexOf($authApiCandidate, [System.StringComparison]::Ordinal) -or
+        $auth.IndexOf($authUnionEnableGate, [System.StringComparison]::Ordinal) -gt
+            $auth.IndexOf($authApiCandidate, [System.StringComparison]::Ordinal)) {
+        throw 'WeChat enablement must reject the pending bridge and prove schema 0012 plus least-privilege ACL before creating an auth candidate.'
+    }
+    $authQqStateEnableGate = 'if [[ "$mode" == ''--apply'' && "$target_qq_auth_enabled" == ''true'' ]]; then'
+    $authQqStateChangeGate = '  if [[ "$qq_identity_state_change_required" == ''true'' ]]; then'
+    $authQqStateReadyCall = '    assert_qq_identity_state_change_ready'
+    $authQqStatePersistCall = '    persist_qq_identity_state '
+    $authQqStateCountGate = "SELECT count(*) FROM public.identity_bindings WHERE identity_type = 'QQ';"
+    $authQqStatePersistDefinition = 'persist_qq_identity_state() {'
+    $authNonActiveCandidateGate = '[[ "$active_deploy" != "$bundle_root" ]]'
+    if ([regex]::Matches($auth, [regex]::Escape('assert_qq_identity_state_change_ready')).Count -ne 2 -or
+        [regex]::Matches($auth, [regex]::Escape('persist_qq_identity_state')).Count -ne 2 -or
+        $auth.IndexOf($authQqStateEnableGate, [System.StringComparison]::Ordinal) -lt 0 -or
+        $auth.IndexOf($authQqStateChangeGate, [System.StringComparison]::Ordinal) -lt
+            $auth.IndexOf($authQqStateEnableGate, [System.StringComparison]::Ordinal) -or
+        $auth.IndexOf($authQqStateReadyCall, [System.StringComparison]::Ordinal) -lt
+            $auth.IndexOf($authQqStateChangeGate, [System.StringComparison]::Ordinal) -or
+        $auth.IndexOf($authQqStatePersistCall, [System.StringComparison]::Ordinal) -lt
+            $auth.IndexOf($authQqStateReadyCall, [System.StringComparison]::Ordinal) -or
+        $auth.IndexOf($authQqStatePersistCall, [System.StringComparison]::Ordinal) -gt
+            $auth.IndexOf($authApiCandidate, [System.StringComparison]::Ordinal) -or
+        $auth.IndexOf($authQqStateCountGate, [System.StringComparison]::Ordinal) -lt 0 -or
+        $auth.IndexOf($authQqStatePersistDefinition, [System.StringComparison]::Ordinal) -lt
+            $auth.IndexOf($authQqStateCountGate, [System.StringComparison]::Ordinal) -or
+        $auth.IndexOf($authNonActiveCandidateGate, [System.StringComparison]::Ordinal) -lt 0 -or
+        $auth.IndexOf($authNonActiveCandidateGate, [System.StringComparison]::Ordinal) -gt
+            $auth.IndexOf($authUnionEnableGate, [System.StringComparison]::Ordinal) -or
+        $auth.IndexOf($authNonActiveCandidateGate, [System.StringComparison]::Ordinal) -gt
+            $auth.IndexOf($authQqStateEnableGate, [System.StringComparison]::Ordinal) -or
+        $auth.IndexOf($authNonActiveCandidateGate, [System.StringComparison]::Ordinal) -gt
+            $auth.IndexOf($authApiCandidate, [System.StringComparison]::Ordinal)) {
+        throw 'QQ shared identity-state initialization must pass the zero-binding gate and persist before API/deployment candidate creation.'
+    }
+    $authCleanup = [regex]::Match(
+        $auth,
+        '(?s)cleanup\(\) \{(?<body>.*?)\n\}\ntrap cleanup EXIT'
+    )
+    if (-not $authCleanup.Success -or
+        $authCleanup.Groups['body'].Value.Contains('identity_state')) {
+        throw 'Authentication rollback must restore API/deployment files without rolling back shared QQ identity state.'
+    }
+    $authPreflightCall = 'if ! "$preflight" >/dev/null; then'
+    $authDeploymentReplace = 'mv -f -- "$deployment_candidate" "$deployment_env"'
+    if ([regex]::Matches(
+            $auth,
+            [regex]::Escape($authPreflightCall)
+        ).Count -ne 1 -or
+        $auth.IndexOf($authPreflightCall, [System.StringComparison]::Ordinal) -lt
+            $auth.IndexOf($authDeploymentReplace, [System.StringComparison]::Ordinal)) {
+        throw 'Authentication updater must preflight exactly once after replacing the candidate deployment env; non-bridge modes also replace api.env first.'
+    }
     foreach ($required in @(
         '--network none --read-only',
         '--env-file "$secrets_dir/api.env"',
+        '--env AUTH_SCHEMA_TRANSITION_MODE="$auth_schema_transition_mode"',
+        'AUTH_SCHEMA_TRANSITION_MODE must be none, legacy_phone_drain or wechat_union_aliases_pending',
+        'legacy_phone_drain requires ACCOUNTS_ENABLED=false',
+        'wechat_union_aliases_pending requires WECHAT_AUTH_ENABLED=false',
+        'WECHAT_OPEN_PLATFORM_REALM_ID',
+        'WECHAT_OPEN_PLATFORM_REALM_ID must be a stable lowercase internal identifier',
+        '--env WECHAT_OPEN_PLATFORM_REALM_ID="$wechat_open_platform_realm_id"',
+        'QQ_OPEN_PLATFORM_REALM_ID',
+        'QQ_OPEN_PLATFORM_REALM_ID must be a stable lowercase internal identifier',
+        '--env QQ_OPEN_PLATFORM_REALM_ID="$qq_open_platform_realm_id"',
+        'qq_identity_state_file="$shared_state_directory/auth-identity-state.env"',
+        'assert_regular_file "$qq_identity_state_file" 600',
+        'AUTH_IDENTITY_STATE_FORMAT_VERSION',
+        'QQ_UNION_ID_NAMESPACE_INITIALIZED',
+        'assert_exact_env_keys "$qq_identity_state_file"',
+        'release must preserve the shared QQ Open Platform realm',
+        'QQ authentication requires initialized shared identity state',
+        'if [[ "$qq_identity_state_present" == ''false'' ]]; then',
+        'QQ_UNION_ID_ENABLED requires an initialized QQ UnionID namespace',
+        'initialized QQ UnionID namespace requires UnionID whenever QQ authentication is enabled',
+        'assert_env_keys_with_optional',
+        'AUTH_OTP_PEPPER_ACTIVE_VERSION',
+        'AUTH_OTP_PEPPER_KEYS_JSON',
+        'ALIYUN_SMS_SIGN_NAME',
+        'ALIYUN_FUSION_SCHEME_CODE',
+        'ALIYUN_FUSION_PACKAGE_NAME',
+        'ALIYUN_FUSION_PACKAGE_SIGN',
         'loadAuthRuntimeConfig(process.env',
         'production: true',
-        'accounts require SMS phone auth or FusionAuth',
+        'PHONE_ONLY accounts require SMS phone authentication',
+        'QQ_UNION_ID_ENABLED requires QQ_AUTH_ENABLED',
+        'ALIYUN_PNVS_SIGN_NAME ALIYUN_PNVS_TEMPLATE_CODE',
+        'if [[ "$email_auth_enabled" == ''true'' ]]; then',
+        'SMTP_HOST SMTP_PORT SMTP_SECURE SMTP_USERNAME SMTP_PASSWORD',
+        'SMTP_FROM_ADDRESS SMTP_REPLY_TO SMTP_FROM_NAME',
         'if [[ "$wechat_auth_enabled" == ''true'' ]]; then',
         'api_env_names+=(WECHAT_APP_ID WECHAT_APP_SECRET)',
+        'if [[ "$qq_auth_enabled" == ''true'' ]]; then',
+        'api_env_names+=(QQ_APP_ID QQ_APP_KEY)',
         'config.registrationEnabled !== registrationEnabled',
+        'config.wechat.openPlatformRealmId',
+        'config.qq.unionIdEnabled',
+        'config.qq.openPlatformRealmId',
         'AUTH_CONFIG_VALIDATION=OK',
+        'api.env contains an incomplete authentication identity/session continuity group',
+        'api.env contains an incomplete email OTP continuity group',
+        'disabled authentication continuity validation failed',
         '/app/dist/auth/auth-config.js',
+        '/app/migrations/0012_wechat_union_aliases.sql',
         'API image rejected authentication configuration'
     )) {
         if (-not $preflight.Contains($required)) {
             throw "Deployment preflight is missing runtime-equivalent authentication validation: $required"
         }
+    }
+    if ($preflight.Contains('SMTP_APP_PASSWORD') -or
+        $preflight.Contains('EMAIL_OTP_PEPPER_')) {
+        throw 'Deployment preflight must accept only runtime SMTP_PASSWORD and AUTH_OTP_PEPPER_* names.'
+    }
+    $preflightLegacyApiEnvGate = '(?s)if \[\[ "\$auth_schema_transition_mode" == ''legacy_phone_drain'' \]\]; then.*?' +
+        'assert_env_keys_with_optional.*?else\s+' +
+        'assert_exact_env_keys "\$secrets_dir/api\.env" "\$\{api_env_names\[@\]\}"\s+fi'
+    if ($preflight -notmatch $preflightLegacyApiEnvGate) {
+        throw 'Deployment preflight must allow the retired auth whitelist only in legacy_phone_drain and keep ordinary api.env validation exact.'
     }
     if (-not $permissionHardener.Contains('"$bundle_root/postgres/pg_hba.conf") chmod 644 "$path" ;;') -or
         -not $preflight.Contains('"$bundle_root/postgres/pg_hba.conf") assert_regular_file "$path" 644 ;;')) {
@@ -817,15 +1358,28 @@ function Assert-EcsOperationalGates {
         [regex]::Matches($preflight, $preflightWechatFieldAppend).Count -ne 1) {
         throw 'WeChat credentials must be required exactly once and only inside the enabled-channel condition.'
     }
+    $authQqFieldAppend = 'input_names\+=\(QQ_APP_ID QQ_APP_KEY\)'
+    $authQqConditional = '(?s)if \[\[ "\$target_qq_auth_enabled" == ''true'' \]\]; then\s+' +
+        $authQqFieldAppend + '\s+fi'
+    $preflightQqFieldAppend = 'api_env_names\+=\(QQ_APP_ID QQ_APP_KEY\)'
+    $preflightQqConditional = '(?s)if \[\[ "\$qq_auth_enabled" == ''true'' \]\]; then\s+' +
+        $preflightQqFieldAppend + '\s+fi'
+    if ($auth -notmatch $authQqConditional -or
+        [regex]::Matches($auth, $authQqFieldAppend).Count -ne 1 -or
+        $preflight -notmatch $preflightQqConditional -or
+        [regex]::Matches($preflight, $preflightQqFieldAppend).Count -ne 1) {
+        throw 'QQ AppID/AppKey must be required exactly once and only inside the enabled-channel condition.'
+    }
     if ($auth.Contains('accounts require WeChat authentication') -or
         $preflight.Contains('accounts require WeChat authentication')) {
-        throw 'Fusion-only accounts must not depend on the WeChat authentication channel.'
+        throw 'PHONE_ONLY accounts must not depend on the WeChat authentication channel.'
     }
     foreach ($required in @(
         "lock_directory='/run/lock/chi-shen-me'",
         'lock_file="$lock_directory/mutation.lock"',
         'flock -n 9',
         '[[ "$#" -eq 0 ]]',
+        'candidate release is already current',
         '"$preflight" >/dev/null',
         'candidate_compose up -d --no-deps --force-recreate --pull never --no-build api',
         'old_compose_command up -d --no-deps --force-recreate --pull never --no-build api',

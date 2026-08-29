@@ -175,6 +175,13 @@ class AccountExportCapabilityLifecycleTest {
             gate.markConfigurationUntrusted(2)
             gate.acceptTrustedConfiguration(2, "9.0.0")
             runCurrent()
+
+            assertEquals(
+                com.chishenme.app.feature.config.RuntimeAppVersionGate.Status.UPDATE_REQUIRED,
+                gate.currentState.status,
+            )
+            assertEquals(AccountStatus.SIGNED_IN, viewModel.state.value.status)
+            assertFalse(viewModel.state.value.busy)
             viewModel.deleteAccount()
             runCurrent()
 
@@ -473,20 +480,13 @@ private class FakeAuthActions : AccountAuthActions {
     override suspend fun createOAuthState(
         provider: AuthIdentityType,
         purpose: OAuthPurpose,
-        phoneChallengeId: String?,
     ): AuthOutcome<OAuthStateResponse> = error("unused")
-
-    override suspend fun registerPhoneWechat(
-        challengeId: String,
-        otpCode: String,
-        oauthState: String,
-        authorizationCode: String,
-    ): AuthOutcome<LocalAuthSession> = error("unused")
 
     override suspend fun loginWithOtp(
         type: AuthIdentityType,
         challengeId: String,
         otpCode: String,
+        phoneNumber: String?,
     ): AuthOutcome<LocalAuthSession> = error("unused")
 
     override suspend fun loginWithWechat(
@@ -496,7 +496,7 @@ private class FakeAuthActions : AccountAuthActions {
 
     override suspend fun loginWithQq(
         oauthState: String,
-        qqAccessToken: String,
+        authorizationCode: String,
     ): AuthOutcome<LocalAuthSession> = error("unused")
 
     override suspend fun bindWithOtp(
@@ -507,7 +507,12 @@ private class FakeAuthActions : AccountAuthActions {
 
     override suspend fun bindWithQq(
         oauthState: String,
-        qqAccessToken: String,
+        authorizationCode: String,
+    ): AuthOutcome<AuthIdentityBinding> = error("unused")
+
+    override suspend fun bindWithWechat(
+        oauthState: String,
+        authorizationCode: String,
     ): AuthOutcome<AuthIdentityBinding> = error("unused")
 
     override suspend fun unbindIdentity(bindingId: String): AuthOutcome<Unit> = error("unused")

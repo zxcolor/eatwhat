@@ -49,6 +49,10 @@ API 运行进程；管理员、迁移、维护、导出 worker 和其他父终�
 
 本机已准备 Android 工具时，可执行一条完整验证命令：
 
+执行前必须仅在当前进程把受控的 Alpha 微信、QQ 公开 AppID 分别设置为
+`CHISHENME_ALPHA_WECHAT_APP_ID`、`CHISHENME_ALPHA_QQ_APP_ID`；不得在此处或命令中
+使用微信 AppSecret、QQ AppKey 或其他服务端 Secret。
+
 ```powershell
 .\scripts\verify.ps1 -AlphaApiBaseUrl 'https://api.unfinished-era.com/'
 ```

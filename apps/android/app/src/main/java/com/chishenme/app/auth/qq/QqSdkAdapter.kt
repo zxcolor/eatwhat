@@ -6,6 +6,7 @@ import android.content.Intent
 import android.os.Build
 import com.chishenme.app.BuildConfig
 import com.chishenme.app.feature.consent.PrivacyAuthorizationGate
+import com.tencent.connect.common.Constants
 import com.tencent.tauth.IUiListener
 import com.tencent.tauth.Tencent
 import com.tencent.tauth.UiError
@@ -30,7 +31,7 @@ internal class AndroidQqSdkSessionFactory @Inject constructor(
     private var sdkPermissionWasGranted = false
 
     override val isConfigured: Boolean
-        get() = appId.matches(QQ_APP_ID)
+        get() = appId.matches(QQ_APP_ID_PATTERN)
 
     override fun create(onCallback: (QqSdkCallback) -> Unit): QqSdkSession = synchronized(lock) {
         check(isConfigured) { "QQ client is not configured" }
@@ -62,7 +63,7 @@ internal class AndroidQqSdkSessionFactory @Inject constructor(
     }
 
     private companion object {
-        val QQ_APP_ID = Regex("^[1-9][0-9]{4,15}$")
+        val QQ_APP_ID_PATTERN = Regex("^[1-9][0-9]{4,15}$")
     }
 }
 
@@ -93,14 +94,14 @@ private class AndroidQqSdkSession(
     }
 
     override fun launchLogin(activity: Activity): Boolean =
-        tencent.login(activity, LOGIN_SCOPE, listener) >= 0
+        tencent.loginServerSide(activity, LOGIN_SCOPE, listener) >= 0
 
     override fun handleActivityResult(
         requestCode: Int,
         resultCode: Int,
         data: Intent?,
     ): Boolean {
-        if (requestCode != Tencent.REQUEST_LOGIN) return false
+        if (!isQqLoginActivityResult(requestCode)) return false
         if (data == null) {
             callback?.invoke(
                 if (resultCode == Activity.RESULT_CANCELED) {
@@ -126,11 +127,20 @@ private class AndroidQqSdkSession(
     }
 }
 
-/** Reads only the access token; client-returned open identity is ignored. */
+internal fun isQqLoginActivityResult(requestCode: Int): Boolean =
+    requestCode == Constants.REQUEST_LOGIN
+
+/**
+ * Reads only the short-lived server-side authorization code. Tencent's Android
+ * SDK returns that code in its historical `access_token` JSON field when
+ * [Tencent.loginServerSide] is used. Client-returned OpenID and other identity
+ * material are deliberately ignored and must be resolved by the backend.
+ */
 private fun Any?.toSafeQqCallback(): QqSdkCallback {
     val json = this as? JSONObject ?: return QqSdkCallback.Invalid
     if (!json.has("ret") || json.optInt("ret", Int.MIN_VALUE) != 0) {
         return QqSdkCallback.Invalid
     }
-    return QqSdkCallback.Authorized(json.optString("access_token").takeIf(String::isNotBlank))
+    val authorizationCode = json.optString("access_token").takeIf(String::isNotBlank)
+    return QqSdkCallback.Authorized(authorizationCode)
 }

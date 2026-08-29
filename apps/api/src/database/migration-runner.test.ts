@@ -131,4 +131,62 @@ describe("transactional migration runner", () => {
 			"落后",
 		);
 	});
+
+	it("allows the bridge to miss only the exact final phone-only migration", async () => {
+		const legacySources = Array.from({ length: 10 }, (_, index) => {
+			const version = index + 1;
+			return {
+				fileName: `${String(version).padStart(4, "0")}_legacy_${String(version)}.sql`,
+				contents: Buffer.from(`SELECT ${String(version)};`),
+			};
+		});
+		const migrations = buildMigrationPlan([
+			...legacySources,
+			{
+				fileName: "0011_phone_only_auth.sql",
+				contents: Buffer.from("SELECT 11;"),
+			},
+		]);
+		const bridgeTarget = {
+			version: 11,
+			name: "phone_only_auth",
+			fileName: "0011_phone_only_auth.sql",
+		} as const;
+		const client = new FakeSqlClient();
+		client.appliedRows = migrations
+			.slice(0, 10)
+			.map(({ version, name, checksum }) => ({ version, name, checksum }));
+
+		await expect(
+			verifySchemaWithClient(client, migrations, bridgeTarget),
+		).resolves.toBeUndefined();
+		await expect(verifySchemaWithClient(client, migrations)).rejects.toThrow(
+			"落后",
+		);
+
+		client.appliedRows = migrations.map(({ version, name, checksum }) => ({
+			version,
+			name,
+			checksum,
+		}));
+		await expect(
+			verifySchemaWithClient(client, migrations, bridgeTarget),
+		).resolves.toBeUndefined();
+
+		client.appliedRows = client.appliedRows.slice(0, 9);
+		await expect(
+			verifySchemaWithClient(client, migrations, bridgeTarget),
+		).rejects.toThrow("受控认证迁移过渡条件");
+
+		const wrongFinal = buildMigrationPlan([
+			...legacySources,
+			{ fileName: "0011_other.sql", contents: Buffer.from("SELECT 12;") },
+		]);
+		client.appliedRows = wrongFinal
+			.slice(0, 10)
+			.map(({ version, name, checksum }) => ({ version, name, checksum }));
+		await expect(
+			verifySchemaWithClient(client, wrongFinal, bridgeTarget),
+		).rejects.toThrow("受控认证迁移过渡条件");
+	});
 });

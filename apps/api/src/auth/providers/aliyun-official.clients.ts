@@ -1,29 +1,21 @@
 import CredentialPackage from "@alicloud/credentials";
 import DypnsapiPackage, {
-	GetFusionAuthTokenRequest,
-	VerifyWithFusionAuthTokenRequest,
+	CheckSmsVerifyCodeRequest,
+	SendSmsVerifyCodeRequest,
 } from "@alicloud/dypnsapi20170525";
-import DysmsapiPackage, { SendSmsRequest } from "@alicloud/dysmsapi20170525";
 import { $OpenApiUtil } from "@alicloud/openapi-core";
 import { RuntimeOptions } from "@darabonba/typescript";
 import type { AppConfig } from "../../config/app-config.js";
 import type {
-	AliyunSmsClient,
-	AliyunSmsRuntimeOptions,
-	AliyunSmsSendRequest,
-	AliyunSmsSendResponse,
-} from "./aliyun-sms-otp.provider.js";
-import type {
-	AliyunFusionClient,
-	AliyunFusionRuntimeOptions,
-	AliyunFusionTokenRequest,
-	AliyunFusionTokenResponse,
-	AliyunFusionVerifyRequest,
-	AliyunFusionVerifyResponse,
-} from "./fusion-auth.provider.js";
+	AliyunPnvsCheckRequest,
+	AliyunPnvsCheckResponse,
+	AliyunPnvsClient,
+	AliyunPnvsRuntimeOptions,
+	AliyunPnvsSendRequest,
+	AliyunPnvsSendResponse,
+} from "./aliyun-pnvs-otp.provider.js";
 
-const SMS_ENDPOINT = "dysmsapi.aliyuncs.com";
-const FUSION_ENDPOINT = "dypnsapi.aliyuncs.com";
+const PNVS_ENDPOINT = "dypnsapi.aliyuncs.com";
 const SAFE_CREDENTIAL_FAILURE = "账号阿里云认证凭据不可用";
 const SAFE_UPSTREAM_FAILURE = "阿里云认证请求失败";
 
@@ -42,9 +34,7 @@ const CredentialConstructor =
 	resolveCommonJsConstructor<typeof CredentialPackage.default>(
 		CredentialPackage,
 	);
-const SmsClientConstructor =
-	resolveCommonJsConstructor<typeof DysmsapiPackage.default>(DysmsapiPackage);
-const FusionClientConstructor =
+const PnvsClientConstructor =
 	resolveCommonJsConstructor<typeof DypnsapiPackage.default>(DypnsapiPackage);
 
 export interface AliyunCredentialModelLike {
@@ -58,22 +48,15 @@ export interface AliyunCredentialLike {
 	getCredential(): Promise<AliyunCredentialModelLike>;
 }
 
-interface OfficialSmsSdkClient {
-	sendSmsWithOptions(
-		request: SendSmsRequest,
+interface OfficialPnvsSdkClient {
+	sendSmsVerifyCodeWithOptions(
+		request: SendSmsVerifyCodeRequest,
 		runtime: RuntimeOptions,
-	): Promise<AliyunSmsSendResponse>;
-}
-
-interface OfficialFusionSdkClient {
-	getFusionAuthTokenWithOptions(
-		request: GetFusionAuthTokenRequest,
+	): Promise<AliyunPnvsSendResponse>;
+	checkSmsVerifyCodeWithOptions(
+		request: CheckSmsVerifyCodeRequest,
 		runtime: RuntimeOptions,
-	): Promise<AliyunFusionTokenResponse>;
-	verifyWithFusionAuthTokenWithOptions(
-		request: VerifyWithFusionAuthTokenRequest,
-		runtime: RuntimeOptions,
-	): Promise<AliyunFusionVerifyResponse>;
+	): Promise<AliyunPnvsCheckResponse>;
 }
 
 export type SafeAliyunFailureReason =
@@ -90,19 +73,19 @@ export class SafeAliyunSdkError extends Error {
 
 export interface AliyunOfficialClientDependencies {
 	createCredential(): AliyunCredentialLike;
-	createSmsSdkClient(
+	createPnvsSdkClient(
 		credential: AliyunCredentialLike,
 		timeoutMs: number,
-	): OfficialSmsSdkClient;
+	): OfficialPnvsSdkClient;
 }
 
 const OFFICIAL_DEPENDENCIES: AliyunOfficialClientDependencies = Object.freeze({
 	createCredential: () => new CredentialConstructor(),
-	createSmsSdkClient: (credential: AliyunCredentialLike, timeoutMs: number) =>
-		new SmsClientConstructor(
+	createPnvsSdkClient: (credential: AliyunCredentialLike, timeoutMs: number) =>
+		new PnvsClientConstructor(
 			new $OpenApiUtil.Config({
 				credential: credential as OfficialCredential,
-				endpoint: SMS_ENDPOINT,
+				endpoint: PNVS_ENDPOINT,
 				protocol: "HTTPS",
 				connectTimeout: timeoutMs,
 				readTimeout: timeoutMs,
@@ -110,35 +93,6 @@ const OFFICIAL_DEPENDENCIES: AliyunOfficialClientDependencies = Object.freeze({
 			}),
 		),
 });
-
-export interface AliyunFusionOfficialClientDependencies {
-	createFusionSdkClient(
-		credential: AliyunCredentialLike,
-		timeoutMs: number,
-	): OfficialFusionSdkClient;
-}
-
-const FUSION_OFFICIAL_DEPENDENCIES: AliyunFusionOfficialClientDependencies =
-	Object.freeze({
-		createFusionSdkClient: (
-			credential: AliyunCredentialLike,
-			timeoutMs: number,
-		) =>
-			new FusionClientConstructor(
-				new $OpenApiUtil.Config({
-					credential: credential as OfficialCredential,
-					endpoint: FUSION_ENDPOINT,
-					protocol: "HTTPS",
-					connectTimeout: timeoutMs,
-					readTimeout: timeoutMs,
-					maxIdleConns: 1,
-				}),
-			),
-	});
-
-function deliveryEnabled(config: AppConfig): boolean {
-	return config.auth.phone.enabled || config.auth.fusion.enabled;
-}
 
 function usableCredential(model: AliyunCredentialModelLike): boolean {
 	return (
@@ -169,17 +123,11 @@ async function getCredentialBeforeDeadline(
 	}
 }
 
-/**
- * Builds and verifies the official default credential chain before Nest starts.
- * The returned handle refreshes temporary RAM-role credentials inside Alibaba's
- * official library; this function never copies credentials into app config.
- */
 export async function createAliyunCredential(
 	config: AppConfig,
 	dependencies: AliyunOfficialClientDependencies = OFFICIAL_DEPENDENCIES,
 ): Promise<AliyunCredentialLike | undefined> {
-	if (!deliveryEnabled(config)) return undefined;
-
+	if (!config.auth.phone.enabled) return undefined;
 	try {
 		const credential = dependencies.createCredential();
 		const model = await getCredentialBeforeDeadline(
@@ -195,75 +143,32 @@ export async function createAliyunCredential(
 		}
 		return credential;
 	} catch {
-		// Never retain the SDK exception: the default chain can include profile
-		// paths, metadata response bodies, AccessKey identifiers, or upstream text.
 		throw new Error(SAFE_CREDENTIAL_FAILURE);
 	}
 }
 
-export function createOfficialAliyunSmsClient(
+export function createOfficialAliyunPnvsClient(
 	config: AppConfig,
 	credential: AliyunCredentialLike | undefined,
 	dependencies: AliyunOfficialClientDependencies = OFFICIAL_DEPENDENCIES,
-): AliyunSmsClient | undefined {
+): AliyunPnvsClient | undefined {
 	if (!config.auth.phone.enabled) return undefined;
 	if (credential === undefined) throw new Error(SAFE_CREDENTIAL_FAILURE);
-	return new OfficialAliyunSmsClient(
-		dependencies.createSmsSdkClient(credential, config.auth.phone.timeoutMs),
+	return new OfficialAliyunPnvsClient(
+		dependencies.createPnvsSdkClient(credential, config.auth.phone.timeoutMs),
 	);
 }
 
-export function createOfficialAliyunFusionClient(
-	config: AppConfig,
-	credential: AliyunCredentialLike | undefined,
-	dependencies: AliyunFusionOfficialClientDependencies =
-		FUSION_OFFICIAL_DEPENDENCIES,
-): AliyunFusionClient | undefined {
-	if (!config.auth.fusion.enabled) return undefined;
-	if (credential === undefined) throw new Error(SAFE_CREDENTIAL_FAILURE);
-	return new OfficialAliyunFusionClient(
-		dependencies.createFusionSdkClient(
-			credential,
-			config.auth.fusion.timeoutMs,
-		),
-	);
-}
+class OfficialAliyunPnvsClient implements AliyunPnvsClient {
+	constructor(private readonly client: OfficialPnvsSdkClient) {}
 
-class OfficialAliyunSmsClient implements AliyunSmsClient {
-	constructor(private readonly client: OfficialSmsSdkClient) {}
-
-	async sendSmsWithOptions(
-		request: AliyunSmsSendRequest,
-		runtime: AliyunSmsRuntimeOptions,
-	): Promise<AliyunSmsSendResponse> {
+	async sendSmsVerifyCodeWithOptions(
+		request: AliyunPnvsSendRequest,
+		runtime: AliyunPnvsRuntimeOptions,
+	): Promise<AliyunPnvsSendResponse> {
 		try {
-			const response = await this.client.sendSmsWithOptions(
-				new SendSmsRequest({
-					phoneNumbers: request.phoneNumbers,
-					signName: request.signName,
-					templateCode: request.templateCode,
-					templateParam: request.templateParam,
-					outId: request.outId,
-				}),
-				new RuntimeOptions({ ...runtime }),
-			);
-			return response;
-		} catch (error) {
-			throw new SafeAliyunSdkError(classifySdkFailure(error));
-		}
-	}
-}
-
-class OfficialAliyunFusionClient implements AliyunFusionClient {
-	constructor(private readonly client: OfficialFusionSdkClient) {}
-
-	async getFusionAuthTokenWithOptions(
-		request: AliyunFusionTokenRequest,
-		runtime: AliyunFusionRuntimeOptions,
-	): Promise<AliyunFusionTokenResponse> {
-		try {
-			return await this.client.getFusionAuthTokenWithOptions(
-				new GetFusionAuthTokenRequest({ ...request }),
+			return await this.client.sendSmsVerifyCodeWithOptions(
+				new SendSmsVerifyCodeRequest({ ...request }),
 				new RuntimeOptions({ ...runtime }),
 			);
 		} catch (error) {
@@ -271,13 +176,13 @@ class OfficialAliyunFusionClient implements AliyunFusionClient {
 		}
 	}
 
-	async verifyWithFusionAuthTokenWithOptions(
-		request: AliyunFusionVerifyRequest,
-		runtime: AliyunFusionRuntimeOptions,
-	): Promise<AliyunFusionVerifyResponse> {
+	async checkSmsVerifyCodeWithOptions(
+		request: AliyunPnvsCheckRequest,
+		runtime: AliyunPnvsRuntimeOptions,
+	): Promise<AliyunPnvsCheckResponse> {
 		try {
-			return await this.client.verifyWithFusionAuthTokenWithOptions(
-				new VerifyWithFusionAuthTokenRequest({ ...request }),
+			return await this.client.checkSmsVerifyCodeWithOptions(
+				new CheckSmsVerifyCodeRequest({ ...request }),
 				new RuntimeOptions({ ...runtime }),
 			);
 		} catch (error) {

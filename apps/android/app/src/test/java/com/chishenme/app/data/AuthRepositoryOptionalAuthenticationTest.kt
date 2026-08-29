@@ -8,12 +8,17 @@ import com.chishenme.app.data.local.AuthSessionToPersist
 import com.chishenme.app.data.local.RefreshTokenCipher
 import com.chishenme.app.data.remote.AuthApi
 import com.chishenme.app.data.remote.AuthCodeChallenge
+import com.chishenme.app.data.remote.AuthIdentityBinding
 import com.chishenme.app.data.remote.AuthIdentityType
+import com.chishenme.app.data.remote.AuthLoginMethod
+import com.chishenme.app.data.remote.AuthLoginRequest
 import com.chishenme.app.data.remote.AuthTokenResponse
+import com.chishenme.app.data.remote.BindIdentityResponse
 import com.chishenme.app.data.remote.DeleteAccountResponse
 import com.chishenme.app.data.remote.OAuthPurpose
 import com.chishenme.app.data.remote.OAuthStateResponse
 import com.chishenme.app.data.remote.OtpPurpose
+import com.chishenme.app.data.remote.PhoneCodeRequest
 import com.chishenme.app.feature.consent.PrivacyAuthorizationGate
 import java.lang.reflect.Proxy
 import java.time.Instant
@@ -32,7 +37,90 @@ import org.junit.Test
 
 class AuthRepositoryOptionalAuthenticationTest {
     @Test
-    fun `unsupported Android 1_0 identity purposes fail before transport`() = runTest {
+    fun `local and E164 mainland phone inputs use the same E164 challenge target`() = runTest {
+        val captured = mutableListOf<PhoneCodeRequest>()
+        val api = Proxy.newProxyInstance(
+            AuthApi::class.java.classLoader,
+            arrayOf(AuthApi::class.java),
+        ) { _, method, arguments ->
+            if (method.name != "requestPhoneCode") error("Unexpected AuthApi call: ${method.name}")
+            captured += arguments?.get(1) as PhoneCodeRequest
+            val now = Instant.now()
+            AuthCodeChallenge(
+                challengeId = "44444444-4444-4444-8444-444444444444",
+                targetType = AuthIdentityType.PHONE,
+                maskedTarget = "+86138****8000",
+                expiresAt = now.plusSeconds(300).toString(),
+                resendAvailableAt = now.plusSeconds(60).toString(),
+            )
+        } as AuthApi
+        val repository = AuthRepository(api, store())
+
+        assertTrue(repository.requestPhoneCode("13800138000", OtpPurpose.REGISTER) is AuthOutcome.Success)
+        assertTrue(repository.requestPhoneCode("+8613800138000", OtpPurpose.LOGIN) is AuthOutcome.Success)
+        assertEquals(listOf("+8613800138000", "+8613800138000"), captured.map { it.phoneNumber })
+    }
+
+    @Test
+    fun `phone verification normalizes local input before login transport`() = runTest {
+        var captured: AuthLoginRequest? = null
+        val api = Proxy.newProxyInstance(
+            AuthApi::class.java.classLoader,
+            arrayOf(AuthApi::class.java),
+        ) { _, method, arguments ->
+            if (method.name != "login") error("Unexpected AuthApi call: ${method.name}")
+            captured = arguments?.first() as AuthLoginRequest
+            tokens(
+                userId = "11111111-1111-4111-8111-111111111111",
+                sessionId = "22222222-2222-4222-8222-222222222222",
+                accessCharacter = "a",
+                refreshCharacter = "r",
+            )
+        } as AuthApi
+        val repository = AuthRepository(api, store())
+
+        val outcome = repository.loginWithOtp(
+            AuthIdentityType.PHONE,
+            "44444444-4444-4444-8444-444444444444",
+            "123456",
+            "13800138000",
+        )
+
+        assertTrue(outcome is AuthOutcome.Success)
+        assertEquals("+8613800138000", captured?.phoneNumber)
+    }
+
+    @Test
+    fun `email OTP login uses the email method and persists the returned session`() = runTest {
+        var captured: AuthLoginRequest? = null
+        val userId = "11111111-1111-4111-8111-111111111111"
+        val sessionId = "22222222-2222-4222-8222-222222222222"
+        val store = store()
+        val api = Proxy.newProxyInstance(
+            AuthApi::class.java.classLoader,
+            arrayOf(AuthApi::class.java),
+        ) { _, method, arguments ->
+            if (method.name != "login") error("Unexpected AuthApi call: ${method.name}")
+            captured = arguments?.first() as AuthLoginRequest
+            tokens(userId, sessionId, "a", "r")
+        } as AuthApi
+        val repository = AuthRepository(api, store)
+
+        val outcome = repository.loginWithOtp(
+            AuthIdentityType.EMAIL,
+            "44444444-4444-4444-8444-444444444444",
+            "123456",
+        )
+
+        assertTrue(outcome is AuthOutcome.Success)
+        assertEquals(AuthLoginMethod.EMAIL, captured?.method)
+        assertNull(captured?.phoneNumber)
+        assertEquals(sessionId, repository.session.value?.sessionId)
+        assertTrue(store.hasSessionMaterial())
+    }
+
+    @Test
+    fun `unsupported identity purposes fail before transport`() = runTest {
         var calls = 0
         val api = Proxy.newProxyInstance(
             AuthApi::class.java.classLoader,
@@ -49,15 +137,9 @@ class AuthRepositoryOptionalAuthenticationTest {
             "user@example.com",
             com.chishenme.app.data.remote.OtpPurpose.REGISTER,
         )
-        val wechatBind = repository.createOAuthState(
-            AuthIdentityType.WECHAT,
-            com.chishenme.app.data.remote.OAuthPurpose.BIND,
-            phoneChallengeId = null,
-        )
         val qqRegister = repository.createOAuthState(
             AuthIdentityType.QQ,
             com.chishenme.app.data.remote.OAuthPurpose.REGISTER,
-            phoneChallengeId = challengeId,
         )
         val phoneIdentityBind = repository.bindWithOtp(
             AuthIdentityType.PHONE,
@@ -65,10 +147,56 @@ class AuthRepositoryOptionalAuthenticationTest {
             "123456",
         )
 
-        listOf(phoneBind, emailRegister, wechatBind, qqRegister, phoneIdentityBind).forEach {
+        listOf(phoneBind, emailRegister, qqRegister, phoneIdentityBind).forEach {
             assertTrue(it is AuthOutcome.Failure)
         }
         assertEquals(0, calls)
+    }
+
+    @Test
+    fun `email bind rejects a valid binding of a substituted identity type`() = runTest {
+        val store = store()
+        val userId = "11111111-1111-4111-8111-111111111111"
+        val sessionId = "22222222-2222-4222-8222-222222222222"
+        store.installationId()
+        store.save(
+            AuthSessionToPersist(
+                userId = userId,
+                sessionId = sessionId,
+                refreshToken = "r".repeat(43),
+                refreshTokenExpiresAt = Instant.now().plusSeconds(86_400),
+            ),
+        )
+        val api = Proxy.newProxyInstance(
+            AuthApi::class.java.classLoader,
+            arrayOf(AuthApi::class.java),
+        ) { _, method, _ ->
+            when (method.name) {
+                "refresh" -> tokens(userId, sessionId, "a", "b")
+                "bindIdentity" -> BindIdentityResponse(
+                    binding = AuthIdentityBinding(
+                        bindingId = "33333333-3333-4333-8333-333333333333",
+                        type = AuthIdentityType.PHONE,
+                        maskedValue = "+86138****8000",
+                        boundAt = Instant.now().toString(),
+                        primary = true,
+                        canUnbind = false,
+                    ),
+                )
+                else -> error("Unexpected AuthApi call: ${method.name}")
+            }
+        } as AuthApi
+        val repository = AuthRepository(api, store)
+
+        val outcome = repository.bindWithOtp(
+            AuthIdentityType.EMAIL,
+            "44444444-4444-4444-8444-444444444444",
+            "123456",
+        )
+
+        assertEquals(AuthFailureKind.INVALID_RESPONSE, (outcome as AuthOutcome.Failure).kind)
+        assertEquals(sessionId, repository.session.value?.sessionId)
+        assertTrue(store.hasSessionMaterial())
     }
 
     @Test
@@ -88,6 +216,7 @@ class AuthRepositoryOptionalAuthenticationTest {
             AuthIdentityType.PHONE,
             "44444444-4444-4444-8444-444444444444",
             "123456",
+            "+8613800138000",
         )
 
         assertEquals(AuthFailureKind.FORBIDDEN, (outcome as AuthOutcome.Failure).kind)
@@ -117,11 +246,11 @@ class AuthRepositoryOptionalAuthenticationTest {
             AuthIdentityType.PHONE,
             "44444444-4444-4444-8444-444444444444",
             "123456",
+            "+8613800138000",
         )
         val oauth = repository.createOAuthState(
             AuthIdentityType.WECHAT,
             OAuthPurpose.LOGIN,
-            phoneChallengeId = null,
         )
 
         listOf(restore, login, oauth).forEach { outcome ->
@@ -202,7 +331,6 @@ class AuthRepositoryOptionalAuthenticationTest {
             repository.createOAuthState(
                 AuthIdentityType.WECHAT,
                 OAuthPurpose.LOGIN,
-                phoneChallengeId = null,
             )
         }
 
@@ -257,6 +385,7 @@ class AuthRepositoryOptionalAuthenticationTest {
                 AuthIdentityType.PHONE,
                 "44444444-4444-4444-8444-444444444444",
                 "123456",
+                "+8613800138000",
             )
         }
 
@@ -297,12 +426,14 @@ class AuthRepositoryOptionalAuthenticationTest {
             AuthIdentityType.PHONE,
             "44444444-4444-4444-8444-444444444444",
             "123456",
+            "+8613800138000",
         )
         repository.allowAuthAttemptsAfterPrivacyConsent()
         val allowed = repository.loginWithOtp(
             AuthIdentityType.PHONE,
             "44444444-4444-4444-8444-444444444444",
             "123456",
+            "+8613800138000",
         )
 
         assertEquals(AuthFailureKind.FORBIDDEN, (blocked as AuthOutcome.Failure).kind)
@@ -436,6 +567,7 @@ class AuthRepositoryOptionalAuthenticationTest {
             AuthIdentityType.PHONE,
             "44444444-4444-4444-8444-444444444444",
             "123456",
+            "+8613800138000",
         )
         assertTrue(login is AuthOutcome.Success)
         assertEquals(secondSessionId, repository.session.value?.sessionId)
@@ -480,6 +612,7 @@ class AuthRepositoryOptionalAuthenticationTest {
                 AuthIdentityType.PHONE,
                 "44444444-4444-4444-8444-444444444444",
                 "123456",
+                "+8613800138000",
             ) is AuthOutcome.Success,
         )
         assertTrue(

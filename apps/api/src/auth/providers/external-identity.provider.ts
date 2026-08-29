@@ -29,7 +29,7 @@ export interface WechatAuthorizationProof {
 }
 
 export interface QqAuthorizationProof {
-	readonly accessToken: string;
+	readonly authorizationCode: string;
 }
 
 export interface WechatIdentityProvider {

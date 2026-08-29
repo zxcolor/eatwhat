@@ -137,8 +137,13 @@ class WechatOAuthManager internal constructor(
                     WechatOAuthFailure.PRIVACY_REQUIRED,
                 )
             }
-            if (activeAttempt != null) {
-                return@synchronized WechatOAuthStartResult.Failed(WechatOAuthFailure.BUSY)
+            activeAttempt?.let { current ->
+                if (coordinator.pendingPurpose() != null) {
+                    return@synchronized WechatOAuthStartResult.Failed(WechatOAuthFailure.BUSY)
+                }
+                activeAttempt = null
+                WechatOAuthRuntimeRegistry.detach(this)
+                current.session?.let(::safeDetach)
             }
             when (val prepared = coordinator.prepare(purpose, state, expiresAt)) {
                 is WechatCoordinatorPrepareResult.Rejected -> {

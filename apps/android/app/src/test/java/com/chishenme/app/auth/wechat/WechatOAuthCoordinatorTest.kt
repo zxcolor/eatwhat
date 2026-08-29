@@ -35,7 +35,7 @@ class WechatOAuthCoordinatorTest {
         val expected = "b".repeat(43)
         val attackerState = "c".repeat(43)
         val code = "authorization-code-private"
-        coordinator.prepare(OAuthPurpose.REGISTER, expected, currentTime.plusSeconds(300))
+        coordinator.prepare(OAuthPurpose.LOGIN, expected, currentTime.plusSeconds(300))
 
         val rejected = coordinator.consume(attackerState, code)
             as WechatCoordinatorConsumeResult.Rejected
@@ -47,21 +47,32 @@ class WechatOAuthCoordinatorTest {
     }
 
     @Test
-    fun `bind is unsupported and does not occupy coordinator`() {
+    fun `bind is accepted and retains its purpose until callback`() {
         val state = "f".repeat(43)
 
-        val rejected = coordinator.prepare(
+        val prepared = coordinator.prepare(
             OAuthPurpose.BIND,
             state,
+            currentTime.plusSeconds(300),
+        )
+
+        assertEquals(WechatCoordinatorPrepareResult.Ready, prepared)
+        assertEquals(OAuthPurpose.BIND, coordinator.pendingPurpose())
+        val consumed = coordinator.consume(state, "authorization-code")
+            as WechatCoordinatorConsumeResult.Accepted
+        assertEquals(OAuthPurpose.BIND, consumed.purpose)
+    }
+
+    @Test
+    fun `register purpose is rejected before any state is retained`() {
+        val rejected = coordinator.prepare(
+            OAuthPurpose.REGISTER,
+            "r".repeat(43),
             currentTime.plusSeconds(300),
         ) as WechatCoordinatorPrepareResult.Rejected
 
         assertEquals(WechatOAuthFailure.UNSUPPORTED_PURPOSE, rejected.failure)
         assertEquals(null, coordinator.pendingPurpose())
-        assertEquals(
-            WechatCoordinatorPrepareResult.Ready,
-            coordinator.prepare(OAuthPurpose.LOGIN, state, currentTime.plusSeconds(300)),
-        )
     }
 
     @Test
@@ -85,13 +96,13 @@ class WechatOAuthCoordinatorTest {
     @Test
     fun `new coordinator models process restart and rejects old callback`() {
         val state = "e".repeat(43)
-        coordinator.prepare(OAuthPurpose.REGISTER, state, currentTime.plusSeconds(300))
+        coordinator.prepare(OAuthPurpose.BIND, state, currentTime.plusSeconds(300))
 
         val restartedProcessCoordinator = WechatOAuthCoordinator { currentTime }
         val rejected = restartedProcessCoordinator.consume(state, "authorization-code-123")
             as WechatCoordinatorConsumeResult.Rejected
 
         assertEquals(WechatOAuthFailure.NO_PENDING_AUTHORIZATION, rejected.failure)
-        assertTrue(coordinator.pendingPurpose() == OAuthPurpose.REGISTER)
+        assertTrue(coordinator.pendingPurpose() == OAuthPurpose.BIND)
     }
 }

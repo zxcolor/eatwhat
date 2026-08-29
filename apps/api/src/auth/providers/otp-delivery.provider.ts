@@ -3,14 +3,20 @@ export type OtpDeliveryChannel = "PHONE" | "EMAIL";
 export interface OtpDeliveryRequest {
 	readonly channel: OtpDeliveryChannel;
 	readonly destination: string;
-	readonly code: string;
+	readonly code: string | null;
 	readonly idempotencyKey: string;
 	readonly expiresAt: Date;
 }
 
 export interface OtpDeliveryReceipt {
-	readonly provider: "ALIYUN_SMS" | "SMTP";
+	readonly provider: "ALIYUN_PNVS" | "SMTP";
 	readonly requestReference: string;
+}
+
+export interface PhoneOtpVerificationRequest {
+	readonly destination: string;
+	readonly code: string;
+	readonly idempotencyKey: string;
 }
 
 export type OtpDeliveryFailureReason =
@@ -32,6 +38,11 @@ export interface OtpDeliveryProvider {
 	send(request: OtpDeliveryRequest): Promise<OtpDeliveryReceipt>;
 }
 
+export interface PhoneOtpProvider extends OtpDeliveryProvider {
+	readonly channel: "PHONE";
+	verify(request: PhoneOtpVerificationRequest): Promise<boolean>;
+}
+
 export function validateOtpDeliveryRequest(
 	request: OtpDeliveryRequest,
 	expectedChannel: OtpDeliveryChannel,
@@ -45,10 +56,27 @@ export function validateOtpDeliveryRequest(
 	if (
 		request.channel !== expectedChannel ||
 		!validDestination ||
-		!/^\d{6}$/u.test(request.code) ||
+		!(
+			(expectedChannel === "PHONE" && request.code === null) ||
+			(expectedChannel === "EMAIL" &&
+				request.code !== null &&
+				/^\d{6}$/u.test(request.code))
+		) ||
 		!request.idempotencyKey.match(/^[A-Za-z0-9_-]{16,86}$/u) ||
 		!Number.isFinite(request.expiresAt.getTime()) ||
 		request.expiresAt.getTime() <= Date.now()
+	) {
+		throw new OtpDeliveryUnavailableError("INVALID_REQUEST");
+	}
+}
+
+export function validatePhoneOtpVerificationRequest(
+	request: PhoneOtpVerificationRequest,
+): void {
+	if (
+		!/^\+861[3-9]\d{9}$/u.test(request.destination) ||
+		!/^\d{6}$/u.test(request.code) ||
+		!request.idempotencyKey.match(/^[A-Za-z0-9_-]{16,86}$/u)
 	) {
 		throw new OtpDeliveryUnavailableError("INVALID_REQUEST");
 	}

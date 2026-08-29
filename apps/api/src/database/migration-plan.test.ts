@@ -14,7 +14,7 @@ describe("fixed migration plan", () => {
 	it("loads the repository migration with a deterministic checksum", async () => {
 		const first = await loadMigrationPlan();
 		const second = await loadMigrationPlan();
-		expect(first).toHaveLength(10);
+		expect(first).toHaveLength(12);
 		expect(first[0]).toMatchObject({
 			version: 1,
 			name: "initial_schema",
@@ -78,6 +78,18 @@ describe("fixed migration plan", () => {
 			fileName: "0010_fusion_phone_auth.sql",
 		});
 		expect(first[9]?.checksum).toMatch(/^[0-9a-f]{64}$/u);
+		expect(first[10]).toMatchObject({
+			version: 11,
+			name: "phone_only_auth",
+			fileName: "0011_phone_only_auth.sql",
+		});
+		expect(first[10]?.checksum).toMatch(/^[0-9a-f]{64}$/u);
+		expect(first[11]).toMatchObject({
+			version: 12,
+			name: "wechat_union_aliases",
+			fileName: "0012_wechat_union_aliases.sql",
+		});
+		expect(first[11]?.checksum).toMatch(/^[0-9a-f]{64}$/u);
 		expect(second[0]?.checksum).toBe(first[0]?.checksum);
 		expect(second[1]?.checksum).toBe(first[1]?.checksum);
 		expect(second[2]?.checksum).toBe(first[2]?.checksum);
@@ -88,6 +100,8 @@ describe("fixed migration plan", () => {
 		expect(second[7]?.checksum).toBe(first[7]?.checksum);
 		expect(second[8]?.checksum).toBe(first[8]?.checksum);
 		expect(second[9]?.checksum).toBe(first[9]?.checksum);
+		expect(second[10]?.checksum).toBe(first[10]?.checksum);
+		expect(second[11]?.checksum).toBe(first[11]?.checksum);
 	});
 
 	it("requires versions to start at 0001 and remain contiguous", () => {

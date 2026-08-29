@@ -26,7 +26,10 @@ esac
 
 [[ "$(stat -c '%a:%u:%g' "$backup_dir")" == '700:0:0' ]] || die 'backup directory must be root:root mode 0700'
 
-declare -a required_files=(chi_shen_me.pgdump RESTORE_LIST.txt METADATA.txt SHA256SUMS)
+declare -a required_files=(
+  chi_shen_me.pgdump RESTORE_LIST.txt METADATA.txt SCHEMA_MIGRATIONS.txt
+  ROLE_GRANTS.sql SHA256SUMS
+)
 for name in "${required_files[@]}"; do
   path="$backup_dir/$name"
   [[ -f "$path" && ! -L "$path" ]] || die "required backup file is missing or is a link: $name"
@@ -35,18 +38,32 @@ done
 
 actual_file_count="$(find "$backup_dir" -mindepth 1 -maxdepth 1 -type f | wc -l)"
 actual_entry_count="$(find "$backup_dir" -mindepth 1 -maxdepth 1 | wc -l)"
-[[ "$actual_file_count" -eq 4 && "$actual_entry_count" -eq 4 ]] || die 'backup directory contains an unexpected entry'
+[[ "$actual_file_count" -eq 6 && "$actual_entry_count" -eq 6 ]] || die 'backup directory contains an unexpected entry'
 
 (
   cd "$backup_dir"
-  [[ "$(wc -l <SHA256SUMS)" -eq 3 ]] || die 'backup checksum manifest must contain exactly three entries'
+  [[ "$(wc -l <SHA256SUMS)" -eq 5 ]] || die 'backup checksum manifest must contain exactly five entries'
   grep -Eq '^[0-9a-f]{64}  chi_shen_me\.pgdump$' SHA256SUMS || die 'database dump checksum is missing'
   grep -Eq '^[0-9a-f]{64}  RESTORE_LIST\.txt$' SHA256SUMS || die 'restore-list checksum is missing'
   grep -Eq '^[0-9a-f]{64}  METADATA\.txt$' SHA256SUMS || die 'metadata checksum is missing'
+  grep -Eq '^[0-9a-f]{64}  SCHEMA_MIGRATIONS\.txt$' SHA256SUMS || die 'migration-ledger checksum is missing'
+  grep -Eq '^[0-9a-f]{64}  ROLE_GRANTS\.sql$' SHA256SUMS || die 'role-grant checksum is missing'
   sha256sum --check --strict SHA256SUMS >/dev/null
 )
 grep -qx 'backup_format=chi-shen-me-postgres-v1' "$backup_dir/METADATA.txt" || die 'backup metadata format is invalid'
 grep -q 'schema_migrations' "$backup_dir/RESTORE_LIST.txt" || die 'backup restore list is incomplete'
+grep -Eq '^[1-9][0-9]*\|[a-z0-9][a-z0-9_-]{0,119}\|[0-9a-f]{64}$' \
+  "$backup_dir/SCHEMA_MIGRATIONS.txt" || die 'backup migration ledger format is invalid'
+if grep -Evq '^[1-9][0-9]*\|[a-z0-9][a-z0-9_-]{0,119}\|[0-9a-f]{64}$' \
+  "$backup_dir/SCHEMA_MIGRATIONS.txt"; then
+  die 'backup migration ledger contains an invalid record'
+fi
+recorded_migration_count="$(sed -n 's/^database_facts=[^|]*|[^|]*|//p' "$backup_dir/METADATA.txt")"
+[[ "$recorded_migration_count" =~ ^[1-9][0-9]*$ ]] || die 'backup migration count is invalid'
+[[ "$(wc -l <"$backup_dir/SCHEMA_MIGRATIONS.txt")" -eq "$recorded_migration_count" ]] ||
+  die 'backup migration ledger count differs from metadata'
+grep -Fqx '\set ON_ERROR_STOP on' "$backup_dir/ROLE_GRANTS.sql" ||
+  die 'backup role-grant snapshot is invalid'
 
 postgis_image="$(sed -n 's/^POSTGIS_IMAGE=//p' "$deployment_env")"
 postgis_image_id="$(sed -n 's/^POSTGIS_IMAGE_ID=//p' "$deployment_env")"

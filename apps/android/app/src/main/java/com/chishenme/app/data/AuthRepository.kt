@@ -6,6 +6,7 @@ import com.chishenme.app.data.local.AuthSessionToPersist
 import com.chishenme.app.data.remote.AuthApi
 import com.chishenme.app.data.remote.AuthCodeChallenge
 import com.chishenme.app.data.remote.AuthDeviceContext
+import com.chishenme.app.data.remote.AuthErrorResponse
 import com.chishenme.app.data.remote.AuthIdentityBinding
 import com.chishenme.app.data.remote.AuthIdentityBindingsResponse
 import com.chishenme.app.data.remote.AuthIdentityType
@@ -19,23 +20,19 @@ import com.chishenme.app.data.remote.BindIdentityRequest
 import com.chishenme.app.data.remote.DeleteAccountRequest
 import com.chishenme.app.data.remote.DeleteAccountResponse
 import com.chishenme.app.data.remote.EmailCodeRequest
-import com.chishenme.app.data.remote.FusionAuthPurpose
-import com.chishenme.app.data.remote.FusionAuthTokenRequest
-import com.chishenme.app.data.remote.FusionAuthTokenResponse
-import com.chishenme.app.data.remote.FusionRegistrationPhoneProof
-import com.chishenme.app.data.remote.FusionRegistrationVerifyRequest
 import com.chishenme.app.data.remote.OAuthPurpose
 import com.chishenme.app.data.remote.OAuthStateRequest
 import com.chishenme.app.data.remote.OAuthStateResponse
 import com.chishenme.app.data.remote.OtpPurpose
 import com.chishenme.app.data.remote.PhoneCodeRequest
 import com.chishenme.app.data.remote.RefreshSessionRequest
-import com.chishenme.app.data.remote.RegisterPhoneWechatRequest
-import com.chishenme.app.data.remote.RegisterFusionWechatRequest
 import com.chishenme.app.data.remote.hasIncompatibleApiContractCause
 import com.chishenme.app.feature.consent.PrivacyAuthorizationGate
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
+import java.nio.ByteBuffer
+import java.nio.charset.CodingErrorAction
+import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicReference
@@ -51,6 +48,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 import retrofit2.HttpException
 
 enum class AuthFailureKind {
@@ -204,8 +203,8 @@ class AuthRepository @Inject constructor(
         if (purpose !in setOf(OtpPurpose.REGISTER, OtpPurpose.LOGIN)) {
             return invalidInput("手机号只支持注册或登录验证码")
         }
-        val phone = rawPhone.trim()
-        if (!phone.matches(MAINLAND_PHONE)) return invalidInput("请输入 +86 格式的中国大陆手机号")
+        val phone = normalizeMainlandPhone(rawPhone)
+            ?: return invalidInput("请输入 11 位中国大陆手机号（也支持 +86 格式）")
         return remote {
             val authorization = otpAuthorizationHeader(purpose)
             val attempt = beginAuthAttempt() ?: throw AuthenticationAttemptInvalidated()
@@ -215,27 +214,6 @@ class AuthRepository @Inject constructor(
             )
             if (!isAuthAttemptCurrent(attempt)) throw AuthenticationAttemptInvalidated()
             if (!AuthResponseValidator.validChallenge(response, AuthIdentityType.PHONE, Instant.now())) {
-                throw InvalidAuthResponse()
-            }
-            response
-        }
-    }
-
-    override suspend fun requestFusionToken(
-        purpose: FusionAuthPurpose,
-    ): AuthOutcome<FusionAuthTokenResponse> {
-        if (!privacyAuthorizationGate.isAcceptedFailClosed()) return privacyBlockedFailure()
-        if (privacyIsBlocked()) return privacyBlockedFailure()
-        return remote {
-            val attempt = beginAuthAttempt() ?: throw AuthenticationAttemptInvalidated()
-            val response = api.requestFusionToken(
-                FusionAuthTokenRequest(
-                    purpose = purpose,
-                    installationId = sessionStore.installationId(),
-                ),
-            )
-            if (!isAuthAttemptCurrent(attempt)) throw AuthenticationAttemptInvalidated()
-            if (!AuthResponseValidator.validFusionToken(response, Instant.now())) {
                 throw InvalidAuthResponse()
             }
             response
@@ -271,27 +249,15 @@ class AuthRepository @Inject constructor(
     override suspend fun createOAuthState(
         provider: AuthIdentityType,
         purpose: OAuthPurpose,
-        phoneChallengeId: String?,
     ): AuthOutcome<OAuthStateResponse> {
         if (!privacyAuthorizationGate.isAcceptedFailClosed()) return privacyBlockedFailure()
         if (privacyIsBlocked()) return privacyBlockedFailure()
         val supportedPurpose = when (provider) {
-            AuthIdentityType.WECHAT -> purpose in setOf(OAuthPurpose.REGISTER, OAuthPurpose.LOGIN)
+            AuthIdentityType.WECHAT -> purpose in setOf(OAuthPurpose.LOGIN, OAuthPurpose.BIND)
             AuthIdentityType.QQ -> purpose in setOf(OAuthPurpose.LOGIN, OAuthPurpose.BIND)
             else -> false
         }
         if (!supportedPurpose) return invalidInput("该登录方式不支持当前 OAuth 用途")
-        if (
-            purpose == OAuthPurpose.REGISTER &&
-            (provider != AuthIdentityType.WECHAT ||
-                phoneChallengeId == null ||
-                !AuthResponseValidator.run { phoneChallengeId.isCanonicalUuid() })
-        ) {
-            return invalidInput("微信注册必须先完成手机号验证码申请")
-        }
-        if (purpose != OAuthPurpose.REGISTER && phoneChallengeId != null) {
-            return invalidInput("当前 OAuth 用途不能携带注册验证码流程")
-        }
         return remote {
             val authorization = if (purpose == OAuthPurpose.BIND) {
                 authorizationHeaderLocked()
@@ -305,8 +271,6 @@ class AuthRepository @Inject constructor(
                     provider = provider,
                     purpose = purpose,
                     installationId = sessionStore.installationId(),
-                    phoneChallengeId = phoneChallengeId,
-                    phoneProofId = null,
                 ),
             )
             if (!isAuthAttemptCurrent(attempt)) throw AuthenticationAttemptInvalidated()
@@ -317,116 +281,11 @@ class AuthRepository @Inject constructor(
         }
     }
 
-    override suspend fun createWechatRegistrationStateForFusion(
-        phoneProofId: String,
-    ): AuthOutcome<OAuthStateResponse> {
-        if (!privacyAuthorizationGate.isAcceptedFailClosed()) return privacyBlockedFailure()
-        if (privacyIsBlocked()) return privacyBlockedFailure()
-        if (!AuthResponseValidator.run { phoneProofId.isCanonicalUuid() }) {
-            return invalidInput("融合认证手机号证明格式无效")
-        }
-        return remote {
-            val attempt = beginAuthAttempt() ?: throw AuthenticationAttemptInvalidated()
-            val response = api.createOAuthState(
-                authorization = null,
-                request = OAuthStateRequest(
-                    provider = AuthIdentityType.WECHAT,
-                    purpose = OAuthPurpose.REGISTER,
-                    installationId = sessionStore.installationId(),
-                    phoneChallengeId = null,
-                    phoneProofId = phoneProofId,
-                ),
-            )
-            if (!isAuthAttemptCurrent(attempt)) throw AuthenticationAttemptInvalidated()
-            if (!AuthResponseValidator.validOAuthState(
-                    response,
-                    AuthIdentityType.WECHAT,
-                    OAuthPurpose.REGISTER,
-                    Instant.now(),
-                )
-            ) {
-                throw InvalidAuthResponse()
-            }
-            response
-        }
-    }
-
-    override suspend fun registerPhoneWechat(
-        challengeId: String,
-        otpCode: String,
-        oauthState: String,
-        authorizationCode: String,
-    ): AuthOutcome<LocalAuthSession> {
-        if (!validOtpProof(challengeId, otpCode) || !validOAuthProof(oauthState, authorizationCode)) {
-            return invalidInput("验证码或微信授权结果格式无效")
-        }
-        return authenticate {
-            api.registerPhoneWechat(
-                RegisterPhoneWechatRequest(
-                    phoneChallengeId = challengeId,
-                    phoneOtpCode = otpCode,
-                    wechatOAuthState = oauthState,
-                    wechatAuthorizationCode = authorizationCode,
-                    device = deviceContext(),
-                ),
-            )
-        }
-    }
-
-    override suspend fun verifyFusionForRegistration(
-        flowId: String,
-        verifyToken: String,
-    ): AuthOutcome<FusionRegistrationPhoneProof> {
-        if (!AuthResponseValidator.run { flowId.isCanonicalUuid() } ||
-            !verifyToken.matches(FUSION_TOKEN)
-        ) {
-            return invalidInput("手机号一键验证结果格式无效")
-        }
-        if (!privacyAuthorizationGate.isAcceptedFailClosed()) return privacyBlockedFailure()
-        if (privacyIsBlocked()) return privacyBlockedFailure()
-        return remote {
-            val attempt = beginAuthAttempt() ?: throw AuthenticationAttemptInvalidated()
-            val response = api.verifyFusionForRegistration(
-                FusionRegistrationVerifyRequest(
-                    flowId = flowId,
-                    verifyToken = verifyToken,
-                    installationId = sessionStore.installationId(),
-                ),
-            )
-            if (!isAuthAttemptCurrent(attempt)) throw AuthenticationAttemptInvalidated()
-            if (!AuthResponseValidator.validFusionRegistrationProof(response, Instant.now())) {
-                throw InvalidAuthResponse()
-            }
-            response
-        }
-    }
-
-    override suspend fun registerFusionWechat(
-        phoneProofId: String,
-        oauthState: String,
-        authorizationCode: String,
-    ): AuthOutcome<LocalAuthSession> {
-        if (!AuthResponseValidator.run { phoneProofId.isCanonicalUuid() } ||
-            !validOAuthProof(oauthState, authorizationCode)
-        ) {
-            return invalidInput("手机号证明或微信授权结果格式无效")
-        }
-        return authenticate {
-            api.registerFusionWechat(
-                RegisterFusionWechatRequest(
-                    phoneProofId = phoneProofId,
-                    wechatOAuthState = oauthState,
-                    wechatAuthorizationCode = authorizationCode,
-                    device = deviceContext(),
-                ),
-            )
-        }
-    }
-
     override suspend fun loginWithOtp(
         type: AuthIdentityType,
         challengeId: String,
         otpCode: String,
+        phoneNumber: String?,
     ): AuthOutcome<LocalAuthSession> {
         if (type !in setOf(AuthIdentityType.PHONE, AuthIdentityType.EMAIL) ||
             !validOtpProof(challengeId, otpCode)
@@ -438,33 +297,20 @@ class AuthRepository @Inject constructor(
             AuthIdentityType.EMAIL -> AuthLoginMethod.EMAIL
             else -> return invalidInput("验证码登录方式无效")
         }
+        val normalizedPhone = phoneNumber?.let(::normalizeMainlandPhone)
+        if (type == AuthIdentityType.PHONE && normalizedPhone == null) {
+            return invalidInput("手机号验证码校验必须携带原手机号")
+        }
+        if (type != AuthIdentityType.PHONE && phoneNumber != null) {
+            return invalidInput("非手机号验证码不能携带手机号")
+        }
         return authenticate {
             api.login(
                 AuthLoginRequest(
                     method = method,
                     challengeId = challengeId,
                     otpCode = otpCode,
-                    device = deviceContext(),
-                ),
-            )
-        }
-    }
-
-    override suspend fun loginWithFusion(
-        flowId: String,
-        verifyToken: String,
-    ): AuthOutcome<LocalAuthSession> {
-        if (!AuthResponseValidator.run { flowId.isCanonicalUuid() } ||
-            !verifyToken.matches(FUSION_TOKEN)
-        ) {
-            return invalidInput("手机号一键验证结果格式无效")
-        }
-        return authenticate {
-            api.login(
-                AuthLoginRequest(
-                    method = AuthLoginMethod.PHONE_FUSION,
-                    flowId = flowId,
-                    verifyToken = verifyToken,
+                    phoneNumber = normalizedPhone,
                     device = deviceContext(),
                 ),
             )
@@ -490,12 +336,9 @@ class AuthRepository @Inject constructor(
 
     override suspend fun loginWithQq(
         oauthState: String,
-        qqAccessToken: String,
+        authorizationCode: String,
     ): AuthOutcome<LocalAuthSession> {
-        if (!oauthState.matches(OPAQUE_TOKEN) ||
-            qqAccessToken.length !in 16..2_048 ||
-            !qqAccessToken.matches(SAFE_EXTERNAL_CREDENTIAL)
-        ) {
+        if (!validOAuthProof(oauthState, authorizationCode)) {
             return invalidInput("QQ 授权结果格式无效")
         }
         return authenticate {
@@ -503,7 +346,7 @@ class AuthRepository @Inject constructor(
                 AuthLoginRequest(
                     method = AuthLoginMethod.QQ,
                     oauthState = oauthState,
-                    accessToken = qqAccessToken,
+                    authorizationCode = authorizationCode,
                     device = deviceContext(),
                 ),
             )
@@ -537,19 +380,32 @@ class AuthRepository @Inject constructor(
 
     override suspend fun bindWithQq(
         oauthState: String,
-        qqAccessToken: String,
+        authorizationCode: String,
     ): AuthOutcome<AuthIdentityBinding> {
-        if (!oauthState.matches(OPAQUE_TOKEN) ||
-            qqAccessToken.length !in 16..2_048 ||
-            !qqAccessToken.matches(SAFE_EXTERNAL_CREDENTIAL)
-        ) {
+        if (!validOAuthProof(oauthState, authorizationCode)) {
             return invalidInput("QQ 授权结果格式无效")
         }
         return bindIdentity(
             BindIdentityRequest(
                 type = AuthIdentityType.QQ,
                 oauthState = oauthState,
-                accessToken = qqAccessToken,
+                authorizationCode = authorizationCode,
+            ),
+        )
+    }
+
+    override suspend fun bindWithWechat(
+        oauthState: String,
+        authorizationCode: String,
+    ): AuthOutcome<AuthIdentityBinding> {
+        if (!validOAuthProof(oauthState, authorizationCode)) {
+            return invalidInput("微信授权结果格式无效")
+        }
+        return bindIdentity(
+            BindIdentityRequest(
+                type = AuthIdentityType.WECHAT,
+                oauthState = oauthState,
+                authorizationCode = authorizationCode,
             ),
         )
     }
@@ -775,7 +631,12 @@ class AuthRepository @Inject constructor(
     private suspend fun bindIdentity(request: BindIdentityRequest): AuthOutcome<AuthIdentityBinding> =
         authenticatedRemote { header ->
             val response = api.bindIdentity(header, request)
-            if (!AuthResponseValidator.validIdentity(response.binding)) throw InvalidAuthResponse()
+            if (
+                !AuthResponseValidator.validIdentity(response.binding) ||
+                response.binding.type != request.type
+            ) {
+                throw InvalidAuthResponse()
+            }
             response.binding
         }
 
@@ -1115,15 +976,7 @@ class AuthRepository @Inject constructor(
             is UnknownHostException -> AuthOutcome.Failure(AuthFailureKind.NETWORK, "网络不可用，请检查连接")
             is SocketTimeoutException -> AuthOutcome.Failure(AuthFailureKind.TIMEOUT, "账号服务响应较慢，请稍后重试")
             is SerializationException -> AuthOutcome.Failure(AuthFailureKind.INVALID_RESPONSE, "账号服务响应无法识别")
-            is HttpException -> when (error.code()) {
-                400 -> AuthOutcome.Failure(AuthFailureKind.INPUT, "提交的信息不符合要求")
-                401 -> AuthOutcome.Failure(AuthFailureKind.UNAUTHORIZED, "验证码、授权或登录状态无效")
-                403 -> AuthOutcome.Failure(AuthFailureKind.FORBIDDEN, "当前账号或设备不允许此操作")
-                409 -> AuthOutcome.Failure(AuthFailureKind.CONFLICT, "身份已绑定其他账号或验证流程已使用")
-                429 -> AuthOutcome.Failure(AuthFailureKind.RATE_LIMITED, "操作过于频繁，请稍后重试")
-                503 -> AuthOutcome.Failure(AuthFailureKind.UNAVAILABLE, "该账号能力暂未开放或暂时不可用")
-                else -> AuthOutcome.Failure(AuthFailureKind.UNKNOWN, "账号服务暂时不可用")
-            }
+            is HttpException -> mapAuthHttpFailure(error)
             else -> AuthOutcome.Failure(AuthFailureKind.UNKNOWN, "账号操作暂时失败，请重试")
         }
     }
@@ -1168,13 +1021,73 @@ class AuthRepository @Inject constructor(
 
     private companion object {
         val MAINLAND_PHONE = Regex("^\\+861[3-9]\\d{9}$")
+        val LOCAL_MAINLAND_PHONE = Regex("^1[3-9]\\d{9}$")
         val EMAIL = Regex("^[^@\\s]+@[^@\\s]+\\.[A-Za-z]{2,}$")
         val OTP = Regex("^\\d{6}$")
         val OPAQUE_TOKEN = Regex("^[A-Za-z0-9_-]{43}$")
         val SAFE_EXTERNAL_CREDENTIAL = Regex("^[A-Za-z0-9._~+/=-]+$")
-		val FUSION_TOKEN = Regex("^[^\\s\\u0000-\\u001F\\u007F]{1,4096}$")
         const val CANCELLED_AUTH_CLEANUP_TIMEOUT_MILLIS = 1_000L
     }
+
+    private fun normalizeMainlandPhone(rawPhone: String): String? {
+        val phone = rawPhone.trim()
+        return when {
+            phone.matches(MAINLAND_PHONE) -> phone
+            phone.matches(LOCAL_MAINLAND_PHONE) -> "+86$phone"
+            else -> null
+        }
+    }
+}
+
+internal fun mapAuthHttpFailure(error: HttpException): AuthOutcome.Failure = when (error.code()) {
+    400 -> AuthOutcome.Failure(AuthFailureKind.INPUT, "提交的信息不符合要求")
+    401 -> if (error.boundedAuthErrorCode() == "IDENTITY_NOT_BOUND") {
+        AuthOutcome.Failure(
+            AuthFailureKind.UNAUTHORIZED,
+            "该登录身份尚未绑定账号，请先用手机号登录后完成绑定",
+        )
+    } else {
+        AuthOutcome.Failure(AuthFailureKind.UNAUTHORIZED, "验证码、授权或登录状态无效")
+    }
+    403 -> AuthOutcome.Failure(AuthFailureKind.FORBIDDEN, "当前账号或设备不允许此操作")
+    409 -> AuthOutcome.Failure(AuthFailureKind.CONFLICT, "身份已绑定其他账号或验证流程已使用")
+    429 -> AuthOutcome.Failure(AuthFailureKind.RATE_LIMITED, "操作过于频繁，请稍后重试")
+    503 -> AuthOutcome.Failure(AuthFailureKind.UNAVAILABLE, "该账号能力暂未开放或暂时不可用")
+    else -> AuthOutcome.Failure(AuthFailureKind.UNKNOWN, "账号服务暂时不可用")
+}
+
+private fun HttpException.boundedAuthErrorCode(): String? {
+    val body = response()?.errorBody() ?: return null
+    return try {
+        body.use { errorBody ->
+            val declaredLength = errorBody.contentLength()
+            if (declaredLength > MAX_AUTH_ERROR_BYTES || declaredLength < -1L) return null
+            val source = errorBody.source()
+            source.request(MAX_AUTH_ERROR_BYTES + 1L)
+            if (source.buffer.size > MAX_AUTH_ERROR_BYTES) return null
+            val bytes = source.buffer.clone().readByteArray()
+            val raw = StandardCharsets.UTF_8
+                .newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+                .decode(ByteBuffer.wrap(bytes))
+                .toString()
+            val parsed = STRICT_AUTH_ERROR_JSON.decodeFromString<AuthErrorResponse>(raw)
+            if (AuthResponseValidator.run { parsed.requestId.isCanonicalUuid() }) {
+                parsed.code
+            } else {
+                null
+            }
+        }
+    } catch (_: Exception) {
+        null
+    }
+}
+
+private const val MAX_AUTH_ERROR_BYTES = 4L * 1_024L
+private val STRICT_AUTH_ERROR_JSON = Json {
+    ignoreUnknownKeys = false
+    isLenient = false
 }
 
 internal fun otpPurposeRequiresAuthentication(purpose: OtpPurpose): Boolean =

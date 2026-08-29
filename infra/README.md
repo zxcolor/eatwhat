@@ -48,15 +48,46 @@ PostGIS/pgcrypto 通常需要托管库特权，必须由一次性 bootstrap 身�
 6. 用 runtime role 做 schema verify、权限正反例和 API 启动 smoke，失败不启动新实例。
 7. 启动 API；仅在私有 OSS、独立 RAM 角色、locator/反馈解密密钥和 export worker 均就绪后开放数据导出能力。导出专用 RAM 角色只需读取桶版本与生命周期配置，不得修改它们；专用桶必须从未启用版本控制，且 `GetBucketLifecycle` 必须精确返回 `404 NoSuchLifecycle`，任何已配置规则都会拒绝 worker 就绪。maintenance job 独立运行，默认 `--dry-run`；只有明确 `--execute` 才删除到期数据，并在同一受控事务中不可逆销毁已超过 24 小时配额窗口的游客反馈 IP HMAC。
 
+账号 schema 0010→0011 是上述通用顺序的受控特例：先激活 `ACCOUNTS_ENABLED=false` 的
+`legacy_phone_drain` bridge，再从活动 bridge 运行
+`scripts/provision-database.sh --phone-only-cutover`。该入口在同一 mutation lock 内核对实际
+运行容器、排空所有未过期及 15 分钟内已消费未领取的证明，自动生成并验证带完整 ledger 和
+匹配 ACL 的 schema 0010 备份，二次排空后才执行 0011 和第 4–6 步；最后才对启用候选执行
+`--apply` 并激活。bridge 只允许 schema 完整或仅缺精确最后 0011；迁移后不能把旧 Fusion
+镜像直接指回当前数据库，必须恢复迁移前数据库。完整命令见运维手册。
+`provision-database.sh`、备份、Secret 更新和候选激活共用 root-owned 非阻塞全局 mutation
+lock；锁冲突必须在 preflight 和任何数据库动作之前失败。
+隔离恢复与生产回滚也使用同一把锁并覆盖恢复、停 API、数据库 rename、重启及失败清理的完整
+关键区间；回滚内部的安全备份/隔离恢复只验证并继承父进程 FD8，不会二次抢锁。认证 `--apply`
+或 `--disable` 若发现旧 Fusion/SMS 配置，会在修改共享 `api.env` 前直接验证活动停号 bridge、
+0011 migration 和角色 ACL；因此恢复旧数据库后不能复用先前的迁移证明。
+schema 0011 常态下的 `--disable` 仅做可逆紧急关停：清除供应商字段但保留 root-only
+身份/会话 HMAC、dedup version 与已有 OTP pepper pair；后续 `--apply` 必须沿用相同连续性
+材料，错误值会在共享 env 写入前拒绝。
+
+微信 UnionID 使用独立的 schema 0011→0012 受控过渡：先激活
+`AUTH_SCHEMA_TRANSITION_MODE=wechat_union_aliases_pending` 且
+`WECHAT_AUTH_ENABLED=false` 的 plan12 bridge，再从活动 bridge 执行
+`scripts/provision-database.sh --wechat-union-aliases-cutover`。脚本在同一 mutation lock 内创建并
+验证 exact-schema11 备份，迁移至 exact-schema12，重新应用 schema11/12 兼容的角色授权，并
+验证 alias 表无直接 runtime 权限、只有 API runtime 可执行三项 state-bound 函数且表仍为空。
+随后必须先激活 `transition=none`、微信仍关闭的 final release，最后才由认证配置更新器启用微信。
+`WECHAT_OPEN_PLATFORM_REALM_ID` 是稳定身份命名空间；常规 release 不允许相对活动 release
+更改。普通 schema12→11 数据库回退还要求 alias 表为空；写入任一真实 alias 后只允许向前修复。
+
 迁移锁键为 `(1129310029, 1296645202)`，`pg_try_advisory_lock` 最多 20 次、间隔 250 ms；保留期锁键为 `(1129310029, 1382374734)`，占用时立即失败。成功和失败路径都尝试释放。`schema_migrations` 固定为 `version integer`、`name varchar(120)`、`checksum varchar(64)`、`applied_at timestamptz`；未知版本、缺号、名称或 checksum 漂移会拒绝迁移/启动。
 
 ## 数据与保留边界
 
 - 除 `coverage_areas.boundary` 的泛化服务区域 MultiPolygon，业务表没有用户坐标、轨迹或原始请求体。
 - provider ID 只存在 `external_place_references`，且只由当前有效 `LICENSED_ENRICHMENT` + `PERSIST_PLACE_REFERENCE` 经受限函数写入；runtime 只读 active view。授权撤销/到期会解绑依赖并清除引用，过期行不能 upsert 复活。
-- OTP code 使用带 pepper 的 Argon2id；身份、目的地、OAuth state、设备/IP 和 opaque token 使用带域分离与 key version 的 HMAC-SHA256。不保存明文 OTP、手机号、邮箱、refresh/access token、第三方 token 或授权 code。
+- 邮件 OTP 使用带 pepper 的 Argon2id；手机验证码由号码认证服务生成并通过供应商 API 核验，服务端只保存 challenge、状态和不可逆目的地指纹。身份、目的地、OAuth state、设备/IP 和 opaque token 使用带域分离与 key version 的 HMAC-SHA256。不保存明文 OTP、手机号、邮箱、refresh/access token、第三方 token 或授权 code。
+- 0010 Fusion 表仅为清除最长 24 小时的历史记录而暂留；只有 maintenance role 可调用两项专用 preview/execute 清理函数，runtime/admin/export 均显式拒绝。这是历史数据最小化，不构成 Fusion 登录能力。
 - 支持反馈正文以独立 AES-256-GCM 密钥环加密，内容幂等指纹与游客配额使用另一个独立 HMAC-SHA256 密钥环。轮换期间 API 对每个保留版本计算最多 3 个候选，数据库原子比较；启动门禁会拒绝缺少任何在用版本的实例。游客 IP HMAC 不做伪重算，超过数据库时钟 24 小时窗口后由 maintenance job 置空并记录 `guest_ip_destroyed_at`，随后才能移除对应旧 HMAC 密钥。
 - identity `lookup_hash` 可轮换；跨账号唯一的 `dedup_hash` 必须使用独立稳定 key。该 key 不允许在线直接轮换；若必须轮换，先完成双读、全量事务重键和冲突审计，旧版本清退前禁止新版本写入。
+- 微信 OpenID/UnionID 原值均不落库；AppID+OpenID 的 HMAC 继续作为当前 App binding，
+  `realm + UnionID` 的 HMAC 只作为跨应用 alias。微信解绑保留 alias 防接管，账号最终删除通过
+  外键级联删除；历史备份中的副本按同一 30 天备份保留流程清除。
 - 推荐历史 90 天；关闭反馈/管理员审计 180 天；导出个人内容/元数据 7 天；完成注销任务和过期会话最多 30 天；OTP/OAuth/access token 更短。OSS 个人工件必须先由 worker 删除并以同 key 的固定、无 PII 永久 tombstone 占位，HEAD 验证后才能写 `artifact_deleted_at` 并清理导出元数据；生命周期规则不得覆盖该 tombstone 前缀。
 - audit context 只接受内置 action 对应的非负计数；未知 action 只能空对象，runtime 不获泛化 append 权限。
 

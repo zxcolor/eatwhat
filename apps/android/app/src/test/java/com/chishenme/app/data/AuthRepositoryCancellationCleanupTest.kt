@@ -54,6 +54,7 @@ class AuthRepositoryCancellationCleanupTest {
                     AuthIdentityType.PHONE,
                     CHALLENGE_ID,
                     "123456",
+                    "+8613800138000",
                 )
             }
 
@@ -159,7 +160,12 @@ class AuthRepositoryCancellationCleanupTest {
         )
 
         val thrown = captureCancellation {
-            repository.loginWithOtp(AuthIdentityType.PHONE, CHALLENGE_ID, "123456")
+            repository.loginWithOtp(
+                AuthIdentityType.PHONE,
+                CHALLENGE_ID,
+                "123456",
+                "+8613800138000",
+            )
         }
 
         assertSame(callerCancellation, thrown)

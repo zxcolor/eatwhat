@@ -11,6 +11,28 @@ import { loadMigrationPlan } from "./migration-plan.js";
 import { type SqlResult, verifySchemaWithClient } from "./migration-runner.js";
 
 export const DATABASE_POOL_FACTORY = Symbol("DATABASE_POOL_FACTORY");
+const LEGACY_PHONE_DRAIN_PENDING_MIGRATION = Object.freeze({
+	version: 11,
+	name: "phone_only_auth",
+	fileName: "0011_phone_only_auth.sql",
+});
+const WECHAT_UNION_ALIASES_PENDING_MIGRATION = Object.freeze({
+	version: 12,
+	name: "wechat_union_aliases",
+	fileName: "0012_wechat_union_aliases.sql",
+});
+
+function allowedPendingAuthMigration(
+	mode: AppConfig["database"]["authSchemaTransitionMode"],
+) {
+	if (mode === "legacy_phone_drain") {
+		return LEGACY_PHONE_DRAIN_PENDING_MIGRATION;
+	}
+	if (mode === "wechat_union_aliases_pending") {
+		return WECHAT_UNION_ALIASES_PENDING_MIGRATION;
+	}
+	return undefined;
+}
 
 // node-postgres supports a per-query query_timeout at runtime, while its
 // QueryConfig declaration currently exposes it only on ClientConfig. Keeping
@@ -81,7 +103,13 @@ export class DatabasePool
 			client = await pool.connect();
 			await client.query("SELECT 1");
 			const plan = await loadMigrationPlan();
-			await verifySchemaWithClient(client, plan);
+			await verifySchemaWithClient(
+				client,
+				plan,
+				allowedPendingAuthMigration(
+					this.config.database.authSchemaTransitionMode,
+				),
+			);
 		} catch {
 			this.pool = null;
 			if (client !== null) {

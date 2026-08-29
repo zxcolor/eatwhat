@@ -93,6 +93,8 @@ export class OfficialWechatIdentityProvider implements WechatIdentityProvider {
 			const expiresIn = body.expires_in;
 			const openId = boundedString(body.openid, 256, /^[A-Za-z0-9_-]+$/u);
 			const scope = boundedString(body.scope, 256);
+			// UnionID is a cross-application alias, not the AppID-scoped identity.
+			// Preserve a verified OpenID when WeChat omits this conditional field.
 			const unionId =
 				body.unionid === undefined
 					? null

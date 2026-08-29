@@ -2,10 +2,9 @@ import { describe, expect, it } from "vitest";
 import { loadAppConfig } from "../config/app-config.js";
 import {
 	createEmailOtpProvider,
-	createFusionAuthProvider,
 	createPhoneOtpProvider,
 } from "./auth-provider.factories.js";
-import { UnavailableOtpDeliveryProvider } from "./providers/unavailable-otp.provider.js";
+import { UnavailablePhoneOtpProvider } from "./providers/unavailable-otp.provider.js";
 
 function enabledConfig() {
 	const hashKey = Buffer.alloc(32, 9).toString("base64");
@@ -22,10 +21,11 @@ function enabledConfig() {
 		AUTH_OTP_PEPPER_ACTIVE_VERSION: "v1",
 		AUTH_OTP_PEPPER_KEYS_JSON: JSON.stringify({ v1: otpPepper }),
 		AUTH_IDENTITY_DEDUP_KEY_VERSION: "v1",
-		ALIYUN_SMS_SIGN_NAME: "test-sign",
-		ALIYUN_SMS_TEMPLATE_CODE: "SMS_TEST",
+		ALIYUN_PNVS_SIGN_NAME: "test-sign",
+		ALIYUN_PNVS_TEMPLATE_CODE: "100001",
 		WECHAT_APP_ID: "wx0123456789abcdef",
 		WECHAT_APP_SECRET: "private-provider-secret",
+		WECHAT_OPEN_PLATFORM_REALM_ID: "eatwhat-primary",
 	});
 }
 
@@ -35,7 +35,7 @@ describe("account provider startup factories", () => {
 			loadAppConfig({ NODE_ENV: "test" }),
 			undefined,
 		);
-		expect(provider).toBeInstanceOf(UnavailableOtpDeliveryProvider);
+		expect(provider).toBeInstanceOf(UnavailablePhoneOtpProvider);
 	});
 
 	it("fails startup when an enabled channel has no audited client", () => {
@@ -60,26 +60,10 @@ describe("account provider startup factories", () => {
 			SMTP_USERNAME: "no-reply@example.com",
 			SMTP_PASSWORD: "private-smtp-password",
 			SMTP_FROM_ADDRESS: "no-reply@example.com",
+			SMTP_REPLY_TO: "support@example.com",
 		});
 		expect(() => createEmailOtpProvider(config, undefined)).toThrow(
 			"账号邮件供应商客户端未配置",
-		);
-	});
-
-	it("fails startup when enabled fusion authentication has no official client", () => {
-		const environment = enabledConfigEnvironment();
-		delete environment.PHONE_AUTH_ENABLED;
-		delete environment.AUTH_OTP_PEPPER_ACTIVE_VERSION;
-		delete environment.AUTH_OTP_PEPPER_KEYS_JSON;
-		const config = loadAppConfig({
-			...environment,
-			FUSION_AUTH_ENABLED: "true",
-			ALIYUN_FUSION_SCHEME_CODE: "scheme_100001",
-			ALIYUN_FUSION_PACKAGE_NAME: "com.chishenme.app",
-			ALIYUN_FUSION_PACKAGE_SIGN: "a".repeat(32),
-		});
-		expect(() => createFusionAuthProvider(config, undefined)).toThrow(
-			"账号融合认证供应商客户端未配置",
 		);
 	});
 });
@@ -99,9 +83,10 @@ function enabledConfigEnvironment(): NodeJS.ProcessEnv {
 		AUTH_OTP_PEPPER_ACTIVE_VERSION: "v1",
 		AUTH_OTP_PEPPER_KEYS_JSON: JSON.stringify({ v1: otpPepper }),
 		AUTH_IDENTITY_DEDUP_KEY_VERSION: "v1",
-		ALIYUN_SMS_SIGN_NAME: "test-sign",
-		ALIYUN_SMS_TEMPLATE_CODE: "SMS_TEST",
+		ALIYUN_PNVS_SIGN_NAME: "test-sign",
+		ALIYUN_PNVS_TEMPLATE_CODE: "100001",
 		WECHAT_APP_ID: "wx0123456789abcdef",
 		WECHAT_APP_SECRET: "private-provider-secret",
+		WECHAT_OPEN_PLATFORM_REALM_ID: "eatwhat-primary",
 	};
 }

@@ -7,9 +7,15 @@ import {
 	type VerifiedExternalIdentity,
 } from "./external-identity.provider.js";
 
+const QQ_TOKEN_ENDPOINT = "https://graph.qq.com/oauth2.0/token";
+const QQ_IDENTITY_ENDPOINT = "https://graph.qq.com/oauth2.0/me";
+const QQ_SERVER_SIDE_REDIRECT_URI = "auth://tauth.qq.com/";
+
 export interface QqIdentityProviderConfig {
 	readonly enabled: boolean;
+	readonly unionIdEnabled: boolean;
 	readonly appId: string | null;
+	readonly appKey: string | null;
 	readonly timeoutMs: number;
 }
 
@@ -28,6 +34,35 @@ function boundedIdentifier(value: unknown, maximum: number): string | null {
 		: null;
 }
 
+function boundedCredential(value: unknown): string | null {
+	return typeof value === "string" &&
+		value.length >= 1 &&
+		value.length <= 2_048 &&
+		!hasUnsafeCredentialCharacters(value)
+		? value
+		: null;
+}
+
+function positiveLifetimeSeconds(value: unknown): number | null {
+	const parsed =
+		typeof value === "number"
+			? value
+			: typeof value === "string" && /^[1-9][0-9]{0,8}$/u.test(value)
+				? Number(value)
+				: Number.NaN;
+	return Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= 315_360_000
+		? parsed
+		: null;
+}
+
+function isRejectedPayload(body: Record<string, unknown>): boolean {
+	return (
+		body.error !== undefined ||
+		body.error_description !== undefined ||
+		(body.ret !== undefined && body.ret !== 0)
+	);
+}
+
 export class OfficialQqIdentityProvider implements QqIdentityProvider {
 	constructor(
 		private readonly config: QqIdentityProviderConfig,
@@ -35,63 +70,28 @@ export class OfficialQqIdentityProvider implements QqIdentityProvider {
 	) {}
 
 	async verify(proof: QqAuthorizationProof): Promise<VerifiedExternalIdentity> {
-		if (!this.config.enabled || this.config.appId === null) {
+		const { appId, appKey } = this.config;
+		if (!this.config.enabled || appId === null || appKey === null) {
 			throw new ExternalIdentityUnavailableError("DISABLED");
 		}
 		if (
-			proof.accessToken.length < 1 ||
-			proof.accessToken.length > 2_048 ||
-			hasUnsafeCredentialCharacters(proof.accessToken)
+			proof.authorizationCode.length < 1 ||
+			proof.authorizationCode.length > 2_048 ||
+			hasUnsafeCredentialCharacters(proof.authorizationCode)
 		) {
 			throw new ExternalIdentityUnavailableError("INVALID_PROOF");
 		}
 
-		const endpoint = new URL("https://graph.qq.com/oauth2.0/me");
-		endpoint.searchParams.set("access_token", proof.accessToken);
-		endpoint.searchParams.set("fmt", "json");
-
 		const controller = new AbortController();
 		const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs);
 		try {
-			// QQ's official endpoint also accepts the temporary credential only as a
-			// query. Never log this URL or copy transport errors into diagnostics.
-			const response = await this.fetchImpl(endpoint, {
-				method: "GET",
-				headers: { Accept: "application/json" },
-				signal: controller.signal,
-				cache: "no-store",
-				redirect: "error",
-				referrerPolicy: "no-referrer",
-			});
-			if (!response.ok) {
-				throw new ExternalIdentityUnavailableError("UPSTREAM_HTTP");
-			}
-			const raw = await readBoundedIdentityJson(response, controller.signal);
-			const body = objectValue(raw);
-			if (body === null) {
-				throw new ExternalIdentityUnavailableError("INVALID_RESPONSE");
-			}
-			if (
-				body.error !== undefined ||
-				(body.ret !== undefined && body.ret !== 0)
-			) {
-				throw new ExternalIdentityUnavailableError("UPSTREAM_REJECTED");
-			}
-
-			const clientId = boundedIdentifier(body.client_id, 128);
-			const openId = boundedIdentifier(body.openid, 256);
-			if (clientId === null || openId === null) {
-				throw new ExternalIdentityUnavailableError("INVALID_RESPONSE");
-			}
-			if (clientId !== this.config.appId) {
-				throw new ExternalIdentityUnavailableError("UPSTREAM_REJECTED");
-			}
-			return Object.freeze({
-				provider: "QQ" as const,
-				providerScope: this.config.appId,
-				subject: openId,
-				unionSubject: null,
-			});
+			const accessToken = await this.exchangeAuthorizationCode(
+				proof.authorizationCode,
+				appId,
+				appKey,
+				controller.signal,
+			);
+			return await this.fetchIdentity(accessToken, appId, controller.signal);
 		} catch (error) {
 			if (error instanceof ExternalIdentityUnavailableError) throw error;
 			throw new ExternalIdentityUnavailableError(
@@ -100,5 +100,108 @@ export class OfficialQqIdentityProvider implements QqIdentityProvider {
 		} finally {
 			clearTimeout(timeout);
 		}
+	}
+
+	private async exchangeAuthorizationCode(
+		authorizationCode: string,
+		appId: string,
+		appKey: string,
+		signal: AbortSignal,
+	): Promise<string> {
+		const endpoint = new URL(QQ_TOKEN_ENDPOINT);
+		endpoint.searchParams.set("grant_type", "authorization_code");
+		endpoint.searchParams.set("client_id", appId);
+		endpoint.searchParams.set("client_secret", appKey);
+		endpoint.searchParams.set("code", authorizationCode);
+		endpoint.searchParams.set("redirect_uri", QQ_SERVER_SIDE_REDIRECT_URI);
+		endpoint.searchParams.set("fmt", "json");
+
+		// Tencent's documented server-side exchange carries the AppKey in this
+		// fixed HTTPS request. Never log this URL or propagate transport errors.
+		const response = await this.fetchImpl(endpoint, {
+			method: "GET",
+			headers: { Accept: "application/json" },
+			signal,
+			cache: "no-store",
+			redirect: "error",
+			referrerPolicy: "no-referrer",
+		});
+		if (!response.ok) {
+			throw new ExternalIdentityUnavailableError("UPSTREAM_HTTP");
+		}
+		const body = objectValue(await readBoundedIdentityJson(response, signal));
+		if (body === null) {
+			throw new ExternalIdentityUnavailableError("INVALID_RESPONSE");
+		}
+		if (isRejectedPayload(body)) {
+			throw new ExternalIdentityUnavailableError("UPSTREAM_REJECTED");
+		}
+
+		const accessToken = boundedCredential(body.access_token);
+		const refreshToken = boundedCredential(body.refresh_token);
+		const expiresIn = positiveLifetimeSeconds(body.expires_in);
+		if (accessToken === null || refreshToken === null || expiresIn === null) {
+			throw new ExternalIdentityUnavailableError("INVALID_RESPONSE");
+		}
+		// The refresh token is deliberately validated and discarded. Neither token
+		// leaves this adapter, reaches persistence, or appears in an error value.
+		void refreshToken;
+		void expiresIn;
+		return accessToken;
+	}
+
+	private async fetchIdentity(
+		accessToken: string,
+		appId: string,
+		signal: AbortSignal,
+	): Promise<VerifiedExternalIdentity> {
+		const endpoint = new URL(QQ_IDENTITY_ENDPOINT);
+		endpoint.searchParams.set("access_token", accessToken);
+		endpoint.searchParams.set("fmt", "json");
+		if (this.config.unionIdEnabled) endpoint.searchParams.set("unionid", "1");
+
+		const response = await this.fetchImpl(endpoint, {
+			method: "GET",
+			headers: { Accept: "application/json" },
+			signal,
+			cache: "no-store",
+			redirect: "error",
+			referrerPolicy: "no-referrer",
+		});
+		if (!response.ok) {
+			throw new ExternalIdentityUnavailableError("UPSTREAM_HTTP");
+		}
+		const body = objectValue(await readBoundedIdentityJson(response, signal));
+		if (body === null) {
+			throw new ExternalIdentityUnavailableError("INVALID_RESPONSE");
+		}
+		if (isRejectedPayload(body)) {
+			throw new ExternalIdentityUnavailableError("UPSTREAM_REJECTED");
+		}
+
+		const clientId = boundedIdentifier(body.client_id, 128);
+		const openId = boundedIdentifier(body.openid, 256);
+		// An unrequested UnionID is not part of the configured proof contract.
+		// Ignore it completely so a supplier-side response expansion cannot
+		// silently change the durable identity deduplication domain.
+		const unionId = this.config.unionIdEnabled
+			? boundedIdentifier(body.unionid, 256)
+			: null;
+		if (
+			clientId === null ||
+			openId === null ||
+			(this.config.unionIdEnabled && unionId === null)
+		) {
+			throw new ExternalIdentityUnavailableError("INVALID_RESPONSE");
+		}
+		if (clientId !== appId) {
+			throw new ExternalIdentityUnavailableError("UPSTREAM_REJECTED");
+		}
+		return Object.freeze({
+			provider: "QQ" as const,
+			providerScope: appId,
+			subject: openId,
+			unionSubject: unionId,
+		});
 	}
 }

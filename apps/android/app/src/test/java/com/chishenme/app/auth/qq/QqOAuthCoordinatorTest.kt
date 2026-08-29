@@ -15,18 +15,19 @@ class QqOAuthCoordinatorTest {
     @Test
     fun `login state is short lived purpose bound and consumed once`() {
         val state = "q".repeat(43)
-        val token = "private-access-token-1234567890"
+        val authorizationCode = "private-authorization-code-1234567890"
         assertEquals(
             QqCoordinatorPrepareResult.Ready,
             coordinator.prepare(OAuthPurpose.LOGIN, state, currentTime.plusSeconds(300)),
         )
 
-        val accepted = coordinator.consume(token) as QqCoordinatorConsumeResult.Accepted
+        val accepted = coordinator.consume(authorizationCode) as QqCoordinatorConsumeResult.Accepted
         assertEquals(OAuthPurpose.LOGIN, accepted.purpose)
+        assertEquals(authorizationCode, accepted.authorizationCode)
         assertFalse(accepted.toString().contains(state))
-        assertFalse(accepted.toString().contains(token))
+        assertFalse(accepted.toString().contains(authorizationCode))
 
-        val replay = coordinator.consume(token) as QqCoordinatorConsumeResult.Rejected
+        val replay = coordinator.consume(authorizationCode) as QqCoordinatorConsumeResult.Rejected
         assertEquals(QqOAuthFailure.NO_PENDING_AUTHORIZATION, replay.failure)
     }
 
@@ -71,16 +72,16 @@ class QqOAuthCoordinatorTest {
     }
 
     @Test
-    fun `invalid token consumes attempt and leaks no secret`() {
+    fun `invalid authorization code consumes attempt and leaks no secret`() {
         val state = "u".repeat(43)
-        val invalidToken = "token with spaces"
+        val invalidCode = "code with spaces"
         coordinator.prepare(OAuthPurpose.BIND, state, currentTime.plusSeconds(300))
 
-        val rejected = coordinator.consume(invalidToken) as QqCoordinatorConsumeResult.Rejected
+        val rejected = coordinator.consume(invalidCode) as QqCoordinatorConsumeResult.Rejected
 
         assertEquals(QqOAuthFailure.INVALID_CALLBACK, rejected.failure)
         assertFalse(rejected.toString().contains(state))
-        assertFalse(rejected.toString().contains(invalidToken))
+        assertFalse(rejected.toString().contains(invalidCode))
         assertNull(coordinator.pendingPurpose())
     }
 
@@ -90,7 +91,7 @@ class QqOAuthCoordinatorTest {
         coordinator.prepare(OAuthPurpose.LOGIN, state, currentTime.plusSeconds(300))
 
         val restarted = QqOAuthCoordinator { currentTime }
-        val rejected = restarted.consume("private-access-token-1234567890")
+        val rejected = restarted.consume("private-authorization-code-1234567890")
             as QqCoordinatorConsumeResult.Rejected
 
         assertEquals(QqOAuthFailure.NO_PENDING_AUTHORIZATION, rejected.failure)

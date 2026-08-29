@@ -60,7 +60,7 @@ internal class WechatOAuthCoordinator(
         state: String,
         expiresAt: Instant,
     ): WechatCoordinatorPrepareResult {
-        if (purpose == OAuthPurpose.BIND) {
+        if (purpose !in setOf(OAuthPurpose.LOGIN, OAuthPurpose.BIND)) {
             return WechatCoordinatorPrepareResult.Rejected(
                 WechatOAuthFailure.UNSUPPORTED_PURPOSE,
             )

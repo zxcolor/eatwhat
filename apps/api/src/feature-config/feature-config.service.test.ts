@@ -27,14 +27,12 @@ function config(input?: {
 	privateFeedback?: boolean;
 	dataExport?: boolean;
 	phone?: boolean;
-	fusion?: boolean;
 	wechat?: boolean;
 }): AppConfig {
 	const base = loadAppConfig({ NODE_ENV: "test" });
 	const accountsEnabled = input?.accounts ?? true;
 	const dataExportEnabled = input?.dataExport ?? false;
 	const phoneEnabled = input?.phone ?? false;
-	const fusionEnabled = input?.fusion ?? false;
 	const wechatEnabled = input?.wechat ?? false;
 	return Object.freeze({
 		...base,
@@ -42,16 +40,11 @@ function config(input?: {
 		auth: Object.freeze({
 			...base.auth,
 			enabled: accountsEnabled,
-			registrationEnabled:
-				accountsEnabled && (phoneEnabled || fusionEnabled) && wechatEnabled,
+			registrationEnabled: accountsEnabled && phoneEnabled,
 			dataExportEnabled,
 			phone: Object.freeze({
 				...base.auth.phone,
 				enabled: phoneEnabled,
-			}),
-			fusion: Object.freeze({
-				...base.auth.fusion,
-				enabled: fusionEnabled,
 			}),
 			wechat: Object.freeze({
 				...base.auth.wechat,
@@ -197,9 +190,9 @@ describe("FeatureConfigService persistence capabilities", () => {
 		});
 	});
 
-	it("keeps SMS and fusion capabilities separate while either can support WeChat registration", async () => {
+	it("advertises phone registration without requiring a social provider", async () => {
 		const service = new FeatureConfigService(
-			config({ accounts: true, phone: false, fusion: true, wechat: true }),
+			config({ accounts: true, phone: true, wechat: false }),
 			placeProvider,
 			locationSearchProvider,
 			placeSearchProvider,
@@ -211,16 +204,15 @@ describe("FeatureConfigService persistence capabilities", () => {
 			authCapabilities: {
 				accountsEnabled: true,
 				registrationEnabled: true,
-				phoneEnabled: false,
-				fusionEnabled: true,
-				wechatEnabled: true,
+				phoneEnabled: true,
+				wechatEnabled: false,
 			},
 		});
 	});
 
-	it("advertises Fusion login while keeping registration closed without WeChat", async () => {
+	it("keeps registration closed when the phone channel is disabled", async () => {
 		const service = new FeatureConfigService(
-			config({ accounts: true, phone: false, fusion: true, wechat: false }),
+			config({ accounts: true, phone: false, wechat: true }),
 			placeProvider,
 			locationSearchProvider,
 			placeSearchProvider,
@@ -233,8 +225,7 @@ describe("FeatureConfigService persistence capabilities", () => {
 				accountsEnabled: true,
 				registrationEnabled: false,
 				phoneEnabled: false,
-				fusionEnabled: true,
-				wechatEnabled: false,
+				wechatEnabled: true,
 			},
 		});
 	});

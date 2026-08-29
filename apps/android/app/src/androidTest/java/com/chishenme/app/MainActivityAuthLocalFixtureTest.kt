@@ -129,10 +129,11 @@ class MainActivityAuthLocalFixtureTest {
 
             assertGuestChannelPresentation()
             requestOtpAndSubmit(
-                inputLabel = "+86 手机号",
+                inputLabel = "手机号",
                 target = PHONE_NUMBER,
                 sendAction = "发送验证码",
                 maskedTarget = PHONE_MASK,
+                submitAction = "验证并登录 / 创建账号",
             )
             awaitText("已安全登录")
             awaitRequestCount(5)
@@ -152,6 +153,7 @@ class MainActivityAuthLocalFixtureTest {
                 target = EMAIL,
                 sendAction = "发送验证码",
                 maskedTarget = EMAIL_MASK,
+                submitAction = "安全登录",
             )
             awaitText("已安全登录")
             awaitRequestCount(14)
@@ -184,15 +186,11 @@ class MainActivityAuthLocalFixtureTest {
     }
 
     private fun assertGuestChannelPresentation() {
-        scrollAccountTo("验证码登录")
-        composeRule.onNodeWithText("验证码登录").assertIsDisplayed()
+        scrollAccountTo("手机号 / 邮箱验证码")
+        composeRule.onNodeWithText("手机号 / 邮箱验证码").assertIsDisplayed()
 
         scrollAccountTo("此安装包未配置微信开放平台 AppID，微信能力已安全关闭。")
         composeRule.onNodeWithText("此安装包未配置微信开放平台 AppID，微信能力已安全关闭。")
-            .assertIsDisplayed()
-
-        scrollAccountTo("此安装包未配置微信开放平台 AppID，注册已安全关闭。")
-        composeRule.onNodeWithText("此安装包未配置微信开放平台 AppID，注册已安全关闭。")
             .assertIsDisplayed()
 
         scrollAccountTo("此安装包未配置腾讯 QQ 互联 AppID，QQ 能力已安全关闭。")
@@ -245,6 +243,7 @@ class MainActivityAuthLocalFixtureTest {
         target: String,
         sendAction: String,
         maskedTarget: String,
+        submitAction: String,
     ) {
         scrollAccountTo(sendAction)
         composeRule.onNode(hasSetTextAction() and hasText(inputLabel))
@@ -260,7 +259,7 @@ class MainActivityAuthLocalFixtureTest {
             .performScrollTo()
             .assertIsDisplayed()
             .performTextInput(OTP)
-        composeRule.onNode(hasClickAction() and hasText("安全登录"))
+        composeRule.onNode(hasClickAction() and hasText(submitAction))
             .performScrollTo()
             .assertIsDisplayed()
             .performClick()
@@ -294,11 +293,11 @@ class MainActivityAuthLocalFixtureTest {
             .assertIsDisplayed()
             .assertIsEnabled()
             .performClick()
-        awaitText("验证码登录")
+        awaitText("手机号 / 邮箱验证码")
     }
 
     private fun selectEmailLogin() {
-        scrollAccountTo("验证码登录")
+        scrollAccountTo("手机号 / 邮箱验证码")
         composeRule.onNode(hasClickAction() and hasText("邮箱"))
             .assertIsDisplayed()
             .performClick()
@@ -369,7 +368,7 @@ class MainActivityAuthLocalFixtureTest {
             actual = requests[1].body,
             expected = """{
                 "phoneNumber":"$PHONE_NUMBER",
-                "purpose":"LOGIN",
+                "purpose":"REGISTER",
                 "installationId":"$installationId"
             }""",
         )
@@ -381,6 +380,7 @@ class MainActivityAuthLocalFixtureTest {
                 challengeId = PHONE_CHALLENGE_ID,
                 installationId = installationId,
                 appVersion = appVersion,
+                phoneNumber = PHONE_NUMBER,
             ),
         )
         assertTrue("身份列表 GET 不得携带请求体", requests[3].body.isEmpty())
@@ -437,7 +437,10 @@ class MainActivityAuthLocalFixtureTest {
         challengeId: String,
         installationId: String,
         appVersion: String,
-    ): String = """{
+        phoneNumber: String? = null,
+    ): String {
+        val phoneField = phoneNumber?.let { ",\n        \"phoneNumber\":\"$it\"" }.orEmpty()
+        return """{
         "method":"$method",
         "device":{
             "installationId":"$installationId",
@@ -446,8 +449,9 @@ class MainActivityAuthLocalFixtureTest {
             "appVersion":"$appVersion"
         },
         "challengeId":"$challengeId",
-        "otpCode":"$OTP"
+        "otpCode":"$OTP"$phoneField
     }"""
+    }
 
     private fun assertExactJson(label: String, actual: String, expected: String) {
         assertEquals(
@@ -638,7 +642,7 @@ class MainActivityAuthLocalFixtureTest {
         const val DEVICE_API_PORT = 3001
         const val PREFERENCES_FILE = "app_preferences.preferences_pb"
         const val UI_TIMEOUT_MS = 20_000L
-        const val GUEST_ACCOUNT_ITEM_COUNT = 5
+        const val GUEST_ACCOUNT_ITEM_COUNT = 4
         const val SIGNED_IN_WITH_EMAIL_BIND_ITEM_COUNT = 7
         const val SIGNED_IN_EMAIL_BOUND_ITEM_COUNT = 6
         const val PHONE_NUMBER = "+8613800138000"

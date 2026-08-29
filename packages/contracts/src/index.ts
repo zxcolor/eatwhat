@@ -581,13 +581,6 @@ export type ThirdPartyAuthorizationCode = z.infer<
 	typeof ThirdPartyAuthorizationCodeSchema
 >;
 
-export const ThirdPartyAccessTokenSchema = z
-	.string()
-	.min(16)
-	.max(2_048)
-	.regex(/^[A-Za-z0-9._~+/=-]+$/u);
-export type ThirdPartyAccessToken = z.infer<typeof ThirdPartyAccessTokenSchema>;
-
 export const AppAccessTokenSchema = z
 	.string()
 	.length(43)
@@ -623,64 +616,6 @@ export const PhoneRequestCodeSchema = z
 	})
 	.strict();
 export type PhoneRequestCode = z.infer<typeof PhoneRequestCodeSchema>;
-
-// Scheme, package, signature and TTL stay server-owned; accepting any of them
-// from the client would allow the public request to select provider security
-// configuration. REGISTER only produces a phone proof and never creates an
-// account without the existing independent WeChat proof.
-export const FusionAuthTokenRequestSchema = z
-	.object({
-		purpose: z.enum(["LOGIN", "REGISTER"]),
-		installationId: z.uuid(),
-	})
-	.strict();
-export type FusionAuthTokenRequest = z.infer<
-	typeof FusionAuthTokenRequestSchema
->;
-
-const FusionTokenValueSchema = z
-	.string()
-	.min(1)
-	.max(4_096)
-	// biome-ignore lint/suspicious/noControlCharactersInRegex: Provider tokens must reject every ASCII control character.
-	.regex(/^[^\s\u0000-\u001F\u007F]+$/u);
-
-export const FusionAuthTokenResponseSchema = z
-	.object({
-		flowId: z.uuid(),
-		schemeCode: z
-			.string()
-			.min(1)
-			.max(128)
-			.regex(/^[A-Za-z0-9_-]+$/u),
-		authToken: FusionTokenValueSchema,
-		expiresAt: z.iso.datetime(),
-	})
-	.strict();
-export type FusionAuthTokenResponse = z.infer<
-	typeof FusionAuthTokenResponseSchema
->;
-
-export const FusionAuthVerifyRequestSchema = z
-	.object({
-		flowId: z.uuid(),
-		verifyToken: FusionTokenValueSchema,
-		installationId: z.uuid(),
-	})
-	.strict();
-export type FusionAuthVerifyRequest = z.infer<
-	typeof FusionAuthVerifyRequestSchema
->;
-
-export const FusionAuthVerifyResponseSchema = z
-	.object({
-		proofId: z.uuid(),
-		expiresAt: z.iso.datetime(),
-	})
-	.strict();
-export type FusionAuthVerifyResponse = z.infer<
-	typeof FusionAuthVerifyResponseSchema
->;
 
 // EMAIL cannot create an account. Keeping REGISTER out of this enum makes that
 // product rule machine-checkable at the public boundary.
@@ -724,26 +659,10 @@ export type EmailCodeChallengeResponse = z.infer<
 >;
 
 // Every state is bound to the App installation that will receive the native
-// callback. Registration additionally names the already-issued phone challenge
-// so the server can copy one shared, server-controlled flow reference into both
-// proofs; two unrelated OTP/OAuth proofs can never be spliced together.
+// callback. Third-party identities can only log in when already bound or be
+// bound from an authenticated session; they never create an account by
+// themselves.
 export const OAuthStateRequestSchema = z.union([
-	z
-		.object({
-			provider: z.literal("WECHAT"),
-			purpose: z.literal("REGISTER"),
-			installationId: z.uuid(),
-			phoneChallengeId: z.uuid(),
-		})
-		.strict(),
-	z
-		.object({
-			provider: z.literal("WECHAT"),
-			purpose: z.literal("REGISTER"),
-			installationId: z.uuid(),
-			phoneProofId: z.uuid(),
-		})
-		.strict(),
 	z
 		.object({
 			provider: z.enum(["WECHAT", "QQ"]),
@@ -753,7 +672,7 @@ export const OAuthStateRequestSchema = z.union([
 		.strict(),
 	z
 		.object({
-			provider: z.literal("QQ"),
+			provider: z.enum(["WECHAT", "QQ"]),
 			purpose: z.literal("BIND"),
 			installationId: z.uuid(),
 		})
@@ -765,7 +684,7 @@ export const OAuthStateResponseSchema = z.discriminatedUnion("provider", [
 	z
 		.object({
 			provider: z.literal("WECHAT"),
-			purpose: z.enum(["REGISTER", "LOGIN"]),
+			purpose: z.enum(["LOGIN", "BIND"]),
 			state: OAuthStateSchema,
 			expiresAt: z.iso.datetime(),
 		})
@@ -787,57 +706,25 @@ const OtpLoginBaseSchema = z.object({
 	device: AuthDeviceContextSchema,
 });
 
-const WechatCredentialSchema = z.object({
+const ThirdPartyAuthorizationCredentialSchema = z.object({
 	oauthState: OAuthStateSchema,
 	authorizationCode: ThirdPartyAuthorizationCodeSchema,
 });
 
-const QqCredentialSchema = z.object({
-	oauthState: OAuthStateSchema,
-	accessToken: ThirdPartyAccessTokenSchema,
-});
-
-export const RegisterPhoneWechatRequestSchema = z
-	.object({
-		phoneChallengeId: z.uuid(),
-		phoneOtpCode: OtpCodeSchema,
-		wechatOAuthState: OAuthStateSchema,
-		wechatAuthorizationCode: ThirdPartyAuthorizationCodeSchema,
-		device: AuthDeviceContextSchema,
-	})
-	.strict();
-export type RegisterPhoneWechatRequest = z.infer<
-	typeof RegisterPhoneWechatRequestSchema
->;
-
-export const RegisterFusionWechatRequestSchema = z
-	.object({
-		phoneProofId: z.uuid(),
-		wechatOAuthState: OAuthStateSchema,
-		wechatAuthorizationCode: ThirdPartyAuthorizationCodeSchema,
-		device: AuthDeviceContextSchema,
-	})
-	.strict();
-export type RegisterFusionWechatRequest = z.infer<
-	typeof RegisterFusionWechatRequestSchema
->;
-
 export const LoginRequestSchema = z.discriminatedUnion("method", [
-	OtpLoginBaseSchema.extend({ method: z.literal("PHONE") }).strict(),
-	z
-		.object({
-			method: z.literal("PHONE_FUSION"),
-			flowId: z.uuid(),
-			verifyToken: FusionTokenValueSchema,
-			device: AuthDeviceContextSchema,
-		})
-		.strict(),
+	OtpLoginBaseSchema.extend({
+		method: z.literal("PHONE"),
+		// PNVS needs the phone number at verification time. The service hashes it
+		// again and requires an exact match with the challenge before calling the
+		// provider, so a challenge cannot be replayed against another number.
+		phoneNumber: MainlandChinaPhoneSchema,
+	}).strict(),
 	OtpLoginBaseSchema.extend({ method: z.literal("EMAIL") }).strict(),
-	WechatCredentialSchema.extend({
+	ThirdPartyAuthorizationCredentialSchema.extend({
 		method: z.literal("WECHAT"),
 		device: AuthDeviceContextSchema,
 	}).strict(),
-	QqCredentialSchema.extend({
+	ThirdPartyAuthorizationCredentialSchema.extend({
 		method: z.literal("QQ"),
 		device: AuthDeviceContextSchema,
 	}).strict(),
@@ -949,7 +836,12 @@ export const BindIdentityRequestSchema = z.discriminatedUnion("type", [
 			otpCode: OtpCodeSchema,
 		})
 		.strict(),
-	QqCredentialSchema.extend({ type: z.literal("QQ") }).strict(),
+	ThirdPartyAuthorizationCredentialSchema.extend({
+		type: z.literal("WECHAT"),
+	}).strict(),
+	ThirdPartyAuthorizationCredentialSchema.extend({
+		type: z.literal("QQ"),
+	}).strict(),
 ]);
 export type BindIdentityRequest = z.infer<typeof BindIdentityRequestSchema>;
 
@@ -1099,9 +991,6 @@ export const AuthCapabilitiesSchema = z
 		accountsEnabled: z.boolean(),
 		registrationEnabled: z.boolean(),
 		phoneEnabled: z.boolean(),
-		// Older v1 services did not advertise fusion authentication. Absence must
-		// always close the capability rather than inheriting phoneEnabled.
-		fusionEnabled: z.boolean().default(false),
 		wechatEnabled: z.boolean(),
 		emailEnabled: z.boolean(),
 		qqEnabled: z.boolean(),
