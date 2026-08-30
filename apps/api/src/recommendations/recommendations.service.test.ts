@@ -7,6 +7,8 @@ import { describe, expect, it, vi } from "vitest";
 import { RecommendationRequestRegistry } from "../common/recommendation-request.registry.js";
 import type { AppConfig } from "../config/app-config.js";
 import type { DataRightsPolicy } from "../config/data-rights-policy.js";
+import type { OperationalConfigService } from "../operational-config/operational-config.service.js";
+import type { OperationalConfigSnapshot } from "../operational-config/operational-config.types.js";
 import type { PlaceProvider } from "./domain/place-candidate.js";
 import type { IntentCoordinator } from "./providers/intent-coordinator.js";
 import {
@@ -33,6 +35,71 @@ describe("recommendationNotice", () => {
 });
 
 describe("RecommendationsService token transaction", () => {
+	it("rejects a radius above the active operations ceiling before provider calls", async () => {
+		const places = {
+			kind: "AUTHORIZED_VENDOR",
+			dataMode: "LIVE",
+			search: vi.fn(),
+		} as unknown as PlaceProvider;
+		const intents = { resolve: vi.fn() } as unknown as IntentCoordinator;
+		const operationalSnapshot = {
+			source: "DATABASE",
+			aiAssistanceEnabled: false,
+			recommendationRules: {
+				qualityWeight: 25,
+				timeWeight: 25,
+				budgetWeight: 20,
+				intentWeight: 15,
+				diversityWeight: 10,
+				operationsAdjustmentMaximum: 5,
+			},
+			prompt: {
+				enabled: false,
+				promptVersion: "prompt-v1",
+				modelVersion: "model-v1",
+				timeoutMs: 1_500,
+			},
+			coverage: {
+				defaultRadiusMeters: 1_000,
+				maximumRadiusMeters: 2_000,
+				areaCode: "NATIONWIDE",
+			},
+			minimumAppVersions: { android: "1.0.0" },
+			versions: {
+				"features.ai-assistance": 1,
+				"recommendations.rules": 1,
+				"recommendations.prompt": 1,
+				"coverage.default": 1,
+				"clients.minimum-version": 1,
+			},
+		} satisfies OperationalConfigSnapshot;
+		const operational = {
+			current: vi.fn(async () => operationalSnapshot),
+		} as unknown as OperationalConfigService;
+		const service = new RecommendationsService(
+			{} as AppConfig,
+			places,
+			intents,
+			new RecommendationRequestRegistry(),
+			{} as DataRightsPolicy,
+			operational,
+		);
+
+		await expect(
+			service.recommend(
+				RecommendationContextSchema.parse({
+					location: { latitude: 39.9928, longitude: 116.3109 },
+					mealPeriod: "LUNCH",
+					radiusMeters: 2_500,
+				}),
+			),
+		).rejects.toMatchObject({
+			response: { code: "RADIUS_EXCEEDS_ACTIVE_COVERAGE" },
+		});
+		expect(places.search).not.toHaveBeenCalled();
+		expect(intents.resolve).not.toHaveBeenCalled();
+	});
+
 	it("revokes an issued mapping when the public response fails validation", async () => {
 		const registry = new RecommendationRequestRegistry();
 		const originalIssue = registry.issue.bind(registry);

@@ -65,10 +65,10 @@ describe("Nest database pool lifecycle", () => {
 		expect(client.release).toHaveBeenCalledTimes(1);
 	});
 
-	it("starts the WeChat Union alias bridge only when exactly 0012 is pending", async () => {
+	it("starts the WeChat Union alias bridge when 0012 and later migrations are pending", async () => {
 		const plan = await loadMigrationPlan();
-		expect(plan.at(-1)?.fileName).toBe("0012_wechat_union_aliases.sql");
-		const applied = plan.slice(0, -1).map(({ version, name, checksum }) => ({
+		expect(plan.at(-1)?.fileName).toBe("0013_admin_config_control.sql");
+		const applied = plan.slice(0, 11).map(({ version, name, checksum }) => ({
 			version,
 			name,
 			checksum,

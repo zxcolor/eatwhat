@@ -3,13 +3,15 @@ import {
 	type FeatureConfig,
 	FeatureConfigSchema,
 } from "@chi-shen-me/contracts";
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import { APP_CONFIG, type AppConfig } from "../config/app-config.js";
 import { DataRightsPolicy } from "../config/data-rights-policy.js";
 import {
 	LOCATION_SEARCH_PROVIDER,
 	type LocationSearchProvider,
 } from "../location-search/location-search.provider.js";
+import { OperationalConfigService } from "../operational-config/operational-config.service.js";
+import { startupOperationalConfig } from "../operational-config/operational-config.types.js";
 import {
 	PLACE_KEYWORD_SEARCH_PROVIDER,
 	type PlaceKeywordSearchProvider,
@@ -31,9 +33,14 @@ export class FeatureConfigService {
 		private readonly placeSearch: PlaceKeywordSearchProvider,
 		private readonly dataRightsPolicy: DataRightsPolicy,
 		private readonly supportFeedback: SupportFeedbackService,
+		@Optional()
+		private readonly operationalConfig?: OperationalConfigService,
 	) {}
 
 	async getPublicConfig(): Promise<FeatureConfig> {
+		const operational =
+			(await this.operationalConfig?.current()) ??
+			startupOperationalConfig(this.config);
 		let effectiveDataRightsMode: DataRightsMode = "LIVE_DISPLAY_ONLY";
 		let canPersistPlaceReference = false;
 		try {
@@ -73,23 +80,40 @@ export class FeatureConfigService {
 			supportFeedbackEnabled = false;
 		}
 		return FeatureConfigSchema.parse({
-			coverageName: "全国范围",
+			coverageName:
+				operational.coverage.areaCode === "NATIONWIDE"
+					? "全国范围"
+					: operational.coverage.areaCode,
 			dataRightsMode: effectiveDataRightsMode,
-			aiEnabled: this.config.qwen.enabled,
+			aiEnabled:
+				this.config.qwen.enabled &&
+				operational.aiAssistanceEnabled &&
+				operational.prompt.enabled,
 			accountsEnabled: this.config.features.accountsEnabled,
 			favoritesEnabled,
 			supportFeedbackEnabled,
 			persistenceCapabilities,
-			minimumSupportedVersion: this.config.features.minimumSupportedVersion,
-			ruleVersion: this.config.versions.rule,
-			promptVersion: this.config.versions.prompt,
-			modelVersion: this.config.qwen.enabled
-				? this.config.qwen.model
-				: this.config.versions.ruleFallbackModel,
+			minimumSupportedVersion: operational.minimumAppVersions.android,
+			recommendationDefaults: {
+				areaCode: operational.coverage.areaCode,
+				defaultRadiusMeters: operational.coverage.defaultRadiusMeters,
+				maximumRadiusMeters: operational.coverage.maximumRadiusMeters,
+			},
+			minimumSupportedVersions: operational.minimumAppVersions,
+			ruleVersion:
+				operational.versions["recommendations.rules"] === null
+					? this.config.versions.rule
+					: `recommendation-rules-v${operational.versions["recommendations.rules"]}`,
+			promptVersion: operational.prompt.promptVersion,
+			modelVersion:
+				this.config.qwen.enabled &&
+				operational.aiAssistanceEnabled &&
+				operational.prompt.enabled
+					? operational.prompt.modelVersion
+					: this.config.versions.ruleFallbackModel,
 			serviceCapabilities: {
 				recommendationsEnabled: this.places.kind !== "UNAVAILABLE",
-				locationSearchEnabled:
-					this.locationSearch.dataSource !== "UNAVAILABLE",
+				locationSearchEnabled: this.locationSearch.dataSource !== "UNAVAILABLE",
 				placeSearchEnabled: this.placeSearch.dataSource !== "UNAVAILABLE",
 			},
 			authCapabilities: {

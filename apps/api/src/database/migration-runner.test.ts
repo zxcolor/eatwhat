@@ -132,7 +132,7 @@ describe("transactional migration runner", () => {
 		);
 	});
 
-	it("allows the bridge to miss only the exact final phone-only migration", async () => {
+	it("allows the bridge target and every later migration to remain pending", async () => {
 		const legacySources = Array.from({ length: 10 }, (_, index) => {
 			const version = index + 1;
 			return {
@@ -146,11 +146,24 @@ describe("transactional migration runner", () => {
 				fileName: "0011_phone_only_auth.sql",
 				contents: Buffer.from("SELECT 11;"),
 			},
+			{
+				fileName: "0012_wechat_union_aliases.sql",
+				contents: Buffer.from("SELECT 12;"),
+			},
+			{
+				fileName: "0013_admin_config_control.sql",
+				contents: Buffer.from("SELECT 13;"),
+			},
 		]);
 		const bridgeTarget = {
 			version: 11,
 			name: "phone_only_auth",
 			fileName: "0011_phone_only_auth.sql",
+			approvedPlanHead: {
+				version: 13,
+				name: "admin_config_control",
+				fileName: "0013_admin_config_control.sql",
+			},
 		} as const;
 		const client = new FakeSqlClient();
 		client.appliedRows = migrations
@@ -178,15 +191,56 @@ describe("transactional migration runner", () => {
 			verifySchemaWithClient(client, migrations, bridgeTarget),
 		).rejects.toThrow("受控认证迁移过渡条件");
 
+		client.appliedRows = migrations
+			.slice(0, 11)
+			.map(({ version, name, checksum }) => ({ version, name, checksum }));
+		await expect(
+			verifySchemaWithClient(client, migrations, bridgeTarget),
+		).rejects.toThrow("受控认证迁移过渡条件");
+
 		const wrongFinal = buildMigrationPlan([
 			...legacySources,
-			{ fileName: "0011_other.sql", contents: Buffer.from("SELECT 12;") },
+			{ fileName: "0011_other.sql", contents: Buffer.from("SELECT 11;") },
+			{
+				fileName: "0012_wechat_union_aliases.sql",
+				contents: Buffer.from("SELECT 12;"),
+			},
+			{
+				fileName: "0013_admin_config_control.sql",
+				contents: Buffer.from("SELECT 13;"),
+			},
 		]);
 		client.appliedRows = wrongFinal
 			.slice(0, 10)
 			.map(({ version, name, checksum }) => ({ version, name, checksum }));
 		await expect(
 			verifySchemaWithClient(client, wrongFinal, bridgeTarget),
+		).rejects.toThrow("受控认证迁移过渡条件");
+
+		const unreviewedFuturePlan = buildMigrationPlan([
+			...legacySources,
+			{
+				fileName: "0011_phone_only_auth.sql",
+				contents: Buffer.from("SELECT 11;"),
+			},
+			{
+				fileName: "0012_wechat_union_aliases.sql",
+				contents: Buffer.from("SELECT 12;"),
+			},
+			{
+				fileName: "0013_admin_config_control.sql",
+				contents: Buffer.from("SELECT 13;"),
+			},
+			{
+				fileName: "0014_unreviewed_future.sql",
+				contents: Buffer.from("SELECT 14;"),
+			},
+		]);
+		client.appliedRows = unreviewedFuturePlan
+			.slice(0, 10)
+			.map(({ version, name, checksum }) => ({ version, name, checksum }));
+		await expect(
+			verifySchemaWithClient(client, unreviewedFuturePlan, bridgeTarget),
 		).rejects.toThrow("受控认证迁移过渡条件");
 	});
 });

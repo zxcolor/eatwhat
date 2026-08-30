@@ -56,6 +56,35 @@ describe("application safety configuration", () => {
 		expect(configured.features.privateFeedbackEnabled).toBe(true);
 	});
 
+	it("requires the startup minimum client version to match the public contract", () => {
+		expect(
+			loadAppConfig({
+				NODE_ENV: "test",
+				MINIMUM_SUPPORTED_VERSION: "2.4.0",
+			}).features.minimumSupportedVersion,
+		).toBe("2.4.0");
+		for (const value of ["02.4.0", "2.4", "2.4.0-beta", "2.4.10000"]) {
+			expect(() =>
+				loadAppConfig({
+					NODE_ENV: "test",
+					MINIMUM_SUPPORTED_VERSION: value,
+				}),
+			).toThrow("MINIMUM_SUPPORTED_VERSION");
+		}
+	});
+
+	it("accepts only prompt and Qwen model versions registered in this build", () => {
+		const defaults = loadAppConfig({ NODE_ENV: "test" });
+		expect(defaults.versions.prompt).toBe("intent-prompt-v1");
+		expect(defaults.qwen.model).toBe("qwen3.7-flash-2026-07-15");
+		expect(() =>
+			loadAppConfig({ NODE_ENV: "test", PROMPT_VERSION: "unknown-prompt" }),
+		).toThrow("PROMPT_VERSION");
+		expect(() =>
+			loadAppConfig({ NODE_ENV: "test", QWEN_MODEL: "unknown-model" }),
+		).toThrow("QWEN_MODEL");
+	});
+
 	it("rejects a worker-ready claim while the data-export capability is disabled", () => {
 		expect(() =>
 			loadAppConfig({

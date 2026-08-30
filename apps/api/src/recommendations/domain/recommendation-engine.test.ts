@@ -173,6 +173,40 @@ describe("rankCandidates", () => {
 		expect(results[0]?.fitScore).toBeTypeOf("number");
 	});
 
+	it("applies a validated published weight profile without changing hard filters", () => {
+		const results = rankCandidates({
+			context: context(),
+			intent: intent(),
+			dataRightsMode: "LICENSED_ENRICHMENT",
+			rules: {
+				qualityWeight: 0,
+				timeWeight: 95,
+				budgetWeight: 0,
+				intentWeight: 0,
+				diversityWeight: 0,
+				operationsAdjustmentMaximum: 0,
+			},
+			candidates: [
+				candidate({
+					providerPlaceId: "high-quality-slower",
+					providerRank: 1,
+					sourceRating: 5,
+					estimatedTravelMinutes: 15,
+				}),
+				candidate({
+					providerPlaceId: "lower-quality-faster",
+					providerRank: 2,
+					sourceRating: 2,
+					estimatedTravelMinutes: 2,
+					name: "更快的测试面馆",
+					location: { latitude: 39.994, longitude: 116.316, crs: "WGS84" },
+				}),
+			],
+		});
+
+		expect(results[0]?.providerPlaceId).toBe("lower-quality-faster");
+	});
+
 	it.each([
 		["closed", { openStatus: "CLOSED" as const }],
 		["blocked", { blocked: true }],

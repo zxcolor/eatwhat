@@ -12,6 +12,10 @@ import {
 	type RecommendationContext,
 	type RecommendationReason,
 } from "@chi-shen-me/contracts";
+import {
+	DEFAULT_RECOMMENDATION_RULES,
+	type RecommendationRules,
+} from "../../operational-config/operational-config.types.js";
 import type { PlaceCandidate } from "./place-candidate.js";
 
 export interface RankCandidatesInput {
@@ -20,6 +24,7 @@ export interface RankCandidatesInput {
 	readonly candidates: readonly PlaceCandidate[];
 	readonly dataRightsMode: DataRightsMode;
 	readonly recentPlaceIds?: ReadonlySet<string>;
+	readonly rules?: RecommendationRules;
 }
 
 /**
@@ -330,16 +335,21 @@ function scoreCandidate(
 	candidate: PlaceCandidate,
 	input: RankCandidatesInput,
 ): ScoredCandidate {
+	const rules = input.rules ?? DEFAULT_RECOMMENDATION_RULES;
 	const isRecent =
 		input.recentPlaceIds?.has(candidate.providerPlaceId) ?? false;
-	const diversity = isRecent ? 2 : 10;
+	const diversity = ((isRecent ? 2 : 10) / 10) * rules.diversityWeight;
 	const rawScore =
-		qualityScore(candidate) +
-		timeScore(candidate, input.context) +
-		budgetScore(candidate, input.context) +
-		mealMatchScore(candidate, input.intent) +
+		(qualityScore(candidate) / 25) * rules.qualityWeight +
+		(timeScore(candidate, input.context) / 25) * rules.timeWeight +
+		(budgetScore(candidate, input.context) / 20) * rules.budgetWeight +
+		(mealMatchScore(candidate, input.intent) / 15) * rules.intentWeight +
 		diversity +
-		candidate.editorialAdjustment;
+		clamp(
+			candidate.editorialAdjustment,
+			-rules.operationsAdjustmentMaximum,
+			rules.operationsAdjustmentMaximum,
+		);
 	return {
 		candidate,
 		fitScore: Math.round(clamp(rawScore, 0, 100)),

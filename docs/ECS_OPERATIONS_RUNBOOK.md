@@ -221,10 +221,10 @@ EMAIL=false，而不是用 `--disable` 关闭全部账号。更新器必须清�
 `ACCOUNTS_ENABLED=true` 或任何认证通道同时使用，也不得为缩短窗口而复用旧验证码、旧
 证明或旧供应商权限。
 
-### schema 0011→0012：现在记录微信 UnionID alias
+### schema 0011→0012：现在记录微信 UnionID alias（当前 head 0013）
 
 UnionID alias 迁移不替换现有 AppID+OpenID binding，但仍必须使用两个不可变候选 release，
-避免 plan11 镜像遇到未知 schema12，也避免 schema11 上提前运行 plan12 final API：
+避免 plan11 镜像遇到未知 schema12，也避免 schema11 上提前运行当前 plan13 final API：
 
 1. 第一个候选使用 `AUTH_SCHEMA_TRANSITION_MODE=wechat_union_aliases_pending`，强制
    `WECHAT_AUTH_ENABLED=false`；账号和手机号可继续开放。`WECHAT_OPEN_PLATFORM_REALM_ID`
@@ -238,22 +238,24 @@ UnionID alias 迁移不替换现有 AppID+OpenID binding，但仍必须使用两
    ```
 
    脚本只接受 exact schema11，并在同一 mutation lock 内创建、验证 exact-schema11 备份，
-   执行 0012、重新应用角色授权，再核对 exact schema12、空 alias 表、三项 state-bound
-   SECURITY DEFINER 函数和最小 ACL。微信在整个 cutover 中保持关闭；
+   连续执行 0012 与 0013、重新应用角色授权，再核对 exact schema13、0012 UnionID ledger、
+   空 alias 表、三项 state-bound SECURITY DEFINER 函数和最小 ACL。微信在整个 cutover 中保持关闭；
 3. 第二个候选必须使用 `AUTH_SCHEMA_TRANSITION_MODE=none` 且仍保持
-   `WECHAT_AUTH_ENABLED=false`。先激活并证明 plan12 final API healthy；不得让认证更新器直接把
+   `WECHAT_AUTH_ENABLED=false`。先激活并证明 plan13 final API healthy；不得让认证更新器直接把
    pending bridge 变成 final；
 4. 最后另建一个非 `current` 的认证候选并从其中使用 `update-auth-secrets.sh --apply` 恢复微信
-   通道；更新器只读活动 final 的 exact schema12、realm 和别名 ACL 证明，再由候选激活流程
+   通道；更新器只读活动 final 的 exact schema13、0012 UnionID ledger、realm 和别名 ACL 证明，
+   再由候选激活流程
    重建 API；
 5. 已有微信用户下一次成功登录或绑定时，服务端会把微信返回的 UnionID 作为
    `realm + HMAC-SHA256` alias 懒写入；不输出原值。当前存量用户需要主动完成一次微信授权，
    才能证明 alias 已补齐。
 
-在 alias 表仍为空的迁移窗口，显式
+保留的专用 0012→0011 回滚只适用于数据库仍精确停在 schema12 的旧过渡部署。在 alias 表仍为空时，显式
 `rollback-database.sh --wechat-union-aliases <schema11备份> --execute <确认值>` 可从活动 pending
-bridge 回退数据库。只要写入过一条 alias，普通降级必须失败；此时关闭微信、保留 schema12
-及安全备份并向前修复，不能用数据丢失回滚删除跨端身份。
+bridge 回退数据库；当前已到 schema13 的部署不得借该入口跨越 0013 降级。只要写入过一条
+alias，普通降级必须失败；此时关闭微信、保留当前数据库及安全备份并向前修复，不能用数据丢失
+回滚删除跨端身份。
 
 首次开启前必须：
 

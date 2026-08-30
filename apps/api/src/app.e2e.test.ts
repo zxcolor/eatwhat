@@ -18,22 +18,33 @@ import {
 	DataRightsPolicy,
 } from "./config/data-rights-policy.js";
 import { RecommendationEventsService } from "./events/recommendation-events.service.js";
+import { OperationalConfigService } from "./operational-config/operational-config.service.js";
+import { startupOperationalConfig } from "./operational-config/operational-config.types.js";
 
 describe("public HTTP API", () => {
 	let app: INestApplication;
 	let baseUrl: string;
+	const appConfig = loadAppConfig({
+		NODE_ENV: "test",
+		DATA_RIGHTS_MODE: "LIVE_DISPLAY_ONLY",
+		AMAP_ENABLED: "false",
+		QWEN_ENABLED: "false",
+	});
+	const operationalConfig = Object.freeze({
+		...startupOperationalConfig(appConfig),
+		coverage: Object.freeze({
+			areaCode: "NATIONWIDE",
+			defaultRadiusMeters: 1_500,
+			maximumRadiusMeters: 2_000,
+		}),
+	});
 
 	beforeAll(async () => {
 		const module = await Test.createTestingModule({ imports: [AppModule] })
 			.overrideProvider(APP_CONFIG)
-			.useValue(
-				loadAppConfig({
-					NODE_ENV: "test",
-					DATA_RIGHTS_MODE: "LIVE_DISPLAY_ONLY",
-					AMAP_ENABLED: "false",
-					QWEN_ENABLED: "false",
-				}),
-			)
+			.useValue(appConfig)
+			.overrideProvider(OperationalConfigService)
+			.useValue({ current: async () => operationalConfig })
 			.compile();
 		app = module.createNestApplication({ bodyParser: false });
 		app.useGlobalFilters(new SafeExceptionFilter());
@@ -234,6 +245,11 @@ describe("public HTTP API", () => {
 				locationSearchEnabled: true,
 				placeSearchEnabled: true,
 			},
+			recommendationDefaults: {
+				areaCode: "NATIONWIDE",
+				defaultRadiusMeters: 1_500,
+				maximumRadiusMeters: 2_000,
+			},
 		});
 	});
 
@@ -319,6 +335,26 @@ describe("public HTTP API", () => {
 		const body = (await response.json()) as Record<string, unknown>;
 		expect(response.status).toBe(400);
 		expect(body.code).toBe("INVALID_REQUEST");
+	});
+
+	it("rejects a recommendation radius above the active operational limit", async () => {
+		const response = await fetch(`${baseUrl}/v1/recommendations`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				location: { latitude: 39.9928, longitude: 116.3109 },
+				mealPeriod: "LUNCH",
+				radiusMeters: 2_001,
+			}),
+		});
+		const body = (await response.json()) as Record<string, unknown>;
+		expect(response.status).toBe(400);
+		expect(body).toMatchObject({
+			code: "RADIUS_EXCEEDS_ACTIVE_COVERAGE",
+			message: "搜索半径超过当前运营配置允许的范围",
+		});
+		expect(String(body.requestId)).toMatch(/^[0-9a-f-]{36}$/i);
+		expect(body).not.toHaveProperty("stack");
 	});
 
 	it("POST /v1/recommendation-events accepts the strict coordinate-free contract", async () => {

@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { type AppConfig, loadAppConfig } from "../config/app-config.js";
 import type { DataRightsPolicy } from "../config/data-rights-policy.js";
 import type { LocationSearchProvider } from "../location-search/location-search.provider.js";
+import type { OperationalConfigService } from "../operational-config/operational-config.service.js";
+import { startupOperationalConfig } from "../operational-config/operational-config.types.js";
 import type { PlaceKeywordSearchProvider } from "../place-search/place-keyword-search.provider.js";
 import type { PlaceProvider } from "../recommendations/domain/place-candidate.js";
 import type { SupportFeedbackService } from "../support-feedback/support-feedback.service.js";
@@ -95,6 +97,50 @@ function supportFeedback(
 }
 
 describe("FeatureConfigService persistence capabilities", () => {
+	it("publishes only the validated operational snapshot fields", async () => {
+		const baseConfig = config();
+		const baseOperational = startupOperationalConfig(baseConfig);
+		const operational = {
+			current: vi.fn(async () => ({
+				...baseOperational,
+				source: "DATABASE" as const,
+				aiAssistanceEnabled: false,
+				coverage: {
+					defaultRadiusMeters: 1_200,
+					maximumRadiusMeters: 3_000,
+					areaCode: "NATIONWIDE",
+				},
+				minimumAppVersions: { android: "2.4.0" },
+				versions: {
+					...baseOperational.versions,
+					"recommendations.rules": 7,
+				},
+			})),
+		} as unknown as OperationalConfigService;
+		const service = new FeatureConfigService(
+			baseConfig,
+			placeProvider,
+			locationSearchProvider,
+			placeSearchProvider,
+			policy(),
+			supportFeedback(),
+			operational,
+		);
+
+		await expect(service.getPublicConfig()).resolves.toMatchObject({
+			coverageName: "全国范围",
+			aiEnabled: false,
+			minimumSupportedVersion: "2.4.0",
+			minimumSupportedVersions: { android: "2.4.0" },
+			recommendationDefaults: {
+				areaCode: "NATIONWIDE",
+				defaultRadiusMeters: 1_200,
+				maximumRadiusMeters: 3_000,
+			},
+			ruleVersion: "recommendation-rules-v7",
+		});
+	});
+
 	it("always returns the complete fail-closed capability object", async () => {
 		const service = new FeatureConfigService(
 			config({
@@ -265,7 +311,9 @@ describe("FeatureConfigService persistence capabilities", () => {
 		);
 		const failedResult = await failedReadiness.getPublicConfig();
 		expect(failedResult.supportFeedbackEnabled).toBe(false);
-		expect(JSON.stringify(failedResult)).not.toContain("private readiness failure");
+		expect(JSON.stringify(failedResult)).not.toContain(
+			"private readiness failure",
+		);
 	});
 
 	it("advertises only the three actually selected provider capabilities", async () => {

@@ -1,6 +1,6 @@
 # 实施状态
 
-更新日期：2026-08-27
+更新日期：2026-08-30
 
 本仓库目前是“吃什么”Android 1.0 的封闭测试候选工程，不代表外部资质、真实基础设施或公开发布门禁已经全部完成。
 
@@ -14,6 +14,7 @@
 - 推荐公共契约已把来源改为受约束、可扩展的代码，并为每条结果携带 `dataMode: LIVE | DEMO` 和导航、拨号、复制地址、分享四项布尔 `actions`。为保持 API v1 兼容暂时保留 `share`，但当前 AMAP/DEMO provider 统一返回 `false`，Android 1.0 也不会展示或执行它。推荐引擎与 Android 不根据供应商名称分支；当前仅有 AMAP 和 development/test 的 DEMO adapter，没有虚构美团或大众点评接口。
 - 推荐与地点关键词搜索共用通用 provider registry/selector，但分别以 `PLACE_RECOMMENDATION`、`LOCATION_TEXT_SEARCH` 真实能力注册，并分别配置 `RECOMMENDATION_PROVIDER_PRIORITY`、`LOCATION_SEARCH_PROVIDER_PRIORITY`。禁用、能力不匹配或无可用 adapter 时安全跳过或失败，不跨能力推断，也不伪造未来供应商。
 - `/v1/config` 已增加供应商无关的 `serviceCapabilities`，分别声明推荐、地点搜索和餐厅关键词搜索当前是否可用；共享契约与服务端继续保留 `placeSearchEnabled`，`/v1/place-search`、OpenAPI 和 provider 也继续作为独立 API 能力维护。Android 1.0 只消费推荐与地点搜索字段，缺少整个对象、缺少对应字段或值不是明确 `true` 时按 `false` 关闭，并无条件忽略 `placeSearchEnabled`。地点搜索能力与可信配置 generation 一起交给 ViewModel；旧 generation 的开放状态不能取得新 generation 的远程访问 lease，也不能在配置刷新后继续触网。
+- `/v1/config` 还返回当前运行配置的脱敏 `recommendationDefaults`（固定 `NATIONWIDE`、客户端建议半径、服务端最大半径）与 `minimumSupportedVersions`（Android 及可选 iOS/小程序）。建议半径不是服务端自动默认，推荐请求仍必须显式提交 `radiusMeters`。为兼容已部署旧响应，两个新对象在共享契约中可缺省，但当前服务总是发出。旧 `minimumSupportedVersion` 继续等于 Android 值。公开投影不含坐标、供应商身份、Secret、管理员或版本历史，也不代表上游健康/readiness。
 - 公开推荐结果已移除稳定 `providerPlaceId`，只返回两小时、请求作用域的 43 字符 HMAC `resultToken`。推荐事件只提交 `requestId/resultToken/type/occurredAt`；服务端从短期映射解析真实来源，同一 token 的同类事件只能接受一次。
 - 客户端在展示前再次拒绝明确停业、超半径、已知超预算和明确命中排除菜系的响应；未知价格或营业信息只做风险提示，不伪造事实。
 - 会话内推荐餐厅详情同时按服务端逐项 `actions` 与本地必要字段决定是否提供地图查询、复制地址和安全拨号；动作未授权、缺少电话、缺少地址或缺少导航查询信息时，对应按钮保持禁用并显示明确原因，Intent 工厂仍会再次拒绝执行。第三方 POI 不进入导航参数、SavedState 或本地持久化。推荐结果和详情选择只在 Activity 级内存 ViewModel 中跨配置重建保留；结果页仅把“仅营业中”等安全筛选和列表/方位图展示偏好写入可恢复 UI 状态，餐厅对象、坐标和 `resultToken` 不进入 Bundle、SavedState 或持久化。DEMO 结果的已开放动作只用于本地 UI 验收并带虚构数据警示；分享字段在全部 provider 上关闭。
@@ -29,6 +30,7 @@
 - API 对非法 JSON、超过 100 KiB 的 JSON 和非 JSON POST 分别返回统一安全的 400/413/415；错误不回显解析器原文或非法请求 ID，并统一下发 `nosniff`、`DENY`、`no-referrer`、`no-store` 响应头。
 - API 已区分 `GET /health` 存活探针与 `GET /health/ready` 就绪探针：前者只证明 NestJS 进程能响应，后者才在不调用外部供应商的前提下检查已启用数据库的有界 `SELECT 1` 和核心推荐 adapter 的本地配置。Compose 健康检查、部署预检后的运行时验证和未来公网切流必须使用 readiness；生产没有可用推荐 adapter 时返回受控 503 是失败关闭，不得用 liveness 冒充可服务。
 - 管理员服务与运营台已实现独立的 WebAuthn/passkey 登录、15 分钟空闲会话、逐请求 RBAC、当前会话、passkey 自助管理和脱敏审计读取；浏览器 BFF 使用 HttpOnly 会话 Cookie，普通用户 token/数据库角色与管理员链路隔离。真实生产 RP ID/origin、HTTPS、首位管理员离线 bootstrap、独立 `admin_api_runtime`、完整 step-up assertion、真实数据库权限和恢复演练仍未验收，因此不能把代码存在表述为管理后台已上线。
+- 管理员配置中心已收口为五个非 Secret 白名单键：`features.ai-assistance`、`recommendations.rules`、`recommendations.prompt`、`coverage.default`、`clients.minimum-version`。提示词与模型标签不是自由文本，只能选择当前服务端构建注册值；未注册值在 UI、共享契约、API 和数据库四层拒绝。推荐权重仅 `LICENSED_ENRICHMENT` 生效，`LIVE_DISPLAY_ONLY` 保持上游顺序。隔离管理员 API 提供活动列表、逐键历史、带 `expectedActiveVersion` 的发布和复制旧值生成新版本的回滚；PUT 首次发布期望版本为 `null`、已有活动版本时精确匹配，rollback 始终要求正整数活动版本，漂移返回 409。AI 辅助键严格只有全局 `enabled` 布尔开关。配置审计只投影固定键、新/源版本和枚举变更原因，不含 value 或自由文本。读写分别要求 `ALGORITHM_CONFIG_READ/WRITE`。它不接收或返回高德/千问/短信/SMTP/OAuth/数据库/管理员加密 Secret，也不下发可执行代码。接口中的活动状态只表示数据库版本状态，不等于上游健康、运行进程已经采用或生产 readiness；生产管理员启动门禁仍未验收。
 - 本地开发、CI、容器部署和安全基线文件已落盘。ECS 当前运行全国版 root-only release `20260823T071142Z-nationwide`，Linux/amd64 镜像为 `sha256:44041f99d06b1758088b58a22af83707e56db81783c8c4daadc7347e9da7c3a7`；bundle、镜像 ID/用户、发布坐标、共享 Secret 形状、PostgreSQL TLS 与 Compose 均通过严格预检、上海隔离候选验收和动态激活。激活只重建 API，PostgreSQL 容器未变化；本地 Windows 不承担 Docker 构建。
 - PostgreSQL/PostGIS 基础已落盘：非生产默认无连接、生产强制直连/TLS/角色身份，Nest Pool 生命周期与安全事务入口，固定路径 SHA-256 迁移、schema 启动校验、初始账号/收藏/历史/反馈/导出/注销/配置/后台审计/数据权利 schema，以及固定 90/180/7/30 天 retention runner。数据库没有用户精确坐标；OTP/opaque token/身份只保存 Argon2id、HMAC 或密文。
 - migration/runtime/maintenance 与一次性 extension owner 的权限边界已写入事务化 `role-grants.sql`；脚本会拒绝缺变量、同角色、高权或互相继承，收敛历史表级和列级 ACL。Docker 镜像复制只读 migrations，本地 Compose 顺序是数据库健康→迁移成功→API schema 校验后启动。
@@ -54,7 +56,7 @@
   门禁会复核地址策略并检查同一地址已进入 Debug/Alpha `BuildConfig` 与 APK DEX，同时证明 Fixture 只含固定回环地址且 AndroidTest 只指向 Fixture；还会核对 Alpha 固定证书摘要、唯一 signer、v2 签名以及与 Debug 测试证书隔离。它不会发起公网探测。DNS、TLS、独立 API vhost 与 `/health/ready` 已由独立公网 smoke 验收，关闭 Wi-Fi 真机与最终 Release 的独立签名仍不能由构建门禁替代。
 - `scripts/start-api-local.ps1` 可从已忽略的 `.env.local` 注入服务端配置并隐藏密钥值；构建子进程不继承运行时 Secret，API 子进程只接收明确白名单字段。邮件验证码使用标准 SMTP，阿里云只负责短信；仓库内所有中文 PowerShell 脚本均以 UTF-8 BOM 保存，并由验证脚本检查 Windows PowerShell 5.1 兼容性。
 - `pnpm dev:api` 现在先按项目 TypeScript 配置生成带 Nest 装饰器元数据的编译产物，再监听源码并以 Node 运行 `dist`；独立运行时冒烟测试会在随机本机端口验证健康、配置和地点搜索，防止以后退回会破坏依赖注入的直接 esbuild/tsx 执行路径。
-- 已落地 [`openapi.v1.json`](./openapi.v1.json) 作为 OpenAPI 3.1 v1 单一文档源；生成门禁会校验 JSON、本地引用、controller 路由/方法/状态码、Zod input/output、Bearer、安全错误和管理员 passkey/RBAC 隔离。账号契约正在同步为 PHONE_ONLY，生成产物必须在接口收束后重新生成，不能把旧文档或路由存在冒充功能可用。
+- 已落地 [`openapi.v1.json`](./openapi.v1.json) 作为 OpenAPI 3.1 v1 单一文档源；生成门禁会校验 JSON、本地引用、controller 路由/方法/状态码、Zod input/output、Bearer、安全错误和管理员 passkey/RBAC 隔离，并覆盖配置中心四条路由、严格五键 schema 与 409 乐观并发冲突。账号契约正在同步为 PHONE_ONLY，生成产物必须在接口收束后重新生成，不能把旧文档、配置状态或路由存在冒充功能可用。
 
 ## 尚未声称完成
 

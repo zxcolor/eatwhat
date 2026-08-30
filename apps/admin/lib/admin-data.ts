@@ -2,16 +2,57 @@ import "server-only";
 
 export type DataSource = "LIVE" | "DEMO";
 
+export interface PersistenceCapabilities {
+  favoritesEnabled: boolean;
+  historyEnabled: boolean;
+  privateFeedbackEnabled: boolean;
+  savedResourceIdsEnabled: boolean;
+}
+
+export interface AuthCapabilities {
+  accountsEnabled: boolean;
+  registrationEnabled: boolean;
+  phoneEnabled: boolean;
+  wechatEnabled: boolean;
+  emailEnabled: boolean;
+  qqEnabled: boolean;
+  dataExportEnabled: boolean;
+}
+
+export interface ServiceCapabilities {
+  recommendationsEnabled: boolean;
+  locationSearchEnabled: boolean;
+  placeSearchEnabled: boolean;
+}
+
+export interface RecommendationDefaults {
+  areaCode: "NATIONWIDE";
+  defaultRadiusMeters: number;
+  maximumRadiusMeters: number;
+}
+
+export interface MinimumSupportedVersions {
+  android: string;
+  ios?: string;
+  miniprogram?: string;
+}
+
 export interface FeatureConfig {
   coverageName: string;
   dataRightsMode: "LIVE_DISPLAY_ONLY" | "LICENSED_ENRICHMENT";
   aiEnabled: boolean;
   accountsEnabled: boolean;
   favoritesEnabled: boolean;
+  supportFeedbackEnabled: boolean;
   minimumSupportedVersion: string;
   ruleVersion: string;
   promptVersion: string;
   modelVersion: string;
+  recommendationDefaults?: RecommendationDefaults;
+  minimumSupportedVersions?: MinimumSupportedVersions;
+  persistenceCapabilities: PersistenceCapabilities;
+  authCapabilities: AuthCapabilities;
+  serviceCapabilities: ServiceCapabilities;
 }
 
 export interface HealthSummary {
@@ -35,10 +76,39 @@ const demoConfig: FeatureConfig = {
   aiEnabled: false,
   accountsEnabled: false,
   favoritesEnabled: false,
+  supportFeedbackEnabled: false,
   minimumSupportedVersion: "0.1.0",
   ruleVersion: "rules-2026.08-demo",
   promptVersion: "prompt-2026.08-demo",
-  modelVersion: "qwen3.7-flash-2026-07-15"
+  modelVersion: "qwen3.7-flash-2026-07-15",
+  recommendationDefaults: {
+    areaCode: "NATIONWIDE",
+    defaultRadiusMeters: 1_500,
+    maximumRadiusMeters: 10_000
+  },
+  minimumSupportedVersions: {
+    android: "0.1.0"
+  },
+  persistenceCapabilities: {
+    favoritesEnabled: false,
+    historyEnabled: false,
+    privateFeedbackEnabled: false,
+    savedResourceIdsEnabled: false
+  },
+  authCapabilities: {
+    accountsEnabled: false,
+    registrationEnabled: false,
+    phoneEnabled: false,
+    wechatEnabled: false,
+    emailEnabled: false,
+    qqEnabled: false,
+    dataExportEnabled: false
+  },
+  serviceCapabilities: {
+    recommendationsEnabled: false,
+    locationSearchEnabled: false,
+    placeSearchEnabled: false
+  }
 };
 
 const demoHealth: HealthSummary = {
@@ -65,23 +135,199 @@ function apiBaseUrl(): string {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isFeatureConfig(value: unknown): value is FeatureConfig {
-  if (!isRecord(value)) return false;
+function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  const allowed = new Set(keys);
+  return Object.keys(value).every((key) => allowed.has(key));
+}
+
+function exactBooleanRecord<T extends object>(
+  value: unknown,
+  keys: readonly (keyof T)[]
+): T | null {
+  if (!isRecord(value) || !hasOnlyKeys(value, keys as readonly string[])) return null;
+  if (Object.keys(value).length !== keys.length || !keys.every((key) => typeof value[key as string] === "boolean")) {
+    return null;
+  }
+  return Object.fromEntries(keys.map((key) => [key, value[key as string]])) as T;
+}
+
+function compatibleBooleanRecord<T extends object>(
+  value: unknown,
+  requiredKeys: readonly (keyof T)[],
+  defaultFalseKeys: readonly (keyof T)[]
+): T | null {
+  const keys = [...requiredKeys, ...defaultFalseKeys];
+  if (!isRecord(value) || !hasOnlyKeys(value, keys as readonly string[])) return null;
+  if (
+    !requiredKeys.every(
+      (key) => Object.hasOwn(value, key as string) && typeof value[key as string] === "boolean"
+    ) ||
+    !defaultFalseKeys.every(
+      (key) => !Object.hasOwn(value, key as string) || typeof value[key as string] === "boolean"
+    )
+  ) return null;
+  return Object.fromEntries([
+    ...requiredKeys.map((key) => [key, value[key as string]]),
+    ...defaultFalseKeys.map((key) => [key, value[key as string] ?? false])
+  ]) as T;
+}
+
+function isStrictSemver(value: unknown): value is string {
   return (
-    typeof value.coverageName === "string" &&
-    (value.dataRightsMode === "LIVE_DISPLAY_ONLY" ||
-      value.dataRightsMode === "LICENSED_ENRICHMENT") &&
-    typeof value.aiEnabled === "boolean" &&
-    typeof value.accountsEnabled === "boolean" &&
-    typeof value.favoritesEnabled === "boolean" &&
-    typeof value.minimumSupportedVersion === "string" &&
-    typeof value.ruleVersion === "string" &&
-    typeof value.promptVersion === "string" &&
-    typeof value.modelVersion === "string"
+    typeof value === "string" &&
+    value.length <= 64 &&
+    /^(?:0|[1-9]\d{0,3})\.(?:0|[1-9]\d{0,3})\.(?:0|[1-9]\d{0,3})$/.test(value)
   );
+}
+
+function parseRecommendationDefaults(value: unknown): RecommendationDefaults | null {
+  const keys = ["areaCode", "defaultRadiusMeters", "maximumRadiusMeters"] as const;
+  if (!isRecord(value) || !hasOnlyKeys(value, keys) || Object.keys(value).length !== keys.length) return null;
+  if (
+    value.areaCode !== "NATIONWIDE" ||
+    typeof value.defaultRadiusMeters !== "number" || !Number.isSafeInteger(value.defaultRadiusMeters) ||
+    value.defaultRadiusMeters < 200 || value.defaultRadiusMeters > 10_000 ||
+    typeof value.maximumRadiusMeters !== "number" || !Number.isSafeInteger(value.maximumRadiusMeters) ||
+    value.maximumRadiusMeters < 200 || value.maximumRadiusMeters > 10_000 ||
+    value.defaultRadiusMeters > value.maximumRadiusMeters
+  ) return null;
+  return {
+    areaCode: value.areaCode,
+    defaultRadiusMeters: value.defaultRadiusMeters,
+    maximumRadiusMeters: value.maximumRadiusMeters
+  };
+}
+
+function parseMinimumSupportedVersions(value: unknown): MinimumSupportedVersions | null {
+  if (!isRecord(value) || !hasOnlyKeys(value, ["android", "ios", "miniprogram"])) return null;
+  if (
+    !isStrictSemver(value.android) ||
+    !(value.ios === undefined || isStrictSemver(value.ios)) ||
+    !(value.miniprogram === undefined || isStrictSemver(value.miniprogram))
+  ) return null;
+  return {
+    android: value.android,
+    ...(value.ios === undefined ? {} : { ios: value.ios }),
+    ...(value.miniprogram === undefined ? {} : { miniprogram: value.miniprogram })
+  };
+}
+
+export function parseFeatureConfig(value: unknown): FeatureConfig | null {
+  const topLevelKeys = [
+    "coverageName",
+    "dataRightsMode",
+    "aiEnabled",
+    "accountsEnabled",
+    "favoritesEnabled",
+    "supportFeedbackEnabled",
+    "minimumSupportedVersion",
+    "ruleVersion",
+    "promptVersion",
+    "modelVersion",
+    "recommendationDefaults",
+    "minimumSupportedVersions",
+    "persistenceCapabilities",
+    "authCapabilities",
+    "serviceCapabilities"
+  ] as const;
+  if (!isRecord(value) || !hasOnlyKeys(value, topLevelKeys)) return null;
+  if (
+    typeof value.coverageName !== "string" || value.coverageName.length === 0 || value.coverageName.length > 80 ||
+    (value.dataRightsMode !== "LIVE_DISPLAY_ONLY" && value.dataRightsMode !== "LICENSED_ENRICHMENT") ||
+    typeof value.aiEnabled !== "boolean" ||
+    typeof value.accountsEnabled !== "boolean" ||
+    typeof value.favoritesEnabled !== "boolean" ||
+    !(value.supportFeedbackEnabled === undefined || typeof value.supportFeedbackEnabled === "boolean") ||
+    !isStrictSemver(value.minimumSupportedVersion) ||
+    typeof value.ruleVersion !== "string" || value.ruleVersion.length > 120 ||
+    typeof value.promptVersion !== "string" || value.promptVersion.length > 120 ||
+    typeof value.modelVersion !== "string" || value.modelVersion.length > 120
+  ) return null;
+
+  const persistenceCapabilities = value.persistenceCapabilities === undefined
+    ? {
+        favoritesEnabled: false,
+        historyEnabled: false,
+        privateFeedbackEnabled: false,
+        savedResourceIdsEnabled: false
+      }
+    : exactBooleanRecord<PersistenceCapabilities>(value.persistenceCapabilities, [
+        "favoritesEnabled",
+        "historyEnabled",
+        "privateFeedbackEnabled",
+        "savedResourceIdsEnabled"
+      ]);
+  const authCapabilities = value.authCapabilities === undefined
+    ? {
+        accountsEnabled: false,
+        registrationEnabled: false,
+        phoneEnabled: false,
+        wechatEnabled: false,
+        emailEnabled: false,
+        qqEnabled: false,
+        dataExportEnabled: false
+      }
+    : compatibleBooleanRecord<AuthCapabilities>(value.authCapabilities, [
+        "accountsEnabled",
+        "registrationEnabled",
+        "phoneEnabled",
+        "wechatEnabled",
+        "emailEnabled",
+        "qqEnabled"
+      ], [
+        "dataExportEnabled"
+      ]);
+  const serviceCapabilities = value.serviceCapabilities === undefined
+    ? {
+        recommendationsEnabled: false,
+        locationSearchEnabled: false,
+        placeSearchEnabled: false
+      }
+    : compatibleBooleanRecord<ServiceCapabilities>(value.serviceCapabilities, [], [
+        "recommendationsEnabled",
+        "locationSearchEnabled",
+        "placeSearchEnabled"
+      ]);
+  const recommendationDefaults = value.recommendationDefaults === undefined
+    ? undefined
+    : parseRecommendationDefaults(value.recommendationDefaults);
+  const minimumSupportedVersions = value.minimumSupportedVersions === undefined
+    ? undefined
+    : parseMinimumSupportedVersions(value.minimumSupportedVersions);
+  if (
+    persistenceCapabilities === null ||
+    authCapabilities === null ||
+    serviceCapabilities === null ||
+    recommendationDefaults === null ||
+    minimumSupportedVersions === null
+  ) return null;
+  if (value.persistenceCapabilities !== undefined && persistenceCapabilities.favoritesEnabled !== value.favoritesEnabled) return null;
+  if (minimumSupportedVersions !== undefined && minimumSupportedVersions.android !== value.minimumSupportedVersion) return null;
+  if (
+    value.dataRightsMode === "LIVE_DISPLAY_ONLY" &&
+    (value.favoritesEnabled || Object.values(persistenceCapabilities).some(Boolean))
+  ) return null;
+
+  return {
+    coverageName: value.coverageName,
+    dataRightsMode: value.dataRightsMode,
+    aiEnabled: value.aiEnabled,
+    accountsEnabled: value.accountsEnabled,
+    favoritesEnabled: value.favoritesEnabled,
+    supportFeedbackEnabled: value.supportFeedbackEnabled ?? false,
+    minimumSupportedVersion: value.minimumSupportedVersion,
+    ruleVersion: value.ruleVersion,
+    promptVersion: value.promptVersion,
+    modelVersion: value.modelVersion,
+    ...(recommendationDefaults === undefined ? {} : { recommendationDefaults }),
+    ...(minimumSupportedVersions === undefined ? {} : { minimumSupportedVersions }),
+    persistenceCapabilities,
+    authCapabilities,
+    serviceCapabilities
+  };
 }
 
 async function request(path: string): Promise<unknown> {
@@ -99,9 +345,10 @@ export async function loadConfig(): Promise<Snapshot<FeatureConfig>> {
   try {
     const raw = await request(endpoint);
     const value = isRecord(raw) && isRecord(raw.data) ? raw.data : raw;
-    if (!isFeatureConfig(value)) throw new Error("INVALID_RESPONSE");
+    const parsed = parseFeatureConfig(value);
+    if (parsed === null) throw new Error("INVALID_RESPONSE");
     return {
-      data: value,
+      data: parsed,
       source: "LIVE",
       endpoint,
       notice: "已连接 API，只读展示当前运行配置。"

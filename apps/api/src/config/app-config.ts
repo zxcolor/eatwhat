@@ -4,6 +4,8 @@ import {
 	DataRightsModeSchema,
 	type DataSourceCode,
 	DataSourceCodeSchema,
+	REGISTERED_INTENT_PROMPT_VERSIONS,
+	REGISTERED_QWEN_MODEL_VERSIONS,
 } from "@chi-shen-me/contracts";
 import {
 	type AdminRuntimeConfig,
@@ -58,12 +60,12 @@ export interface AppConfig {
 		readonly enabled: boolean;
 		readonly baseUrl: string | null;
 		readonly apiKey: string | null;
-		readonly model: string;
+		readonly model: (typeof REGISTERED_QWEN_MODEL_VERSIONS)[number];
 		readonly timeoutMs: number;
 	};
 	readonly versions: {
 		readonly rule: string;
-		readonly prompt: string;
+		readonly prompt: (typeof REGISTERED_INTENT_PROMPT_VERSIONS)[number];
 		readonly ruleFallbackModel: string;
 	};
 	readonly features: {
@@ -162,6 +164,35 @@ function readInteger(
 		throw new Error(`${name} 必须是 ${minimum} 到 ${maximum} 的整数`);
 	}
 	return parsed;
+}
+
+function readSemanticVersion(
+	value: string | undefined,
+	fallback: string,
+	name: string,
+): string {
+	const normalized = value?.trim() || fallback;
+	if (
+		!/^(?:0|[1-9][0-9]{0,3})\.(?:0|[1-9][0-9]{0,3})\.(?:0|[1-9][0-9]{0,3})$/u.test(
+			normalized,
+		)
+	) {
+		throw new Error(`${name} 必须是三段式版本号 x.y.z`);
+	}
+	return normalized;
+}
+
+function readRegisteredVersion<T extends string>(
+	value: string | undefined,
+	fallback: T,
+	name: string,
+	registeredVersions: readonly T[],
+): T {
+	const normalized = value?.trim() || fallback;
+	if (!registeredVersions.includes(normalized as T)) {
+		throw new Error(`${name} 未在当前服务端构建注册`);
+	}
+	return normalized as T;
 }
 
 function requiredWhenEnabled(
@@ -422,7 +453,12 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 				env.QWEN_API_KEY,
 				"QWEN_API_KEY",
 			),
-			model: env.QWEN_MODEL?.trim() || "qwen3.7-flash-2026-07-15",
+			model: readRegisteredVersion(
+				env.QWEN_MODEL,
+				REGISTERED_QWEN_MODEL_VERSIONS[0],
+				"QWEN_MODEL",
+				REGISTERED_QWEN_MODEL_VERSIONS,
+			),
 			timeoutMs: readInteger(
 				env.QWEN_TIMEOUT_MS,
 				2_500,
@@ -433,7 +469,12 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 		}),
 		versions: Object.freeze({
 			rule: env.RULE_VERSION?.trim() || "recommendation-rules-v1",
-			prompt: env.PROMPT_VERSION?.trim() || "intent-prompt-v1",
+			prompt: readRegisteredVersion(
+				env.PROMPT_VERSION,
+				REGISTERED_INTENT_PROMPT_VERSIONS[0],
+				"PROMPT_VERSION",
+				REGISTERED_INTENT_PROMPT_VERSIONS,
+			),
 			ruleFallbackModel: "rule-fallback-v1",
 		}),
 		features: Object.freeze({
@@ -444,7 +485,11 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 				env.PRIVATE_FEEDBACK_ENABLED,
 				"PRIVATE_FEEDBACK_ENABLED",
 			),
-			minimumSupportedVersion: env.MINIMUM_SUPPORTED_VERSION?.trim() || "0.1.1",
+			minimumSupportedVersion: readSemanticVersion(
+				env.MINIMUM_SUPPORTED_VERSION,
+				"0.1.1",
+				"MINIMUM_SUPPORTED_VERSION",
+			),
 		}),
 	});
 }

@@ -4,8 +4,10 @@
 
 `0003_admin_security.sql` 提供管理后台的数据库安全底座；
 `0004_admin_api_primitives.sql` 补齐管理员 API 所需的脱敏审计读取和当前管理员
-passkey 自助管理原语。管理员 NestJS 由独立 `admin-main` 入口、`AdminAppModule`、
-监听端口和容器运行，只在 `/admin/v1/*` 暴露登录、当前会话、自助凭据和脱敏审计端点。
+passkey 自助管理原语；`0013_admin_config_control.sql` 在既有配置版本表上增加受控的
+发布、历史和回滚原语。管理员 NestJS 由独立 `admin-main` 入口、`AdminAppModule`、
+监听端口和容器运行，只在 `/admin/v1/*` 暴露登录、当前会话、自助凭据、脱敏审计和
+受控配置端点。
 公开 `AppModule` 不导入 `AdminModule`，公开 API 进程会拒绝 `ADMIN_API_ENABLED=true`
 或任何管理员数据库/加密 Secret，因而普通推荐、账号服务的进程被攻陷时不会直接取得
 管理员密钥或连接池。`ADMIN_API_ENABLED` 默认仍为 `false`。完成真实 PostgreSQL CI、
@@ -154,8 +156,8 @@ hash key version 和 `context_json` 永不进入结果集。运行角色仍无�
 
 ## 8. 发布门禁
 
-- 在空库真实 PostgreSQL/PostGIS 上依次执行 0001、0002、0003、0004，并重复运行迁移器
-  验证 checksum/idempotency。
+- 在空库真实 PostgreSQL/PostGIS 上依次执行固定的 0001–0013 完整迁移链，并重复运行
+  迁移器验证 exact head、checksum/idempotency。
 - 以真实五角色运行 `role-grants.sql`，验证角色互异、无 MEMBER/USAGE 继承、无高权
   属性、admin runtime 无基表权限、普通 runtime 无管理员函数权限。
 - 覆盖 challenge 重放、五分钟过期、最大尝试次数、注册选项跨 session/IP/device
@@ -179,7 +181,59 @@ hash key version 和 `context_json` 永不进入结果集。运行角色仍无�
 - 自助凭据新增/撤销的完整既有 passkey step-up assertion 是生产发布门禁；当前五分钟
   近期登录检查不是替代品。
 
-## 9. API 接线边界
+## 9. 受控配置中心
+
+配置中心只管理下列五个已建模、非 Secret 的键。键、JSON schema 和分类必须逐项
+匹配，不能由请求自报 schema/classification，也不能借“自定义配置”扩展为任意 JSON：
+
+| `configKey` | 固定 schema | 分类 | 用途 |
+|---|---|---|---|
+| `features.ai-assistance` | `FEATURE_FLAGS_V1` | `PUBLIC` | 仅含全局 AI 辅助功能 `enabled` 开关 |
+| `recommendations.rules` | `RECOMMENDATION_RULES_V1` | `INTERNAL` | 固定六项推荐权重与运营调整上限；仅 `LICENSED_ENRICHMENT` 应用 |
+| `recommendations.prompt` | `PROMPT_SETTINGS_V1` | `INTERNAL` | 只能选择当前服务端构建注册的提示词/模型版本，另含超时和启用状态，不含模型 Key |
+| `coverage.default` | `COVERAGE_SETTINGS_V1` | `PUBLIC` | 客户端建议半径、服务端最大半径和固定 `NATIONWIDE`，不含用户坐标 |
+| `clients.minimum-version` | `MINIMUM_APP_VERSION_V1` | `PUBLIC` | Android、iOS、小程序最低兼容版本 |
+
+高德、千问、短信、SMTP、微信、QQ、数据库、管理员加密材料、HMAC/pepper、token、
+证书和任何其他 Secret 永远不进入 `app_config_versions`、HTTP 请求/响应、历史记录或
+审计 context；它们仍由 ECS/KMS 的独立 Secret 注入和启动门禁管理。
+
+- `GET /admin/v1/configuration` 和
+  `GET /admin/v1/configuration/{configKey}/history` 同时要求 HTTP guard 与数据库函数
+  当次重新认证后的 `ALGORITHM_CONFIG_READ`。响应只包含固定键、schema、分类、版本、
+  已校验 JSON、变更原因和创建/激活时间，不返回管理员 UUID、基表 ID 或 Secret。
+- `PUT /admin/v1/configuration/{configKey}` 和
+  `POST /admin/v1/configuration/{configKey}/rollback` 同时要求
+  `ALGORITHM_CONFIG_WRITE`。发布原因只接受 `ROUTINE_TUNING`、
+  `INCIDENT_RESPONSE` 或 `RELEASE_COMPATIBILITY`；回滚原因固定为 `ROLLBACK`。
+- 所有写入都携带 `expectedActiveVersion`；PUT 首次发布必须为 `null`，已有活动版本时
+  必须精确匹配该版本，rollback 则始终要求正整数活动版本。数据库在锁住该键后重新
+  比较当前活动版本；不匹配必须返回 HTTP 409，客户端只能刷新后重新判断，不能覆盖
+  后来者。发布只追加新版本并
+  retire 原活动版本。回滚读取同一键的目标历史版本，复制固定 schema、分类和值，发布
+  `max(version)+1` 的新活动版本；绝不把旧行重新激活或改写历史值。
+- 普通 API 只可执行 `runtime_list_active_app_config()`，管理员进程只可执行四个受控
+  管理函数。两者都没有 `app_config_versions` 基表权限；函数全部为
+  `SECURITY DEFINER`、固定 `search_path = pg_catalog, public` 并向 `PUBLIC` 撤权。
+- 配置发布/回滚审计 context 只写入固定 `configKey`、`newVersion`、
+  `sourceVersion` 和枚举 `changeReason`；不写入 value、Secret 或自由文本。
+  `AUDIT_READ` 的 v2 脱敏投影只对 `APP_CONFIG` 事件返回这四项，其他事件
+  仍只返回原固定四字段。
+
+配置接口中的“活动”“已发布”只描述数据库版本状态，不执行高德、千问、SMTP、OAuth
+或客户端在线探测，不证明 Secret 有效、上游健康、运行进程已刷新、移动端已采用该版本，
+也不等于 `/health/ready` 或生产发布验收。真实生产 RP ID/origin、首名管理员离线
+bootstrap、独立 `admin_api_runtime` Secret/网络、完整 step-up、真实 PostgreSQL ACL、
+备份恢复和部署演练仍未验收，因此路由和页面存在不能被表述为生产管理员启动门禁已通过。
+
+公开 `/v1/config` 只投影运行时已经采用的脱敏值：`recommendationDefaults` 包含固定
+`NATIONWIDE`、客户端建议半径与服务端最大半径。建议半径不是服务端自动默认：
+每个推荐请求仍必须显式提交 `radiusMeters`。`minimumSupportedVersions` 包含 Android 及可选 iOS/
+小程序最低版本。两个对象为旧响应兼容而可缺省，但当前服务必须返回；旧
+`minimumSupportedVersion` 继续等于 Android 值。该投影不含版本历史、管理员、坐标、
+供应商身份或 Secret，也仍不是上游健康与生产 readiness 证明。
+
+## 10. API 接线边界
 
 管理员服务只能从独立 `admin_api_runtime` 连接池调用以下新增原语：
 
@@ -189,10 +243,30 @@ hash key version 和 `context_json` 永不进入结果集。运行角色仍无�
 - `admin_get_self_credential_record(...)`：注册成功后把本次内部 UUID 精确映射为
   active self credential 的外部记录；UUID 不得进入 controller、日志或错误。
 - `admin_revoke_self_credential(...)`：只接受列表返回的 opaque handle。
-- `admin_list_sanitized_audit_events(...)`：只形成固定四字段审计响应。
+- `admin_list_sanitized_audit_events_v2(...)`：普通事件只形成固定四字段审计响应，配置
+  事件额外形成四项受控配置投影。
+- `admin_list_active_app_config(...)`：只返回五个白名单键当前活动的固定形状记录。
+- `admin_list_app_config_history(...)`：只读取一个白名单键的有界版本历史。
+- `admin_publish_app_config(...)`：验证键/schema/classification/value、权限、原因和
+  `expectedActiveVersion` 后原子发布新版本。
+- `admin_rollback_app_config(...)`：验证写权限、目标历史版本和乐观锁后复制发布回滚版本。
 
 每个原语内部都先调用 `admin_authenticate_session(...)`，API guard 仍必须使用该次
 返回的实时权限，不能缓存角色。接线不得复制普通用户 bearer 认证、改用
 `api_runtime`、直接查询管理员基表，或把内部 UUID/HMAC/密文映射进 HTTP 合同。
 任何新增管理能力必须先新增固定权限码、受控函数、固定形状审计和越权反例，再开放
 前端入口。
+
+## 11. 参考实现与洁净室边界
+
+本轮只对用户提供的 WordPress 7.1 与 Zibll V9.0 本地压缩包做离线、只读研究，压缩包
+不是产品依赖，也没有被安装、执行或提交。WordPress 参考仅用于理解“固定功能注册表、
+按能力显示菜单、分组表单、显式发布动作”的管理体验；本项目用 TypeScript 固定合同、
+双层 RBAC、同源 BFF、乐观锁和追加式版本历史重新实现，没有引入 PHP、插件运行时或
+WordPress 的配置存储方式。
+
+Zibll 只作为视觉气质参考。实现采用暖色浅背景、克制边框与阴影、紧凑信息层级、语义
+状态色和尊重 `prefers-reduced-motion` 的短动效；未复制主题的 PHP、JavaScript、CSS、
+图标、图片、字体或品牌元素。压缩包中出现的混淆/动态执行代码和旧版第三方组件也未被
+带入或运行。最终管理后台仍是现有 Next.js 网页、NestJS API 与 PostgreSQL 受控函数，
+所有设计和安全边界都由本仓库合同与测试独立定义。

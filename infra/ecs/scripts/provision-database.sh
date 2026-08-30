@@ -296,6 +296,10 @@ else
       [[ "$phone_only_cutover" == 'false' && "$wechat_union_aliases_cutover" == 'false' ]] ||
         die 'cutover flags cannot be reused after schema 0012 is active'
       ;;
+    '13|1|13|admin_config_control')
+      [[ "$phone_only_cutover" == 'false' && "$wechat_union_aliases_cutover" == 'false' ]] ||
+        die 'cutover flags cannot be reused after schema 0012 is active'
+      ;;
     *) die 'database schema is not an exact supported provisioning state' ;;
   esac
 fi
@@ -326,11 +330,12 @@ run_bootstrap_psql -qAt -c \
 
 if [[ "$wechat_union_aliases_cutover" == 'true' ]]; then
   post_cutover_facts="$(run_bootstrap_psql -qAt -F '|' -c \
-    "SELECT count(*), min(version), max(version), max(name) FILTER (WHERE version = max_version)
+    "SELECT count(*), min(version), max(version), max(name) FILTER (WHERE version = max_version),
+            bool_or(version = 12 AND name = 'wechat_union_aliases')
        FROM public.schema_migrations
        CROSS JOIN (SELECT max(version) AS max_version FROM public.schema_migrations) AS head;")"
-  [[ "$post_cutover_facts" == '12|1|12|wechat_union_aliases' ]] ||
-    die 'WeChat Union alias cutover did not reach exact schema 0012'
+  [[ "$post_cutover_facts" == '13|1|13|admin_config_control|t' ]] ||
+    die 'WeChat Union alias cutover did not reach exact current schema 0013'
   alias_security_ready="$(run_bootstrap_psql -qAt -c \
     "SELECT
        to_regclass('public.wechat_union_aliases') IS NOT NULL

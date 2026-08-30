@@ -245,6 +245,10 @@ describe("administrator services", () => {
 			action: "ADMIN_LOGIN_SUCCEEDED",
 			targetType: "ADMIN_USER",
 			createdAt: new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString(),
+			configKey: null,
+			newVersion: null,
+			sourceVersion: null,
+			changeReason: null,
 		});
 		listSanitizedAuditEvents.mockResolvedValueOnce(
 			Array.from({ length: 100 }, (_, index) => row(index)),

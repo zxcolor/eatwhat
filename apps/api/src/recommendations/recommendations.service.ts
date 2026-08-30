@@ -10,13 +10,17 @@ import {
 	type ResultToken,
 } from "@chi-shen-me/contracts";
 import {
+	BadRequestException,
 	Inject,
 	Injectable,
+	Optional,
 	ServiceUnavailableException,
 } from "@nestjs/common";
 import { RecommendationRequestRegistry } from "../common/recommendation-request.registry.js";
 import { APP_CONFIG, type AppConfig } from "../config/app-config.js";
 import { DataRightsPolicy } from "../config/data-rights-policy.js";
+import { OperationalConfigService } from "../operational-config/operational-config.service.js";
+import { startupOperationalConfig } from "../operational-config/operational-config.types.js";
 import {
 	PLACE_PROVIDER,
 	type PlaceCandidate,
@@ -84,6 +88,8 @@ export class RecommendationsService {
 		private readonly intents: IntentCoordinator,
 		private readonly requestRegistry: RecommendationRequestRegistry,
 		private readonly dataRightsPolicy: DataRightsPolicy,
+		@Optional()
+		private readonly operationalConfig?: OperationalConfigService,
 	) {}
 
 	async recommend(
@@ -91,11 +97,23 @@ export class RecommendationsService {
 	): Promise<RecommendationResponse> {
 		const requestId = randomUUID();
 		const generatedAt = new Date().toISOString();
+		const operational =
+			(await this.operationalConfig?.current()) ??
+			startupOperationalConfig(this.config);
+		if (context.radiusMeters > operational.coverage.maximumRadiusMeters) {
+			throw new BadRequestException({
+				code: "RADIUS_EXCEEDS_ACTIVE_COVERAGE",
+				message: "搜索半径超过当前运营配置允许的范围",
+			});
+		}
 		// Client clocks are untrusted. Business-hours evaluation must use server
 		// time so a forged requestTime cannot turn a closed place into an open one.
 		const trustedContext = { ...context, requestTime: generatedAt };
 
-		const resolvedIntent = await this.intents.resolve(trustedContext);
+		const resolvedIntent = await this.intents.resolve(
+			trustedContext,
+			operational,
+		);
 		let candidates: readonly PlaceCandidate[];
 		try {
 			// 模型只在此调用之前获得脱敏用餐条件；POI 从不传入千问。
@@ -136,6 +154,7 @@ export class RecommendationsService {
 			intent: resolvedIntent.profile,
 			candidates,
 			dataRightsMode: effectiveDataRightsMode,
+			rules: operational.recommendationRules,
 		});
 
 		const notice = recommendationNotice(
@@ -162,8 +181,11 @@ export class RecommendationsService {
 				generatedAt,
 				coverage: "NATIONWIDE",
 				dataRightsMode: effectiveDataRightsMode,
-				ruleVersion: this.config.versions.rule,
-				promptVersion: this.config.versions.prompt,
+				ruleVersion:
+					operational.versions["recommendations.rules"] === null
+						? this.config.versions.rule
+						: `recommendation-rules-v${operational.versions["recommendations.rules"]}`,
+				promptVersion: operational.prompt.promptVersion,
 				modelVersion: resolvedIntent.modelVersion,
 				aiFallbackUsed: resolvedIntent.fallbackUsed,
 				results: publicResults,

@@ -4,6 +4,7 @@ import type {
 } from "@chi-shen-me/contracts";
 import { Inject, Injectable } from "@nestjs/common";
 import { APP_CONFIG, type AppConfig } from "../../config/app-config.js";
+import type { OperationalConfigSnapshot } from "../../operational-config/operational-config.types.js";
 import { QwenIntentProvider } from "./qwen-intent.provider.js";
 import { RuleIntentProvider } from "./rule-intent.provider.js";
 
@@ -21,8 +22,18 @@ export class IntentCoordinator {
 		private readonly rules: RuleIntentProvider,
 	) {}
 
-	async resolve(context: RecommendationContext): Promise<ResolvedIntent> {
-		if (!context.aiAssistanceEnabled || !this.config.qwen.enabled) {
+	async resolve(
+		context: RecommendationContext,
+		operational?: OperationalConfigSnapshot,
+	): Promise<ResolvedIntent> {
+		const prompt = operational?.prompt;
+		const operationallyEnabled =
+			(operational?.aiAssistanceEnabled ?? true) && (prompt?.enabled ?? true);
+		if (
+			!context.aiAssistanceEnabled ||
+			!this.config.qwen.enabled ||
+			!operationallyEnabled
+		) {
 			return {
 				profile: await this.rules.resolve(context),
 				fallbackUsed: false,
@@ -31,9 +42,9 @@ export class IntentCoordinator {
 		}
 		try {
 			return {
-				profile: await this.qwen.resolve(context),
+				profile: await this.qwen.resolve(context, prompt),
 				fallbackUsed: false,
-				modelVersion: this.config.qwen.model,
+				modelVersion: prompt?.modelVersion ?? this.config.qwen.model,
 			};
 		} catch {
 			return {

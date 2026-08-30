@@ -110,7 +110,7 @@ function objectValue(container: JsonObject, key: string): JsonObject {
 	return value;
 }
 
-type HttpMethod = "get" | "post" | "delete";
+type HttpMethod = "get" | "post" | "put" | "delete";
 
 function pathOperation(path: string, method: HttpMethod): JsonObject {
 	const pathItem = openApi.paths[path];
@@ -155,10 +155,15 @@ function implementedControllerOperations(): {
 			successStatus: string;
 		}[] = [];
 		const routePattern =
-			/@(Get|Post|Delete)\(\s*(?:"([^"]*)")?\s*\)([\s\S]*?)(?=@(?:Get|Post|Delete)\(|$)/g;
+			/@(Get|Post|Put|Delete)\(\s*(?:"([^"]*)")?\s*\)([\s\S]*?)(?=@(?:Get|Post|Put|Delete)\(|$)/g;
 		for (const match of source.matchAll(routePattern)) {
 			const method = match[1]?.toLowerCase();
-			if (method !== "get" && method !== "post" && method !== "delete") {
+			if (
+				method !== "get" &&
+				method !== "post" &&
+				method !== "put" &&
+				method !== "delete"
+			) {
 				throw new Error(`Unsupported route method in ${controllerFile}`);
 			}
 			const suffix = match[2] ?? "";
@@ -419,6 +424,49 @@ describe("OpenAPI v1", () => {
 				path: "/admin/v1/audit",
 				method: "get",
 				statuses: ["200", "400", "401", "403", "429", "500", "503"],
+			},
+			{
+				path: "/admin/v1/configuration",
+				method: "get",
+				statuses: ["200", "401", "403", "429", "500", "503"],
+			},
+			{
+				path: "/admin/v1/configuration/{configKey}/history",
+				method: "get",
+				statuses: ["200", "400", "401", "403", "429", "500", "503"],
+			},
+			{
+				path: "/admin/v1/configuration/{configKey}",
+				method: "put",
+				statuses: [
+					"200",
+					"400",
+					"401",
+					"403",
+					"409",
+					"413",
+					"415",
+					"429",
+					"500",
+					"503",
+				],
+			},
+			{
+				path: "/admin/v1/configuration/{configKey}/rollback",
+				method: "post",
+				statuses: [
+					"200",
+					"400",
+					"401",
+					"403",
+					"404",
+					"409",
+					"413",
+					"415",
+					"429",
+					"500",
+					"503",
+				],
 			},
 			{ path: "/v1/config", method: "get", statuses: ["200", "500"] },
 			{
@@ -802,7 +850,7 @@ describe("OpenAPI v1", () => {
 
 		for (const [path, pathItem] of Object.entries(openApi.paths)) {
 			if (!isObject(pathItem)) throw new Error(`Invalid path item ${path}`);
-			for (const method of ["get", "post", "delete"] as const) {
+			for (const method of ["get", "post", "put", "delete"] as const) {
 				if (!(method in pathItem)) continue;
 				const operation = pathOperation(path, method);
 				const parameters = operation.parameters;
@@ -925,18 +973,106 @@ describe("OpenAPI v1", () => {
 			"required",
 		);
 
-		const auditProperties = objectValue(
-			documentedSchema("AdminAuditEvent"),
-			"properties",
-		);
+		const auditSchema = documentedSchema("AdminAuditEvent");
+		const auditProperties = objectValue(auditSchema, "properties");
 		expect(Object.keys(auditProperties)).toEqual([
 			"auditEventId",
 			"action",
 			"targetType",
 			"occurredAt",
+			"configKey",
+			"newVersion",
+			"sourceVersion",
+			"changeReason",
 		]);
 		expect(JSON.stringify(auditProperties)).not.toMatch(
 			/hash|context|login|credentialId|ip|userAgent/i,
+		);
+
+		if (!Array.isArray(auditSchema.allOf) || auditSchema.allOf.length !== 1) {
+			throw new Error("AdminAuditEvent must have one conditional contract");
+		}
+		const conditionalContract = auditSchema.allOf[0];
+		if (!isObject(conditionalContract)) {
+			throw new Error("AdminAuditEvent conditional contract must be an object");
+		}
+		const auditBranches = conditionalContract.oneOf;
+		if (!Array.isArray(auditBranches) || auditBranches.length !== 3) {
+			throw new Error("AdminAuditEvent must document three exclusive shapes");
+		}
+		const branchForAction = (action: string): JsonObject => {
+			const branch = auditBranches.find((candidate) => {
+				if (!isObject(candidate)) return false;
+				const properties = candidate.properties;
+				return (
+					isObject(properties) &&
+					isObject(properties.action) &&
+					properties.action.const === action
+				);
+			});
+			if (!isObject(branch)) {
+				throw new Error(`Missing AdminAuditEvent branch for ${action}`);
+			}
+			return branch;
+		};
+		const requiredConfigurationFields = [
+			"configKey",
+			"newVersion",
+			"sourceVersion",
+			"changeReason",
+		];
+		const publishedBranch = branchForAction("ADMIN_CONFIG_PUBLISHED");
+		expect(publishedBranch.required).toEqual(requiredConfigurationFields);
+		expect(objectValue(publishedBranch, "properties")).toMatchObject({
+			action: { const: "ADMIN_CONFIG_PUBLISHED" },
+			targetType: { const: "APP_CONFIG" },
+			changeReason: {
+				enum: ["ROUTINE_TUNING", "INCIDENT_RESPONSE", "RELEASE_COMPATIBILITY"],
+			},
+		});
+		const rollbackBranch = branchForAction("ADMIN_CONFIG_ROLLED_BACK");
+		expect(rollbackBranch.required).toEqual(requiredConfigurationFields);
+		expect(objectValue(rollbackBranch, "properties")).toMatchObject({
+			action: { const: "ADMIN_CONFIG_ROLLED_BACK" },
+			targetType: { const: "APP_CONFIG" },
+			changeReason: { const: "ROLLBACK" },
+		});
+
+		const ordinaryBranch = auditBranches.find((candidate) => {
+			if (!isObject(candidate)) return false;
+			const properties = candidate.properties;
+			return (
+				isObject(properties) &&
+				isObject(properties.action) &&
+				Array.isArray(properties.action.enum)
+			);
+		});
+		if (!isObject(ordinaryBranch)) {
+			throw new Error("Missing ordinary AdminAuditEvent branch");
+		}
+		const ordinaryProperties = objectValue(ordinaryBranch, "properties");
+		const allActions = documentedSchema("AdminAuditAction").enum;
+		if (!Array.isArray(allActions)) {
+			throw new Error("AdminAuditEvent action enum must be an array");
+		}
+		expect(objectValue(ordinaryProperties, "action").enum).toEqual(
+			allActions.filter(
+				(action) =>
+					action !== "ADMIN_CONFIG_PUBLISHED" &&
+					action !== "ADMIN_CONFIG_ROLLED_BACK",
+			),
+		);
+		expect(objectValue(ordinaryProperties, "targetType").enum).toEqual([
+			"ADMIN_USER",
+			"ADMIN_SESSION",
+			"ADMIN_CREDENTIAL",
+		]);
+		const forbiddenConfigurationFields = objectValue(
+			ordinaryBranch,
+			"not",
+		).anyOf;
+		expect(forbiddenConfigurationFields).toEqual(
+			requiredConfigurationFields.map((field) => ({ required: [field] })),
 		);
 	});
 
@@ -1159,10 +1295,8 @@ describe("OpenAPI v1", () => {
 			const qqBranch = schema.oneOf.find(
 				(branch) =>
 					isObject(branch) &&
-					objectValue(
-						objectValue(branch, "properties"),
-						discriminator,
-					).const === "QQ",
+					objectValue(objectValue(branch, "properties"), discriminator)
+						.const === "QQ",
 			);
 			if (!isObject(qqBranch)) {
 				throw new Error(`Missing QQ branch in ${schemaName}`);
@@ -1608,6 +1742,10 @@ describe("OpenAPI v1", () => {
 				code: "INVALID_JSON",
 				message: "请求体不是有效的 JSON",
 			},
+			RadiusExceedsActiveCoverageError: {
+				code: "RADIUS_EXCEEDS_ACTIVE_COVERAGE",
+				message: "搜索半径超过当前运营配置允许的范围",
+			},
 			PayloadTooLargeError: {
 				code: "PAYLOAD_TOO_LARGE",
 				message: "请求体不能超过 100 KiB",
@@ -1631,6 +1769,9 @@ describe("OpenAPI v1", () => {
 			expect(objectValue(properties, "code").const).toBe(problem.code);
 			expect(objectValue(properties, "message").const).toBe(problem.message);
 		}
+		expect(
+			JSON.stringify(pathOperation("/v1/recommendations", "post")),
+		).toContain("#/components/schemas/RadiusExceedsActiveCoverageError");
 
 		const unsupportedProperties = objectValue(
 			documentedSchema("UnsupportedMediaTypeError"),

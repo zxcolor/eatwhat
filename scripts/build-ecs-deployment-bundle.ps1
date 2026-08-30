@@ -918,7 +918,7 @@ function Assert-EcsOperationalGates {
             $provision.IndexOf('wechat_union_aliases_cutover_backup="$(sed', [System.StringComparison]::Ordinal) -or
         $rollback.IndexOf('assert-wechat-union-aliases-bridge-runtime.sh" >/dev/null', [System.StringComparison]::Ordinal) -gt
             $rollback.IndexOf('backup-database.sh" --mutation-lock-held', [System.StringComparison]::Ordinal)) {
-        throw 'Schema 0012 cutover and rollback must verify the active WeChat Union alias bridge before backup or mutation.'
+        throw 'WeChat Union alias cutover and dedicated schema 0012 rollback must verify the active bridge before backup or mutation.'
     }
     foreach ($required in @(
         '--phone-only-cutover',
@@ -944,11 +944,14 @@ function Assert-EcsOperationalGates {
         '--wechat-union-aliases-cutover',
         'schema 0011 requires explicit --wechat-union-aliases-cutover',
         "'11|1|11|phone_only_auth'",
+        "'12|1|12|wechat_union_aliases'",
+        "'13|1|13|admin_config_control'",
         'WeChat Union alias cutover backup was not produced by the active bridge',
         'WeChat Union alias cutover backup migration ledger does not have 11 rows',
         '^11\|phone_only_auth\|[0-9a-f]{64}$',
-        "'12|1|12|wechat_union_aliases'",
-        'WeChat Union alias cutover did not reach exact schema 0012',
+        "'13|1|13|admin_config_control|t'",
+        "bool_or(version = 12 AND name = 'wechat_union_aliases')",
+        'WeChat Union alias cutover did not reach exact current schema 0013',
         "to_regclass('public.wechat_union_aliases') IS NOT NULL",
         "to_regprocedure('public.consume_oauth_state_with_wechat_union",
         "to_regprocedure('public.record_wechat_union_alias_from_consumed_state",
@@ -972,7 +975,7 @@ function Assert-EcsOperationalGates {
         'WECHAT_UNION_ALIASES_CUTOVER_BACKUP=%s'
     )) {
         if (-not $provision.Contains($required)) {
-            throw "WeChat Union alias provisioner is missing a schema 0011 to 0012 cutover or ACL gate: $required"
+            throw "WeChat Union alias provisioner is missing a schema 0011 to current 0013 cutover or ACL gate: $required"
         }
     }
     foreach ($required in @(
@@ -1104,14 +1107,15 @@ function Assert-EcsOperationalGates {
         'input_names+=(WECHAT_APP_ID WECHAT_APP_SECRET)',
         'if [[ "$target_qq_auth_enabled" == ''true'' ]]; then',
         'input_names+=(QQ_APP_ID QQ_APP_KEY)',
-        'activate the final schema 0012 release before updating authentication configuration',
-        'WeChat authentication requires the final non-transition schema 0012 release',
+        'activate the final schema 0013 release before updating authentication configuration',
+        'WeChat authentication requires the final non-transition schema 0013 release',
         'active_realm="$(read_env_value "$active_deploy/deployment.env" WECHAT_OPEN_PLATFORM_REALM_ID)"',
         'WeChat authentication requires a stable Open Platform realm',
         '-v expected_wechat_realm="$1"',
         "WHERE realm_id <> :'expected_wechat_realm'",
-        "count(*) = 12 AND min(version) = 1 AND max(version) = 12",
+        "count(*) = 13 AND min(version) = 1 AND max(version) = 13",
         "bool_or(version = 12 AND name = 'wechat_union_aliases')",
+        "bool_or(version = 13 AND name = 'admin_config_control')",
         "to_regclass('public.wechat_union_aliases') IS NOT NULL",
         "has_function_privilege(",
         "'public.consume_oauth_state_with_wechat_union",
@@ -1127,7 +1131,7 @@ function Assert-EcsOperationalGates {
         "has_function_privilege('data_export_worker', routine.oid, 'EXECUTE')",
         'privilege.grantee = 0',
         "privilege.privilege_type = 'EXECUTE'",
-        'schema 0012 and WeChat Union alias least-privilege ACL smoke must pass before enabling WeChat',
+        'schema 0013 and WeChat Union alias least-privilege ACL smoke must pass before enabling WeChat',
         'API_RECREATE_REQUIRED=true'
     )) {
         if (-not $auth.Contains($required)) {
@@ -1224,7 +1228,7 @@ function Assert-EcsOperationalGates {
             $auth.IndexOf($authApiCandidate, [System.StringComparison]::Ordinal) -or
         $auth.IndexOf($authUnionEnableGate, [System.StringComparison]::Ordinal) -gt
             $auth.IndexOf($authApiCandidate, [System.StringComparison]::Ordinal)) {
-        throw 'WeChat enablement must reject the pending bridge and prove schema 0012 plus least-privilege ACL before creating an auth candidate.'
+        throw 'WeChat enablement must reject the pending bridge and prove schema 0013 plus least-privilege ACL before creating an auth candidate.'
     }
     $authQqStateEnableGate = 'if [[ "$mode" == ''--apply'' && "$target_qq_auth_enabled" == ''true'' ]]; then'
     $authQqStateChangeGate = '  if [[ "$qq_identity_state_change_required" == ''true'' ]]; then'
@@ -1326,6 +1330,7 @@ function Assert-EcsOperationalGates {
         'disabled authentication continuity validation failed',
         '/app/dist/auth/auth-config.js',
         '/app/migrations/0012_wechat_union_aliases.sql',
+        '/app/migrations/0013_admin_config_control.sql',
         'API image rejected authentication configuration'
     )) {
         if (-not $preflight.Contains($required)) {

@@ -2,7 +2,12 @@
 
 import type {
   AdminAuditPage,
+  AdminConfigKey,
+  AdminConfigRecord,
+  AdminConfigRollbackRequest,
+  AdminConfigUpdateRequest,
   AdminCredentialRecord,
+  AdminConfigurationPage,
   AdminSession
 } from "./admin-contract";
 
@@ -243,4 +248,44 @@ export function loadAuditPage(cursor?: string): Promise<AdminAuditPage> {
   const query = new URLSearchParams({ limit: "50" });
   if (cursor !== undefined) query.set("cursor", cursor);
   return request<AdminAuditPage>(`audit?${query.toString()}`);
+}
+
+export function loadAdminConfiguration(): Promise<AdminConfigurationPage> {
+  return request<AdminConfigurationPage>("configuration");
+}
+
+export function loadAdminConfigurationHistory(
+  configKey: AdminConfigKey,
+  limit = 20
+): Promise<AdminConfigurationPage> {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20) {
+    throw new AdminClientError(400, "历史版本数量必须在 1–20 之间");
+  }
+  const query = new URLSearchParams({ limit: String(limit) });
+  return request<AdminConfigurationPage>(
+    `configuration/${encodeURIComponent(configKey)}/history?${query.toString()}`
+  );
+}
+
+export function updateAdminConfiguration<K extends AdminConfigKey>(
+  configKey: K,
+  update: AdminConfigUpdateRequest<K>
+): Promise<AdminConfigRecord> {
+  return request<AdminConfigRecord>(`configuration/${encodeURIComponent(configKey)}`, {
+    method: "PUT",
+    body: JSON.stringify(update)
+  });
+}
+
+export function rollbackAdminConfiguration(
+  configKey: AdminConfigKey,
+  rollback: AdminConfigRollbackRequest
+): Promise<AdminConfigRecord> {
+  return request<AdminConfigRecord>(
+    `configuration/${encodeURIComponent(configKey)}/rollback`,
+    {
+      method: "POST",
+      body: JSON.stringify(rollback)
+    }
+  );
 }
