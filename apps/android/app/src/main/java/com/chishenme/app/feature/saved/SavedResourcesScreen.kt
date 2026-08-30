@@ -1,6 +1,8 @@
 package com.chishenme.app.feature.saved
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -9,19 +11,17 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Star
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -31,11 +31,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -44,6 +42,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.chishenme.app.data.remote.FavoriteGroup
@@ -56,6 +58,18 @@ import com.chishenme.app.data.remote.PrivateFeedbackRecord
 import com.chishenme.app.data.remote.PrivateFeedbackType
 import com.chishenme.app.data.remote.RecommendationHistoryAction
 import com.chishenme.app.data.remote.RecommendationHistoryItem
+import com.chishenme.app.ui.AppBadge
+import com.chishenme.app.ui.AppCard
+import com.chishenme.app.ui.AppDimens
+import com.chishenme.app.ui.AppDialog
+import com.chishenme.app.ui.AppEmptyState
+import com.chishenme.app.ui.AppHeroCard
+import com.chishenme.app.ui.AppIcons
+import com.chishenme.app.ui.AppPrimaryButton
+import com.chishenme.app.ui.AppSnackbarHost
+import com.chishenme.app.ui.AppStatusBanner
+import com.chishenme.app.ui.AppTone
+import com.chishenme.app.ui.AppTopBar
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -72,6 +86,11 @@ fun SavedResourcesScreen(
 ) {
     val snackbar = remember { SnackbarHostState() }
     var clearTarget by remember { mutableStateOf<ClearTarget?>(null) }
+    val selectedItemCount = when (state.selectedSection) {
+        SavedResourcesSection.FAVORITES -> state.favorites.size
+        SavedResourcesSection.HISTORY -> state.history.size
+        SavedResourcesSection.PRIVATE_FEEDBACK -> state.privateFeedback.size
+    }
 
     BackHandler(onBack = onBack)
     LaunchedEffect(state.message) {
@@ -82,14 +101,13 @@ fun SavedResourcesScreen(
     }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            TopAppBar(
-                title = { Text("收藏与账号记录") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回设置")
-                    }
-                },
+            AppTopBar(
+                title = "收藏与账号记录",
+                subtitle = "跨设备内容与私有操作",
+                onBack = onBack,
+                navigationContentDescription = "返回设置",
                 actions = {
                     IconButton(
                         onClick = viewModel::refresh,
@@ -100,77 +118,90 @@ fun SavedResourcesScreen(
                 },
             )
         },
-        snackbarHost = { SnackbarHost(snackbar) },
+        snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(
+                horizontal = AppDimens.ScreenHorizontal,
+                vertical = AppDimens.ScreenVertical,
+            ),
+            verticalArrangement = Arrangement.spacedBy(AppDimens.SectionGap),
         ) {
             item {
-                Card(Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.Top,
-                    ) {
-                        Icon(Icons.Rounded.Lock, null, tint = MaterialTheme.colorScheme.primary)
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("只展示当前账号的数据", fontWeight = FontWeight.Bold)
-                            Text(
-                                "本机“最近决策”与账号历史彼此独立，不会静默合并或上传。餐厅展示每次由服务端按当前授权实时解析，本页不会缓存地点。",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
+                AppHeroCard(
+                    eyebrow = "PRIVATE LIBRARY",
+                    title = "只展示当前账号的数据",
+                    description = "本机最近决策与账号历史彼此独立，不静默合并或上传；餐厅信息每次按当前授权实时解析。",
+                    icon = Icons.Rounded.Lock,
+                )
             }
 
             if (state.loginRequired) {
                 item {
-                    Card(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Text("登录后管理账号记录", style = MaterialTheme.typography.titleMedium)
-                            Text("游客推荐不受影响；只有主动登录后才会读取跨设备收藏、账号历史和私有反馈。")
-                            Button(onClick = onOpenAccount, modifier = Modifier.fillMaxWidth()) {
-                                Text("前往账号登录")
-                            }
-                            OutlinedButton(onClick = viewModel::retryLogin, modifier = Modifier.fillMaxWidth()) {
-                                Text("我已登录，重新检查")
-                            }
+                    AppCard {
+                        Text(
+                            "登录后管理账号记录",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text("游客推荐不受影响；只有主动登录后才会读取跨设备收藏、账号历史和私有反馈。")
+                        AppPrimaryButton(text = "前往账号登录", onClick = onOpenAccount)
+                        OutlinedButton(onClick = viewModel::retryLogin, modifier = Modifier.fillMaxWidth()) {
+                            Text("我已登录，重新检查")
                         }
                     }
                 }
             } else if (state.enabledSections.isEmpty()) {
                 item {
-                    Card(Modifier.fillMaxWidth()) {
-                        Row(Modifier.padding(18.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Icon(Icons.Rounded.Info, null, tint = MaterialTheme.colorScheme.primary)
-                            Text("远程配置或数据授权尚未开放账号记录能力。本次不会上传任何餐厅引用。")
-                        }
-                    }
+                    AppStatusBanner(
+                        title = "账号记录能力当前未开放",
+                        body = "远程配置或数据授权尚未开放账号记录能力。本次不会上传任何餐厅引用。",
+                        tone = AppTone.INFO,
+                        icon = Icons.Rounded.Info,
+                    )
                 }
             } else {
                 item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
+                    AppCard(contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
                         SavedResourcesSection.entries.forEach { section ->
                             FilterChip(
                                 selected = state.selectedSection == section,
                                 onClick = { viewModel.select(section) },
                                 enabled = section in state.enabledSections && !state.busy,
                                 label = { Text(section.label()) },
+                                leadingIcon = if (state.selectedSection == section) {
+                                    {
+                                        Icon(
+                                            Icons.Rounded.Check,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    }
+                                } else {
+                                    null
+                                },
                             )
+                        }
                         }
                     }
                 }
                 if (state.busy) {
                     item {
                         Row(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .semantics {
+                                    liveRegion = LiveRegionMode.Polite
+                                    stateDescription = "正在读取当前账号记录"
+                                }
+                                .padding(vertical = 24.dp),
                             horizontalArrangement = Arrangement.Center,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -180,9 +211,36 @@ fun SavedResourcesScreen(
                         }
                     }
                 }
+                state.loadFailureMessage?.let { failure ->
+                    item {
+                        AppStatusBanner(
+                            title = "暂时无法读取这一页",
+                            body = "$failure。请点击右上角刷新重试。",
+                            tone = AppTone.ERROR,
+                            icon = Icons.Rounded.Info,
+                        )
+                    }
+                }
+                if (!state.busy && state.loadFailureMessage == null &&
+                    state.selectedSection in state.loadedSections
+                ) {
+                    item {
+                        Text(
+                            "已载入 $selectedItemCount 条当前分类记录",
+                            modifier = Modifier.semantics {
+                                liveRegion = LiveRegionMode.Polite
+                                stateDescription = "读取完成，共 $selectedItemCount 条记录"
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 when (state.selectedSection) {
                     SavedResourcesSection.FAVORITES -> {
-                        if (!state.busy && state.favorites.isEmpty()) item { EmptyCard("暂无账号收藏") }
+                        if (!state.busy && state.selectedSection in state.loadedSections &&
+                            state.favorites.isEmpty()
+                        ) item { EmptyCard("暂无账号收藏") }
                         items(state.favorites) { record ->
                             FavoriteCard(
                                 record = record,
@@ -201,7 +259,9 @@ fun SavedResourcesScreen(
                                 onClear = { clearTarget = ClearTarget.HISTORY },
                             )
                         }
-                        if (!state.busy && state.history.isEmpty()) item { EmptyCard("暂无账号推荐历史") }
+                        if (!state.busy && state.selectedSection in state.loadedSections &&
+                            state.history.isEmpty()
+                        ) item { EmptyCard("暂无账号推荐历史") }
                         items(state.history) { HistoryCard(it) }
                     }
                     SavedResourcesSection.PRIVATE_FEEDBACK -> {
@@ -213,7 +273,9 @@ fun SavedResourcesScreen(
                                 onClear = { clearTarget = ClearTarget.PRIVATE_FEEDBACK },
                             )
                         }
-                        if (!state.busy && state.privateFeedback.isEmpty()) item { EmptyCard("暂无私有反馈") }
+                        if (!state.busy && state.selectedSection in state.loadedSections &&
+                            state.privateFeedback.isEmpty()
+                        ) item { EmptyCard("暂无私有反馈") }
                         items(state.privateFeedback) { record ->
                             FeedbackCard(
                                 record = record,
@@ -242,7 +304,7 @@ fun SavedResourcesScreen(
     }
 
     clearTarget?.let { target ->
-        AlertDialog(
+        AppDialog(
             onDismissRequest = { clearTarget = null },
             title = { Text(if (target == ClearTarget.HISTORY) "清空账号历史？" else "清空全部私有反馈？") },
             text = {
@@ -273,12 +335,13 @@ private fun FavoriteCard(
     onMove: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+    AppCard {
+        Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.Star, null, tint = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.width(8.dp))
-                Text(if (record.group == FavoriteGroup.WANT_TO_GO) "想去" else "常吃", fontWeight = FontWeight.Bold)
+                AppBadge(
+                    if (record.group == FavoriteGroup.WANT_TO_GO) "想去" else "常吃",
+                    tone = if (record.group == FavoriteGroup.WANT_TO_GO) AppTone.ACCENT else AppTone.SUCCESS,
+                )
                 Spacer(Modifier.weight(1f))
                 Text(formatAccountTime(record.createdAt), style = MaterialTheme.typography.labelMedium)
             }
@@ -299,11 +362,18 @@ private fun FavoriteCard(
 
 @Composable
 private fun HistoryCard(item: RecommendationHistoryItem) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(item.action.label(), fontWeight = FontWeight.Bold)
+    AppCard {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                AppBadge(item.action.label(), tone = AppTone.INFO)
+                Spacer(Modifier.weight(1f))
+                Text(
+                    formatAccountTime(item.occurredAt),
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
             Text(
-                "${item.mealPeriod.label()} · ${formatAccountTime(item.occurredAt)}",
+                item.mealPeriod.label(),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -319,10 +389,11 @@ private fun FeedbackCard(
     busy: Boolean,
     onDelete: () -> Unit,
 ) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    AppCard {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(record.type.label(), fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                AppBadge(record.type.label(), tone = AppTone.ACCENT)
+                Spacer(Modifier.weight(1f))
                 Text(formatAccountTime(record.createdAt), style = MaterialTheme.typography.labelMedium)
             }
             record.presentation?.let { PresentationContent(it) }
@@ -358,14 +429,17 @@ private fun PresentationContent(presentation: PersistedPlacePresentation) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        PersistedPresentationStatus.TEMPORARILY_UNAVAILABLE -> Text(
-            "餐厅信息暂时无法实时解析，可稍后重试；记录仍可删除。",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        PersistedPresentationStatus.TEMPORARILY_UNAVAILABLE -> AppStatusBanner(
+            title = "餐厅信息暂不可用",
+            body = "餐厅信息暂时无法实时解析，可稍后重试；记录仍可删除。",
+            tone = AppTone.NEUTRAL,
+            icon = AppIcons.AccessTime,
         )
-        PersistedPresentationStatus.RIGHTS_REVOKED -> Text(
-            "数据授权已撤回，餐厅信息不再展示；仅保留可删除的账号记录。",
-            color = MaterialTheme.colorScheme.error,
-            fontWeight = FontWeight.Medium,
+        PersistedPresentationStatus.RIGHTS_REVOKED -> AppStatusBanner(
+            title = "数据授权已撤回",
+            body = "数据授权已撤回，餐厅信息不再展示；仅保留可删除的账号记录。",
+            tone = AppTone.ERROR,
+            icon = Icons.Rounded.Lock,
         )
     }
 }
@@ -390,9 +464,11 @@ private fun SectionControl(
 
 @Composable
 private fun EmptyCard(message: String) {
-    Card(Modifier.fillMaxWidth()) {
-        Text(message, modifier = Modifier.padding(18.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
+    AppEmptyState(
+        title = message,
+        body = "这里会展示你主动保存或产生的账号记录。",
+        icon = Icons.Rounded.Star,
+    )
 }
 
 private fun SavedResourcesSection.label() = when (this) {

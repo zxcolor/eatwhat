@@ -1,5 +1,10 @@
 package com.chishenme.app.ui
 
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -127,7 +132,26 @@ fun AppNavigation(
     // of reviving an old account/detail back stack.
     val navController = rememberNavController()
 
-    NavHost(navController = navController, startDestination = Routes.Home) {
+    NavHost(
+        navController = navController,
+        startDestination = Routes.Home,
+        enterTransition = {
+            fadeIn(tween(AppMotion.ContentMillis)) +
+                slideInHorizontally(tween(AppMotion.ContentMillis)) { fullWidth -> fullWidth / 14 }
+        },
+        exitTransition = {
+            fadeOut(tween(AppMotion.SelectionMillis)) +
+                slideOutHorizontally(tween(AppMotion.SelectionMillis)) { fullWidth -> -fullWidth / 18 }
+        },
+        popEnterTransition = {
+            fadeIn(tween(AppMotion.ContentMillis)) +
+                slideInHorizontally(tween(AppMotion.ContentMillis)) { fullWidth -> -fullWidth / 14 }
+        },
+        popExitTransition = {
+            fadeOut(tween(AppMotion.SelectionMillis)) +
+                slideOutHorizontally(tween(AppMotion.SelectionMillis)) { fullWidth -> fullWidth / 18 }
+        },
+    ) {
         composable(Routes.Home) {
             HomeScreen(
                 state = decisionState,

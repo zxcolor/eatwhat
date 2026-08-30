@@ -14,6 +14,26 @@ import androidx.compose.ui.unit.dp
  * extended Material icon catalog into debug builds and on slow test devices.
  */
 object AppIcons {
+    val Remove: ImageVector by lazy(LazyThreadSafetyMode.NONE) {
+        ImageVector.Builder(
+            name = "Remove",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f,
+        ).apply {
+            path(
+                fill = null,
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2.2f,
+                strokeLineCap = StrokeCap.Round,
+            ) {
+                moveTo(5f, 12f)
+                lineTo(19f, 12f)
+            }
+        }.build()
+    }
+
     val Restaurant: ImageVector by lazy(LazyThreadSafetyMode.NONE) {
         ImageVector.Builder(
             name = "Restaurant",

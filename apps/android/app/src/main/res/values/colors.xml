@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="launcher_orange">#F36B2B</color>
-    <color name="launcher_cream">#FFF8F0</color>
+    <color name="launcher_raspberry">#C02A6D</color>
+    <color name="launcher_page">#F5F6F7</color>
+    <color name="launcher_page_dark">#292A2D</color>
+    <color name="launcher_mark">#FFFFFF</color>
 </resources>
