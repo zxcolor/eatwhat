@@ -1,25 +1,26 @@
 package com.chishenme.app.feature.consent
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.Lock
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -37,66 +38,76 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.chishenme.app.data.local.ConsentDocumentVersions
+import com.chishenme.app.ui.AppCard
+import com.chishenme.app.ui.AppDimens
+import com.chishenme.app.ui.AppDialog
+import com.chishenme.app.ui.AppHeroCard
 import com.chishenme.app.ui.AppIcons
+import com.chishenme.app.ui.AppPrimaryButton
+import com.chishenme.app.ui.AppStatusBanner
+import com.chishenme.app.ui.AppTone
 
 private enum class ConsentDocument { PRIVACY, TERMS, SDK, AI }
 
 @Composable
 fun ConsentScreen(
     onAccept: () -> Unit,
-    withdrawalPersistenceFailed: Boolean = false,
     modifier: Modifier = Modifier,
+    withdrawalPersistenceFailed: Boolean = false,
 ) {
     var document by remember { mutableStateOf<ConsentDocument?>(null) }
     var showDeclineExplanation by remember { mutableStateOf(false) }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp, vertical = 32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+    Surface(
+        modifier = modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background,
     ) {
-        Spacer(Modifier.height(28.dp))
-        Box(
+        Column(
             modifier = Modifier
-                .size(88.dp)
-                .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
-            contentAlignment = Alignment.Center,
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .verticalScroll(rememberScrollState())
+                .padding(
+                    horizontal = AppDimens.ScreenHorizontal,
+                    vertical = 20.dp,
+                ),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(AppDimens.SectionGap),
         ) {
-            Icon(
-                AppIcons.Restaurant,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(46.dp),
+            AppHeroCard(
+                eyebrow = "PRIVACY FIRST",
+                title = "吃什么",
+                description = "少看列表，快做决定。你的地点和偏好只服务于眼前这一顿。",
+                icon = AppIcons.Restaurant,
             )
-        }
-        Spacer(Modifier.height(22.dp))
-        Text("吃什么", style = MaterialTheme.typography.displaySmall)
-        Text(
-            "少看列表，快做决定",
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.primary,
-        )
-        Spacer(Modifier.height(28.dp))
-        ConsentFeature(
-            icon = { Icon(Icons.Rounded.LocationOn, null) },
-            title = "位置只为这一顿",
-            body = "精确位置仅用于当次推荐，不写入历史或分析事件。拒绝定位后仍可手动选址。",
-        )
-        ConsentFeature(
-            icon = { Icon(Icons.Rounded.Lock, null) },
-            title = "先同意，后调用",
-            body = "同意前不会调用推荐网络、验证码投递或微信/QQ 登录等可能处理个人信息的第三方能力。",
-        )
-        Spacer(Modifier.height(16.dp))
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-            shape = MaterialTheme.shapes.large,
-        ) {
-            Column(Modifier.padding(16.dp)) {
+
+            AppCard {
                 Text(
-                    "开始使用前，请阅读并同意下列文件。核心推荐需要处理你主动提交的地点和条件；手机号、微信和 QQ 登录都不是游客使用的必要条件。",
+                    "先把边界说清楚",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                ConsentFeature(
+                    icon = { Icon(Icons.Rounded.LocationOn, null) },
+                    title = "位置只为这一顿",
+                    body = "精确位置仅用于当次推荐，不写入历史或分析事件。拒绝定位后仍可手动选址。",
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                ConsentFeature(
+                    icon = { Icon(Icons.Rounded.Lock, null) },
+                    title = "先同意，后调用",
+                    body = "同意前不会调用推荐网络、验证码投递或微信/QQ 登录等可能处理个人信息的第三方能力。",
+                )
+            }
+
+            AppCard(containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
+                Text(
+                    "开始使用前",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    "请阅读并同意下列文件。核心推荐需要处理你主动提交的地点和条件；手机号、微信和 QQ 登录都不是游客使用的必要条件。",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Text(
@@ -106,47 +117,50 @@ fun ConsentScreen(
                 )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
+                    horizontalArrangement = Arrangement.SpaceEvenly,
                 ) {
                     TextButton(onClick = { document = ConsentDocument.PRIVACY }) { Text("隐私政策") }
                     TextButton(onClick = { document = ConsentDocument.TERMS }) { Text("用户协议") }
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
+                    horizontalArrangement = Arrangement.SpaceEvenly,
                 ) {
                     TextButton(onClick = { document = ConsentDocument.SDK }) { Text("第三方清单") }
                     TextButton(onClick = { document = ConsentDocument.AI }) { Text("AI 使用说明") }
                 }
             }
-        }
-        if (withdrawalPersistenceFailed) {
+
+            if (withdrawalPersistenceFailed) {
+                AppStatusBanner(
+                    title = "安全存储暂未确认",
+                    body = "隐私撤回已在本次运行中立即生效。登录保持关闭；请勿强制结束应用，待存储恢复后再决定是否重新同意。",
+                    tone = AppTone.ERROR,
+                    icon = Icons.Rounded.Lock,
+                )
+            }
+
+            AppPrimaryButton(text = "同意并继续", onClick = onAccept)
+            OutlinedButton(
+                onClick = { showDeclineExplanation = true },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp),
+            ) {
+                Text("暂不同意")
+            }
             Text(
-                "隐私撤回已在本次运行中立即生效，但本机安全存储暂时无法确认持久化。登录保持关闭；请勿强制结束应用，待存储恢复后再决定是否重新同意。",
-                color = MaterialTheme.colorScheme.error,
+                "你可以随时在设置中撤回同意。",
                 style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(8.dp))
         }
-        Spacer(Modifier.height(24.dp))
-        Button(onClick = onAccept, modifier = Modifier.fillMaxWidth().height(54.dp)) {
-            Text("同意并继续")
-        }
-        Spacer(Modifier.height(10.dp))
-        OutlinedButton(
-            onClick = { showDeclineExplanation = true },
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("暂不同意")
-        }
-        Spacer(Modifier.height(20.dp))
     }
 
     document?.let { selected ->
         DocumentDialog(selected, onDismiss = { document = null })
     }
     if (showDeclineExplanation) {
-        AlertDialog(
+        AppDialog(
             onDismissRequest = { showDeclineExplanation = false },
             title = { Text("你仍然拥有选择权") },
             text = {
@@ -166,7 +180,7 @@ private fun ConsentFeature(
     body: String,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalAlignment = Alignment.Top,
     ) {
@@ -205,16 +219,13 @@ private fun DocumentDialog(document: ConsentDocument, onDismiss: () -> Unit) {
             content = "千问只用于理解餐段、预算、时间和用户主动选择的偏好，不接收手机号、第三方账号、设备标识或精确坐标。所有实际使用 AI 的结果会显示“AI 辅助推荐”，失败时由确定性规则回退。"
         }
     }
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
             Text(
                 text = content,
                 textAlign = TextAlign.Start,
-                modifier = Modifier
-                    .heightIn(max = 400.dp)
-                    .verticalScroll(rememberScrollState()),
             )
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },

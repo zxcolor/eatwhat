@@ -1,7 +1,5 @@
 package com.chishenme.app.feature.settings
 
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -9,33 +7,30 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.List
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Star
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -43,6 +38,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.chishenme.app.BuildConfig
@@ -55,7 +52,13 @@ import com.chishenme.app.domain.AppVersionPolicy
 import com.chishenme.app.domain.AppVersionStatus
 import com.chishenme.app.feature.consent.THIRD_PARTY_SERVICE_DISCLOSURE
 import com.chishenme.app.feature.support.showSupportFeedbackEntryAction
+import com.chishenme.app.ui.AppCard
+import com.chishenme.app.ui.AppDimens
+import com.chishenme.app.ui.AppDialog
+import com.chishenme.app.ui.AppHeroCard
 import com.chishenme.app.ui.AppIcons
+import com.chishenme.app.ui.AppSectionHeader
+import com.chishenme.app.ui.AppTopBar
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -84,22 +87,31 @@ fun SettingsScreen(
     var confirmWithdraw by remember { mutableStateOf(false) }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            TopAppBar(
-                title = { Text("设置与透明度") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
-                    }
-                },
+            AppTopBar(
+                title = "设置与透明度",
+                subtitle = "隐私、数据、账户与显示",
+                onBack = onBack,
             )
         },
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = PaddingValues(
+                horizontal = AppDimens.ScreenHorizontal,
+                vertical = AppDimens.ScreenVertical,
+            ),
+            verticalArrangement = Arrangement.spacedBy(AppDimens.SectionGap),
         ) {
+            item {
+                AppHeroCard(
+                    eyebrow = "CONTROL CENTER",
+                    title = "你的选择，始终由你掌控",
+                    description = "权限按需开启，数据边界清晰可查；账号、历史和主题都能在这里独立管理。",
+                    icon = Icons.Rounded.Lock,
+                )
+            }
             item { SettingsHeader("隐私控制") }
             item {
                 SettingsCard(
@@ -160,6 +172,9 @@ fun SettingsScreen(
                             checked = aiEnabled && aiServiceAvailable,
                             onCheckedChange = onAiEnabledChange,
                             enabled = aiServiceAvailable,
+                            modifier = Modifier.semantics {
+                                contentDescription = "AI 辅助偏好"
+                            },
                         )
                     },
                 )
@@ -209,18 +224,33 @@ fun SettingsScreen(
 
             item { SettingsHeader("显示") }
             item {
-                Card(Modifier.fillMaxWidth()) {
+                AppCard(contentPadding = PaddingValues(0.dp)) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(AppIcons.DarkMode, null, tint = MaterialTheme.colorScheme.primary)
                             Spacer(Modifier.width(10.dp))
                             Text("外观模式", style = MaterialTheme.typography.titleMedium)
                         }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            ThemePreference.entries.forEach { option ->
+                        LazyRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            contentPadding = PaddingValues(end = 4.dp),
+                        ) {
+                            items(ThemePreference.entries) { option ->
                                 FilterChip(
                                     selected = theme == option,
                                     onClick = { onThemeChange(option) },
+                                    leadingIcon = if (theme == option) {
+                                        {
+                                            Icon(
+                                                Icons.Rounded.Check,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(18.dp),
+                                            )
+                                        }
+                                    } else {
+                                        null
+                                    },
                                     label = {
                                         Text(
                                             when (option) {
@@ -267,7 +297,7 @@ fun SettingsScreen(
                 )
             }
             item {
-                Card(Modifier.fillMaxWidth()) {
+                AppCard(contentPadding = PaddingValues(0.dp)) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("吃什么 · 附近美食决策", style = MaterialTheme.typography.titleMedium)
                         Text("版本 ${BuildConfig.VERSION_NAME}")
@@ -300,7 +330,7 @@ fun SettingsScreen(
         )
     }
     if (confirmWithdraw) {
-        AlertDialog(
+        AppDialog(
             onDismissRequest = { confirmWithdraw = false },
             title = { Text("撤回隐私同意？") },
             text = { Text("撤回后立即回到首次隐私页面，推荐网络层将不再被界面调用，本机最近决策会清空；主题偏好会保留。") },
@@ -320,7 +350,7 @@ private fun DecisionHistoryCard(
     entries: List<DecisionHistoryEntry>,
     onClear: () -> Unit,
 ) {
-    Card(Modifier.fillMaxWidth()) {
+    AppCard(contentPadding = PaddingValues(0.dp)) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -417,7 +447,7 @@ private val HISTORY_TIME_FORMATTER: DateTimeFormatter = DateTimeFormatter
 
 @Composable
 private fun SettingsHeader(text: String) {
-    Text(text, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+    AppSectionHeader(title = text)
 }
 
 @Composable
@@ -427,23 +457,36 @@ private fun SettingsCard(
     description: String,
     action: @Composable () -> Unit,
 ) {
-    Card(Modifier.fillMaxWidth()) {
-        Row(
+    AppCard(contentPadding = PaddingValues(0.dp)) {
+        Column(
             modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            androidx.compose.material3.Surface(
-                shape = MaterialTheme.shapes.medium,
-                color = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(42.dp),
-            ) { androidx.compose.foundation.layout.Box(contentAlignment = Alignment.Center) { icon() } }
-            Column(Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.titleMedium)
-                Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                androidx.compose.material3.Surface(
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(42.dp),
+                ) { androidx.compose.foundation.layout.Box(contentAlignment = Alignment.Center) { icon() } }
+                Column(Modifier.weight(1f)) {
+                    Text(title, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
-            action()
+            Row(
+                modifier = Modifier.align(Alignment.End),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                action()
+            }
         }
     }
 }
@@ -475,15 +518,12 @@ private fun SettingsDocumentDialog(
             AppVersionStatus.ConfigurationUnavailable -> "当前版本 ${BuildConfig.VERSION_NAME}。暂时无法取得服务端最低兼容版本，因此不会声称已是最新版；请以原邀请测试渠道的签名 APK 和哈希为准。"
         }
     }
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
             Text(
                 text = body,
-                modifier = Modifier
-                    .heightIn(max = 400.dp)
-                    .verticalScroll(rememberScrollState()),
             )
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },

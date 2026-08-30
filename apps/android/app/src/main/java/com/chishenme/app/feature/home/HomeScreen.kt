@@ -9,26 +9,38 @@ import android.content.pm.PackageManager
 import android.provider.Settings as AndroidSettings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -36,20 +48,20 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -60,7 +72,16 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
@@ -87,6 +108,8 @@ import com.chishenme.app.feature.config.RemoteFeatureConfigState
 import com.chishenme.app.location.LocationAccess
 import com.chishenme.app.location.LocationSettingsTarget
 import com.chishenme.app.ui.AppIcons
+import com.chishenme.app.ui.AppSnackbarHost
+import com.chishenme.app.ui.AppTopBar
 import com.chishenme.app.location.LocationUiState
 import com.chishenme.app.location.presentation
 import kotlin.math.roundToInt
@@ -214,36 +237,40 @@ fun HomeScreen(
         }
     }
 
-    Scaffold(
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text("吃什么", fontWeight = FontWeight.Bold)
-                        Text(
-                            "现在这一顿，30 秒决定",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                },
-                actions = {
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Rounded.Settings, contentDescription = "设置")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
+    HomeSurfaceTheme {
+        val homeColors = currentHomeVisualColors()
+        Scaffold(
+            containerColor = homeColors.page,
+            snackbarHost = { AppSnackbarHost(snackbarHostState) },
+            topBar = {
+                AppTopBar(
+                    title = "吃什么",
+                    subtitle = "现在这一顿，30 秒决定",
+                    actions = {
+                        Surface(
+                            modifier = Modifier.padding(end = 10.dp).size(48.dp),
+                            color = homeColors.card,
+                            shape = MaterialTheme.shapes.medium,
+                            border = BorderStroke(1.dp, homeColors.border),
+                            shadowElevation = 1.dp,
+                        ) {
+                            IconButton(onClick = onOpenSettings) {
+                                Icon(Icons.Rounded.Settings, contentDescription = "设置")
+                            }
+                        }
+                    },
+                )
+            },
+        ) { contentPadding ->
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(contentPadding),
+                contentPadding = PaddingValues(
+                    horizontal = HomeDimens.ScreenHorizontal,
+                    vertical = HomeDimens.SectionGap,
                 ),
-            )
-        },
-    ) { contentPadding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(contentPadding),
-            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
-        ) {
+                verticalArrangement = Arrangement.spacedBy(HomeDimens.SectionGap),
+            ) {
+                item { HomeHeroCard() }
             remoteServiceStatusMessage(state)?.let { message ->
                 item {
                     RemoteServiceStatusCard(
@@ -329,7 +356,7 @@ fun HomeScreen(
             }
 
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                HomeCard {
                     SectionTitle("怎么决定", "极速模式一键给答案，精细模式可调全部条件")
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         ModeButton(
@@ -367,24 +394,12 @@ fun HomeScreen(
 
             if (state.input.decisionMode == DecisionMode.QUICK) {
                 item {
-                    Surface(
-                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f),
-                        shape = MaterialTheme.shapes.large,
-                    ) {
-                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("当前极速条件", style = MaterialTheme.typography.titleMedium)
-                            Text(
-                                "人均 ${state.input.budgetMaxYuan?.let { "${it}元内" } ?: "不限"} · " +
-                                    "${state.input.availableMinutes} 分钟 · ${travelLabel(state.input.travelMode)} · " +
-                                    explorationLabel(state.input.explorationMode),
-                                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            )
-                            Text(
-                                "切换到“精细匹配”可以调整这些条件。",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                    }
+                    QuickDecisionSummary(
+                        budgetMaxYuan = state.input.budgetMaxYuan,
+                        availableMinutes = state.input.availableMinutes,
+                        travelMode = state.input.travelMode,
+                        explorationMode = state.input.explorationMode,
+                    )
                 }
             } else {
                 item {
@@ -468,48 +483,67 @@ fun HomeScreen(
             }
 
             item {
-                state.formError?.let { error ->
+                HomeCard {
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(
+                            "准备好了",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            "不做无限信息流，只把最值得选的答案放到你面前。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    state.formError?.let { error ->
+                        Surface(
+                            modifier = Modifier.semantics {
+                                liveRegion = LiveRegionMode.Polite
+                                stateDescription = error
+                            },
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            shape = MaterialTheme.shapes.small,
+                        ) {
+                            Text(
+                                error,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                            )
+                        }
+                    }
+                    HomePrimaryAction(
+                        enabled = recommendationEnabled,
+                        onClick = {
+                            if (viewModel.recommend()) onRecommendationStarted()
+                        },
+                    )
                     Text(
-                        error,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(bottom = 8.dp),
+                        "给出 1 个主推荐和 2 个备选 · 每个答案都有推荐理由",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
-                Button(
-                    onClick = {
-                        if (viewModel.recommend()) onRecommendationStarted()
-                    },
-                    enabled = recommendationEnabled,
-                    modifier = Modifier.fillMaxWidth().height(58.dp),
-                ) {
-                    Icon(AppIcons.Restaurant, contentDescription = null)
-                    Spacer(Modifier.width(9.dp))
-                    Text("帮我决定")
-                }
-                Text(
-                    "给出 1 个主推荐和 2 个备选，不展示无限信息流",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                )
+            }
             }
         }
-    }
 
-    if (state.locationChooserOpen) {
-        LocationChooserDialog(
-            query = state.locationSearchQuery,
-            searchState = state.locationSearchState,
-            remoteFeatureConfig = state.remoteFeatureConfig,
-            onSearch = viewModel::searchLocation,
-            onDismiss = viewModel::dismissLocationSearch,
-            onChoose = viewModel::setLocation,
-            onChooseSearchResult = { place, dataMode ->
-                viewModel.selectLocationSearchResult(place, dataMode)
-            },
-            onQueryChanged = viewModel::updateLocationSearchQuery,
-        )
+        if (state.locationChooserOpen) {
+            LocationChooserDialog(
+                query = state.locationSearchQuery,
+                searchState = state.locationSearchState,
+                remoteFeatureConfig = state.remoteFeatureConfig,
+                onSearch = viewModel::searchLocation,
+                onDismiss = viewModel::dismissLocationSearch,
+                onChoose = viewModel::setLocation,
+                onChooseSearchResult = { place, dataMode ->
+                    viewModel.selectLocationSearchResult(place, dataMode)
+                },
+                onQueryChanged = viewModel::updateLocationSearchQuery,
+            )
+        }
     }
 }
 
@@ -536,23 +570,108 @@ private fun RemoteServiceStatusCard(
     message: String,
     onReconnect: () -> Unit,
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        shape = MaterialTheme.shapes.large,
+    val colors = currentHomeVisualColors()
+    HomeCard(
+        modifier = Modifier.semantics {
+            liveRegion = LiveRegionMode.Polite
+            stateDescription = message
+        },
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            HomeIconTile(colors.blueSoft) {
+                Icon(
+                    AppIcons.Tune,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.size(21.dp),
+                )
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    "服务状态",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        OutlinedButton(
+            onClick = onReconnect,
+            modifier = Modifier.heightIn(min = HomeDimens.MinTouchTarget),
+        ) {
+            Text("重新连接服务")
+        }
+    }
+}
+
+@Composable
+private fun QuickDecisionSummary(
+    budgetMaxYuan: Int?,
+    availableMinutes: Int,
+    travelMode: TravelMode,
+    explorationMode: ExplorationMode,
+) {
+    val colors = currentHomeVisualColors()
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = colors.greenSoft),
+        shape = RoundedCornerShape(HomeDimens.CardRadius),
+        border = BorderStroke(1.dp, colors.border),
     ) {
         Column(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(HomeDimens.CardPadding),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text("服务状态", style = MaterialTheme.typography.titleMedium)
-            Text(
-                message,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
-            )
-            OutlinedButton(onClick = onReconnect) {
-                Text("重新连接服务")
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(11.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                HomeIconTile(colors.card.copy(alpha = 0.72f)) {
+                    Icon(
+                        AppIcons.AccessTime,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.size(21.dp),
+                    )
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        "当前极速条件",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        "已经替你收好常用条件，可以直接开始。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
+            Surface(
+                color = colors.card.copy(alpha = 0.72f),
+                shape = MaterialTheme.shapes.small,
+            ) {
+                Text(
+                    "人均 ${budgetMaxYuan?.let { "${it}元内" } ?: "不限"} · " +
+                        "$availableMinutes 分钟 · ${travelLabel(travelMode)} · " +
+                        explorationLabel(explorationMode),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+            Text(
+                "切换到“精细匹配”可以调整这些条件。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -570,62 +689,100 @@ private fun LocationCard(
     onOpenLocationSettings: () -> Unit,
     onOpenAppSettings: () -> Unit,
 ) {
+    val colors = currentHomeVisualColors()
     val isLocating = locationState is LocationUiState.AwaitingPermission ||
         locationState is LocationUiState.Locating ||
         isPrecisionRequestInFlight
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.LocationOn, null, tint = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.width(8.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("从哪里出发", style = MaterialTheme.typography.labelLarge)
-                    Text(
-                        location?.label ?: "尚未选择地点",
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                }
-            }
-            if (location?.isDemonstration == true) {
-                Text(
-                    "演示位置只在本次会话使用，不会写入历史。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+    HomeCard {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            HomeIconTile(colors.accentSoft) {
+                Icon(
+                    Icons.Rounded.LocationOn,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(22.dp),
                 )
             }
-            when (locationState) {
-                LocationUiState.Idle -> if (location != null && !location.isDemonstration) {
-                    LocationPrivacySummary(location)
-                }
-                LocationUiState.AwaitingPermission -> LocationProgress("等待你选择位置精度…")
-                LocationUiState.Locating -> LocationProgress("正在获取当前位置…")
-                is LocationUiState.Ready -> {
-                    Text(
-                        buildString {
-                            append(
-                                if (locationState.access == LocationAccess.APPROXIMATE) {
-                                    "已使用系统提供的大致位置"
-                                } else {
-                                    "已取得当前位置"
-                                },
-                            )
-                            locationState.accuracyMeters?.let { append("，精度约 ${formatAccuracy(it)}") }
-                            append("。坐标只用于当次推荐，不保存。")
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    )
-                }
-                is LocationUiState.Failed -> {
-                    val presentation = locationState.reason.presentation()
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    "从哪里出发",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    location?.label ?: "尚未选择地点",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            Surface(
+                color = if (location == null) colors.amberSoft else colors.greenSoft,
+                shape = RoundedCornerShape(50),
+            ) {
+                Text(
+                    if (location == null) "待选择" else "已选择",
+                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+
+        if (location?.isDemonstration == true) {
+            LocationNotice(
+                text = "演示位置只在本次会话使用，不会写入历史。",
+                background = colors.amberSoft,
+            )
+        }
+        when (locationState) {
+            LocationUiState.Idle -> if (location != null && !location.isDemonstration) {
+                LocationPrivacySummary(location)
+            } else if (location == null) {
+                LocationNotice(
+                    text = "定位只会在你主动点击后开始；坐标只用于当次推荐。",
+                    background = colors.cardMuted,
+                )
+            }
+            LocationUiState.AwaitingPermission -> LocationProgress("等待你选择位置精度…")
+            LocationUiState.Locating -> LocationProgress("正在获取当前位置…")
+            is LocationUiState.Ready -> {
+                LocationNotice(
+                    text = buildString {
+                        append(
+                            if (locationState.access == LocationAccess.APPROXIMATE) {
+                                "已使用系统提供的大致位置"
+                            } else {
+                                "已取得当前位置"
+                            },
+                        )
+                        locationState.accuracyMeters?.let { append("，精度约 ${formatAccuracy(it)}") }
+                        append("。坐标只用于当次推荐，不保存。")
+                    },
+                    background = colors.greenSoft,
+                    announce = true,
+                )
+            }
+            is LocationUiState.Failed -> {
+                val presentation = locationState.reason.presentation()
+                Surface(
+                    modifier = Modifier.semantics {
+                        liveRegion = LiveRegionMode.Polite
+                        stateDescription = presentation.message
+                    },
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    shape = MaterialTheme.shapes.small,
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
                         Text(
                             presentation.message,
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
                         )
                         when (presentation.settingsTarget) {
                             LocationSettingsTarget.APP -> TextButton(onClick = onOpenAppSettings) {
@@ -639,8 +796,16 @@ private fun LocationCard(
                     }
                 }
             }
-            if (offerPrecisionUpgrade) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        }
+        if (offerPrecisionUpgrade) {
+            Surface(
+                color = colors.blueSoft,
+                shape = MaterialTheme.shapes.small,
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
                     Text(
                         if (precisionUpgradeRequiresSettings) {
                             "当前只有大致位置权限。如需精确位置，请由你主动前往应用设置开启。"
@@ -648,13 +813,13 @@ private fun LocationCard(
                             "当前只有大致位置权限；继续使用不影响推荐，也可由你主动提高精度。"
                         },
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     TextButton(
                         onClick = onImproveAccuracy,
                         enabled = !isLocating,
                     ) {
-                        Icon(AppIcons.MyLocation, null, modifier = Modifier.width(18.dp).height(18.dp))
+                        Icon(AppIcons.MyLocation, null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
                         Text(
                             when {
@@ -666,48 +831,92 @@ private fun LocationCard(
                     }
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                FilledTonalButton(
-                    onClick = onLocate,
-                    enabled = !isLocating,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Icon(AppIcons.MyLocation, null)
-                    Spacer(Modifier.width(6.dp))
-                    Text(if (isLocating) "定位中" else "自动定位")
-                }
-                OutlinedButton(onClick = onChoose, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Rounded.LocationOn, null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("手动选择")
-                }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            FilledTonalButton(
+                onClick = onLocate,
+                enabled = !isLocating,
+                modifier = Modifier.weight(1f).heightIn(min = HomeDimens.MinTouchTarget),
+            ) {
+                Icon(AppIcons.MyLocation, null, modifier = Modifier.size(19.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(if (isLocating) "定位中" else "自动定位")
+            }
+            OutlinedButton(
+                onClick = onChoose,
+                modifier = Modifier.weight(1f).heightIn(min = HomeDimens.MinTouchTarget),
+            ) {
+                Icon(Icons.Rounded.LocationOn, null, modifier = Modifier.size(19.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("手动选择")
             }
         }
     }
 }
 
 @Composable
-private fun LocationProgress(message: String) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        CircularProgressIndicator(modifier = Modifier.width(16.dp).height(16.dp), strokeWidth = 2.dp)
+private fun LocationNotice(
+    text: String,
+    background: Color,
+    announce: Boolean = false,
+) {
+    Surface(
+        modifier = if (announce) {
+            Modifier.semantics {
+                liveRegion = LiveRegionMode.Polite
+                stateDescription = text
+            }
+        } else {
+            Modifier
+        },
+        color = background,
+        shape = MaterialTheme.shapes.small,
+    ) {
         Text(
-            message,
+            text,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 9.dp),
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
 
 @Composable
+private fun LocationProgress(message: String) {
+    val colors = currentHomeVisualColors()
+    Surface(
+        modifier = Modifier.semantics {
+            liveRegion = LiveRegionMode.Polite
+            stateDescription = message
+        },
+        color = colors.blueSoft,
+        shape = MaterialTheme.shapes.small,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+            Text(
+                message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
 private fun LocationPrivacySummary(location: LocationChoice) {
-    Text(
-        buildString {
+    val colors = currentHomeVisualColors()
+    LocationNotice(
+        text = buildString {
             append(if (location.isApproximate) "当前为大致位置" else "当前为系统定位")
             location.coordinate.accuracyMeters?.let { append("，精度约 ${formatAccuracy(it)}") }
             append("。坐标只用于当次推荐，不保存。")
         },
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onPrimaryContainer,
+        background = colors.greenSoft,
     )
 }
 
@@ -746,28 +955,79 @@ private fun ModeButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val colors = currentHomeVisualColors()
+    val containerColor by animateColorAsState(
+        targetValue = if (selected) colors.accentSoft else colors.cardMuted.copy(alpha = 0.55f),
+        animationSpec = tween(HomeMotion.SelectionMillis),
+        label = "mode container",
+    )
+    val borderColor by animateColorAsState(
+        targetValue = if (selected) {
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.42f)
+        } else {
+            colors.border
+        },
+        animationSpec = tween(HomeMotion.SelectionMillis),
+        label = "mode border",
+    )
+    val elevation by animateDpAsState(
+        targetValue = if (selected) 2.dp else 0.dp,
+        animationSpec = tween(HomeMotion.SelectionMillis),
+        label = "mode elevation",
+    )
     Card(
         onClick = onClick,
-        modifier = modifier,
-        colors = CardDefaults.cardColors(
-            containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer
-            else MaterialTheme.colorScheme.surface,
-        ),
-        border = if (selected) null else CardDefaults.outlinedCardBorder(),
+        modifier = modifier
+            .heightIn(min = 116.dp)
+            .semantics(mergeDescendants = true) {
+                this.selected = selected
+                role = Role.RadioButton
+            },
+        colors = CardDefaults.cardColors(containerColor = containerColor),
+        border = BorderStroke(1.dp, borderColor),
+        elevation = CardDefaults.cardElevation(defaultElevation = elevation),
+        shape = RoundedCornerShape(HomeDimens.CompactRadius),
     ) {
-        Column(Modifier.padding(16.dp)) {
-            Icon(if (selected) AppIcons.Restaurant else AppIcons.Tune, null)
-            Spacer(Modifier.height(8.dp))
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall)
+        Column(
+            modifier = Modifier.fillMaxSize().padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            HomeIconTile(if (selected) colors.card.copy(alpha = 0.78f) else colors.card) {
+                Icon(
+                    if (selected) AppIcons.Restaurant else AppIcons.Tune,
+                    contentDescription = null,
+                    tint = if (selected) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(21.dp),
+                )
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
 
 @Composable
 private fun SectionTitle(title: String, subtitle: String? = null) {
-    Column {
-        Text(title, style = MaterialTheme.typography.titleMedium)
+    Column(
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        Text(
+            title,
+            modifier = Modifier.semantics { heading() },
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+        )
         subtitle?.let {
             Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -781,7 +1041,7 @@ private fun <T> OptionSection(
     selected: T,
     onSelected: (T) -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    HomeCard {
         SectionTitle(title)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(options) { (value, label) ->
@@ -789,6 +1049,23 @@ private fun <T> OptionSection(
                     selected = value == selected,
                     onClick = { onSelected(value) },
                     label = { Text(label) },
+                    leadingIcon = if (value == selected) {
+                        { Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                    } else {
+                        null
+                    },
+                    modifier = Modifier.heightIn(min = 42.dp),
+                    shape = RoundedCornerShape(HomeDimens.CompactRadius),
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                        selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    ),
+                    border = FilterChipDefaults.filterChipBorder(
+                        enabled = true,
+                        selected = value == selected,
+                        borderColor = MaterialTheme.colorScheme.outlineVariant,
+                        selectedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.62f),
+                    ),
                 )
             }
         }
@@ -797,19 +1074,63 @@ private fun <T> OptionSection(
 
 @Composable
 private fun PartySizeRow(partySize: Int, onChange: (Int) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    HomeCard {
         SectionTitle("就餐人数")
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            OutlinedButton(onClick = { onChange(partySize - 1) }, enabled = partySize > 1) { Text("−") }
-            Text("$partySize 人", style = MaterialTheme.typography.titleMedium)
-            OutlinedButton(onClick = { onChange(partySize + 1) }, enabled = partySize < 30) { Text("+") }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            OutlinedButton(
+                onClick = { onChange(partySize - 1) },
+                enabled = partySize > 1,
+                modifier = Modifier.size(HomeDimens.MinTouchTarget),
+                contentPadding = PaddingValues(0.dp),
+            ) {
+                Icon(
+                    AppIcons.Remove,
+                    contentDescription = "减少就餐人数",
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    "$partySize 人",
+                    modifier = Modifier.semantics {
+                        liveRegion = LiveRegionMode.Polite
+                        stateDescription = "当前 $partySize 人"
+                    },
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    "最多 30 人",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            OutlinedButton(
+                onClick = { onChange(partySize + 1) },
+                enabled = partySize < 30,
+                modifier = Modifier.size(HomeDimens.MinTouchTarget),
+                contentPadding = PaddingValues(0.dp),
+            ) {
+                Icon(
+                    Icons.Rounded.Add,
+                    contentDescription = "增加就餐人数",
+                    modifier = Modifier.size(22.dp),
+                )
+            }
         }
     }
 }
 
 @Composable
 private fun CuisineSection(title: String, selected: Set<String>, onToggle: (String) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    HomeCard {
         SectionTitle(title)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(cuisines) { cuisine ->
@@ -817,12 +1138,30 @@ private fun CuisineSection(title: String, selected: Set<String>, onToggle: (Stri
                     selected = cuisine in selected,
                     onClick = { onToggle(cuisine) },
                     label = { Text(cuisine) },
+                    leadingIcon = if (cuisine in selected) {
+                        { Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                    } else {
+                        null
+                    },
+                    modifier = Modifier.heightIn(min = 42.dp),
+                    shape = RoundedCornerShape(HomeDimens.CompactRadius),
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                        selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    ),
+                    border = FilterChipDefaults.filterChipBorder(
+                        enabled = true,
+                        selected = cuisine in selected,
+                        borderColor = MaterialTheme.colorScheme.outlineVariant,
+                        selectedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.62f),
+                    ),
                 )
             }
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LocationChooserDialog(
     query: String,
@@ -850,13 +1189,59 @@ private fun LocationChooserDialog(
         is RemoteFeatureConfigState.Incompatible -> "地点搜索版本不兼容"
     }
 
-    AlertDialog(
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val colors = currentHomeVisualColors()
+
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        title = { Text("搜索或选择地点") },
-        text = {
+        sheetState = sheetState,
+        containerColor = colors.card,
+        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+        dragHandle = null,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.92f)
+                .navigationBarsPadding()
+                .imePadding(),
+        ) {
+            Box(
+                modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(width = 34.dp, height = 4.dp)
+                        .background(colors.border, RoundedCornerShape(50)),
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        "搜索或选择地点",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        "只用于这一轮决定",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                TextButton(onClick = onDismiss) { Text("取消") }
+            }
+            HorizontalDivider(color = colors.border)
             Column(
-                modifier = Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(
                     "可输入全国范围内的学校、商圈或地址。输入内容仅用于本次搜索，不保存；结果会明确显示数据来源。",
@@ -888,7 +1273,7 @@ private fun LocationChooserDialog(
                     enabled = queryValidation is LocationSearchQueryValidation.Valid &&
                         remoteSearchAvailable &&
                         !isLoading,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = HomeDimens.MinTouchTarget),
                 ) {
                     if (isLoading) {
                         CircularProgressIndicator(
@@ -921,22 +1306,42 @@ private fun LocationChooserDialog(
                 )
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                Text("快捷地点（始终可用）", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "快捷地点（始终可用）",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                )
                 Text(
                     "以下内置演示地点可在拒绝定位、断网或搜索失败时完成流程，也可搜索全国其他地点。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                BuiltInQuickLocations.choices.forEachIndexed { index, location ->
-                    TextButton(onClick = { onChoose(location) }, modifier = Modifier.fillMaxWidth()) {
-                        Text(location.label, modifier = Modifier.weight(1f))
+                Surface(
+                    color = colors.cardMuted,
+                    shape = MaterialTheme.shapes.medium,
+                ) {
+                    Column {
+                        BuiltInQuickLocations.choices.forEachIndexed { index, location ->
+                            TextButton(
+                                onClick = { onChoose(location) },
+                                modifier = Modifier.fillMaxWidth().heightIn(min = HomeDimens.MinTouchTarget),
+                            ) {
+                                Text(
+                                    location.label,
+                                    modifier = Modifier.weight(1f),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
+                            if (index != BuiltInQuickLocations.choices.lastIndex) {
+                                HorizontalDivider(color = colors.border)
+                            }
+                        }
                     }
-                    if (index != BuiltInQuickLocations.choices.lastIndex) HorizontalDivider()
                 }
+                Spacer(Modifier.height(8.dp))
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("取消") } },
-    )
+        }
+    }
 }
 
 @Composable
@@ -945,21 +1350,51 @@ private fun LocationSearchContent(
     onChoose: (LocationSearchPlace, LocationSearchDataMode) -> Unit,
 ) {
     when (state) {
-        LocationSearchUiState.Idle,
-        LocationSearchUiState.Loading -> Unit
+        LocationSearchUiState.Idle -> Unit
+        LocationSearchUiState.Loading -> Text(
+            "正在搜索地点…",
+            modifier = Modifier.semantics {
+                liveRegion = LiveRegionMode.Polite
+                stateDescription = "正在搜索地点"
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         is LocationSearchUiState.Failed -> Text(
             state.message,
+            modifier = Modifier.semantics {
+                liveRegion = LiveRegionMode.Polite
+                stateDescription = "地点搜索失败：${state.message}"
+            },
             color = MaterialTheme.colorScheme.error,
             style = MaterialTheme.typography.bodySmall,
         )
         is LocationSearchUiState.Empty -> {
-            Text("没有找到匹配地点，请换个关键词或使用快捷地点。")
-            state.notice?.takeIf(String::isNotBlank)?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall)
+            Column(
+                modifier = Modifier.semantics {
+                    liveRegion = LiveRegionMode.Polite
+                    stateDescription = "没有找到匹配地点"
+                },
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text("没有找到匹配地点，请换个关键词或使用快捷地点。")
+                state.notice?.takeIf(String::isNotBlank)?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall)
+                }
             }
         }
         is LocationSearchUiState.Ready -> {
             val sourceLabels = state.results.map { it.sourceLabel }.distinct().joinToString("、")
+            Text(
+                "已找到 ${state.results.size} 个地点",
+                modifier = Modifier.semantics {
+                    liveRegion = LiveRegionMode.Polite
+                    stateDescription = "地点搜索完成，找到 ${state.results.size} 个结果"
+                },
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
+            )
             Text(
                 "输入内容会发送给 $sourceLabels 用于本次搜索，不保存。",
                 style = MaterialTheme.typography.bodySmall,

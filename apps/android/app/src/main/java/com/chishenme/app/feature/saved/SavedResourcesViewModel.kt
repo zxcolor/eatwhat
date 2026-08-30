@@ -41,6 +41,7 @@ internal fun enabledSavedResourceSections(
 data class SavedResourcesUiState(
     val busy: Boolean = false,
     val message: String? = null,
+    val loadFailureMessage: String? = null,
     val loginRequired: Boolean = false,
     val selectedSection: SavedResourcesSection = SavedResourcesSection.FAVORITES,
     val enabledSections: Set<SavedResourcesSection> = emptySet(),
@@ -173,7 +174,7 @@ class SavedResourcesViewModel @Inject constructor(
             mutableState.value.busy
         ) return
         val generation = resourceGeneration
-        mutableState.update { it.copy(busy = true, message = null) }
+        mutableState.update { it.copy(busy = true, message = null, loadFailureMessage = null) }
         resourceJob = viewModelScope.launch {
             when (val restored = authRepository.restoreSession()) {
                 is AuthOutcome.Failure -> if (resourceAccessIsCurrent(generation)) {
@@ -201,7 +202,9 @@ class SavedResourcesViewModel @Inject constructor(
 
     fun select(section: SavedResourcesSection) {
         if (!remoteCapabilitiesCurrent() || section !in mutableState.value.enabledSections) return
-        mutableState.update { it.copy(selectedSection = section, message = null) }
+        mutableState.update {
+            it.copy(selectedSection = section, message = null, loadFailureMessage = null)
+        }
         if (section !in mutableState.value.loadedSections) load(section, append = false)
     }
 
@@ -326,7 +329,7 @@ class SavedResourcesViewModel @Inject constructor(
         } else null
         if (append && cursor == null) return
         val generation = resourceGeneration
-        mutableState.update { it.copy(busy = true, message = null) }
+        mutableState.update { it.copy(busy = true, message = null, loadFailureMessage = null) }
         resourceJob = viewModelScope.launch {
             when (section) {
                 SavedResourcesSection.FAVORITES -> {
@@ -383,12 +386,15 @@ class SavedResourcesViewModel @Inject constructor(
         success: SavedResourcesUiState.(Value) -> SavedResourcesUiState,
     ) {
         when (outcome) {
-            is SavedResourcesOutcome.Success -> mutableState.update { it.success(outcome.value) }
+            is SavedResourcesOutcome.Success -> mutableState.update {
+                it.success(outcome.value).copy(loadFailureMessage = null)
+            }
             is SavedResourcesOutcome.Failure -> mutableState.update {
                 it.copy(
                     busy = false,
                     loginRequired = outcome.kind == SavedResourcesFailureKind.LOGIN_REQUIRED,
                     message = outcome.message,
+                    loadFailureMessage = outcome.message,
                 )
             }
         }
@@ -505,6 +511,7 @@ class SavedResourcesViewModel @Inject constructor(
     ): SavedResourcesUiState = copy(
         busy = false,
         message = message,
+        loadFailureMessage = null,
         loginRequired = false,
         enabledSections = enabled,
         favorites = favorites.takeIf { SavedResourcesSection.FAVORITES in enabled }.orEmpty(),
@@ -540,5 +547,6 @@ class SavedResourcesViewModel @Inject constructor(
         favoriteSaved = false,
         submittedFeedback = emptySet(),
         message = message,
+        loadFailureMessage = null,
     )
 }

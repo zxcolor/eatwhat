@@ -1,17 +1,23 @@
 package com.chishenme.app.feature.results
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -20,23 +26,25 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.Warning
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -44,7 +52,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -53,29 +60,48 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.chishenme.app.data.remote.Confidence
 import com.chishenme.app.data.remote.DataRightsMode
 import com.chishenme.app.data.remote.OpenStatus
+import com.chishenme.app.data.remote.RecommendationContext
 import com.chishenme.app.data.remote.RecommendationResponse
 import com.chishenme.app.data.remote.RecommendationResult
-import com.chishenme.app.data.remote.RecommendationContext
+import com.chishenme.app.domain.DecisionInput
 import com.chishenme.app.feature.decision.DecisionUiState
 import com.chishenme.app.feature.decision.RecommendationLoadState
-import com.chishenme.app.domain.DecisionInput
+import com.chishenme.app.ui.AppBadge
+import com.chishenme.app.ui.AppCard
+import com.chishenme.app.ui.AppDimens
+import com.chishenme.app.ui.AppDialog
+import com.chishenme.app.ui.AppEmptyState
+import com.chishenme.app.ui.AppHeroCard
 import com.chishenme.app.ui.AppIcons
+import com.chishenme.app.ui.AppMotion
+import com.chishenme.app.ui.AppPrimaryButton
+import com.chishenme.app.ui.AppSectionHeader
+import com.chishenme.app.ui.AppStatusBanner
+import com.chishenme.app.ui.AppTone
+import com.chishenme.app.ui.AppTopBar
+import com.chishenme.app.ui.currentAppVisualPalette
 import java.util.Locale
 
 internal data class RecommendationResultsAccessPolicy(
@@ -112,14 +138,12 @@ fun ResultsScreen(
     var showWhy by remember { mutableStateOf(false) }
 
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            TopAppBar(
-                title = { Text("这顿就吃它") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
-                    }
-                },
+            AppTopBar(
+                title = "这顿就吃它",
+                subtitle = "最多 3 个可靠选择",
+                onBack = onBack,
             )
         },
     ) { padding ->
@@ -168,17 +192,71 @@ fun ResultsScreen(
 
 @Composable
 private fun LoadingContent(modifier: Modifier = Modifier) {
-    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            CircularProgressIndicator()
-            Spacer(Modifier.height(16.dp))
-            Text("正在核对营业、预算和路程…", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "AI 不可用时会自动回退到规则推荐",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+            horizontal = AppDimens.ScreenHorizontal,
+            vertical = AppDimens.ScreenVertical,
+        ),
+        verticalArrangement = Arrangement.spacedBy(AppDimens.SectionGap),
+    ) {
+        item {
+            AppHeroCard(
+                modifier = Modifier.semantics {
+                    liveRegion = LiveRegionMode.Polite
+                    stateDescription = "正在获取推荐"
+                },
+                eyebrow = "正在生成本次答案",
+                title = "正在核对营业、预算和路程…",
+                description = "AI 不可用时会自动回退到规则推荐",
+                footer = {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(22.dp),
+                            color = Color.White,
+                            strokeWidth = 2.dp,
+                        )
+                        Text(
+                            "优先保留真正有用的结果",
+                            color = Color.White.copy(alpha = 0.82f),
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    }
+                },
             )
         }
+        items(2) {
+            ResultLoadingCard()
+        }
+    }
+}
+
+@Composable
+private fun ResultLoadingCard() {
+    val palette = currentAppVisualPalette()
+    AppCard {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(88.dp)
+                .background(palette.cardMuted, RoundedCornerShape(AppDimens.CompactRadius)),
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.58f)
+                .height(18.dp)
+                .background(palette.cardMuted, CircleShape),
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.86f)
+                .height(12.dp)
+                .background(palette.cardMuted, CircleShape),
+        )
     }
 }
 
@@ -189,23 +267,35 @@ private fun ErrorContent(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Box(modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.errorContainer,
-                modifier = Modifier.size(64.dp),
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = AppDimens.ScreenHorizontal, vertical = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        AppEmptyState(
+            title = "这次没决定出来",
+            body = message,
+            modifier = Modifier.semantics {
+                liveRegion = LiveRegionMode.Polite
+                stateDescription = "推荐失败：$message"
+            },
+            icon = Icons.Rounded.Warning,
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.Warning, null, tint = MaterialTheme.colorScheme.error)
-                }
+                AppPrimaryButton(
+                    text = "重新尝试",
+                    icon = Icons.Rounded.Refresh,
+                    onClick = onRetry,
+                )
+                TextButton(onClick = onBack) { Text("返回调整条件") }
             }
-            Spacer(Modifier.height(16.dp))
-            Text("这次没决定出来", style = MaterialTheme.typography.headlineMedium)
-            Text(message, modifier = Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(22.dp))
-            Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) { Text("重新尝试") }
-            TextButton(onClick = onBack) { Text("返回调整条件") }
         }
     }
 }
@@ -222,11 +312,23 @@ private fun ReadyContent(
 ) {
     val results = response.results.take(3)
     if (results.isEmpty()) {
-        Box(modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("附近暂时没有可靠结果", style = MaterialTheme.typography.headlineMedium)
-                Text(response.notice ?: "试试扩大距离或取消部分排除条件")
-                Spacer(Modifier.height(16.dp))
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = AppDimens.ScreenHorizontal, vertical = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            AppEmptyState(
+                title = "附近暂时没有可靠结果",
+                body = response.notice ?: "试试扩大距离或取消部分排除条件",
+                modifier = Modifier.semantics {
+                    liveRegion = LiveRegionMode.Polite
+                    stateDescription = "推荐完成，附近没有可靠结果"
+                },
+                icon = Icons.Rounded.LocationOn,
+            ) {
                 OutlinedButton(onClick = onReroll) { Text("再试一次") }
             }
         }
@@ -264,46 +366,27 @@ private fun ReadyContent(
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        contentPadding = PaddingValues(
+            horizontal = AppDimens.ScreenHorizontal,
+            vertical = AppDimens.ScreenVertical,
+        ),
+        verticalArrangement = Arrangement.spacedBy(AppDimens.SectionGap),
     ) {
         item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        "推荐结果",
-                        style = MaterialTheme.typography.headlineMedium,
-                        modifier = Modifier.semantics { heading() },
-                    )
-                    Text(
-                        "主推荐与备选排名不会因本地筛选改变",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                TextButton(onClick = onWhy) {
-                    Icon(Icons.Rounded.Info, null)
-                    Spacer(Modifier.width(4.dp))
-                    Text("为什么")
-                }
-            }
+            ResultsHero(
+                resultCount = results.size,
+                onWhy = onWhy,
+            )
         }
 
         accessPolicy.persistentNotice?.let { notice ->
             item {
-                Surface(
-                    color = MaterialTheme.colorScheme.errorContainer,
-                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                    shape = MaterialTheme.shapes.medium,
-                ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.Top,
-                    ) {
-                        Icon(Icons.Rounded.Warning, contentDescription = null)
-                        Text(notice, style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
+                AppStatusBanner(
+                    title = "当前为安全展示模式",
+                    body = notice,
+                    tone = AppTone.WARNING,
+                    icon = Icons.Rounded.Warning,
+                )
             }
         }
 
@@ -333,10 +416,9 @@ private fun ReadyContent(
         } else if (presentation == ResultsPresentation.LIST) {
             if (primaryResult != null) {
                 item {
-                    Text(
-                        "主推荐",
-                        style = MaterialTheme.typography.titleLarge,
-                        modifier = Modifier.semantics { heading() },
+                    AppSectionHeader(
+                        title = "主推荐",
+                        subtitle = "综合本次条件，先看这个",
                     )
                 }
                 item {
@@ -353,19 +435,24 @@ private fun ReadyContent(
                 }
             } else if (filter.isActive) {
                 item {
-                    Text(
-                        "主推荐未符合当前筛选；清除筛选即可重新查看。",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    AppStatusBanner(
+                        title = "主推荐已被本地筛选隐藏",
+                        body = "主推荐未符合当前筛选；清除筛选即可重新查看。",
+                        tone = AppTone.INFO,
+                        icon = Icons.Rounded.Info,
                     )
                 }
             }
 
             if (alternatives.isNotEmpty()) {
                 item {
-                    Text(
-                        if (primaryResult == null) "符合筛选的备选" else alternativeHeading(alternatives.size + 1),
-                        style = MaterialTheme.typography.titleLarge,
-                        modifier = Modifier.semantics { heading() },
+                    AppSectionHeader(
+                        title = if (primaryResult == null) {
+                            "符合筛选的备选"
+                        } else {
+                            alternativeHeading(alternatives.size + 1)
+                        },
+                        subtitle = "同样可靠，按原始排名展示",
                     )
                 }
             }
@@ -395,30 +482,76 @@ private fun ReadyContent(
 
         response.notice?.let { notice ->
             item {
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                    shape = MaterialTheme.shapes.medium,
-                ) {
-                    Text(notice, modifier = Modifier.padding(14.dp), style = MaterialTheme.typography.bodySmall)
-                }
+                AppStatusBanner(
+                    title = "本次结果说明",
+                    body = notice,
+                    tone = AppTone.NEUTRAL,
+                    icon = Icons.Rounded.Info,
+                )
             }
         }
 
         item {
-            OutlinedButton(onClick = onReroll, modifier = Modifier.fillMaxWidth().height(52.dp)) {
-                Icon(Icons.Rounded.Refresh, null)
-                Spacer(Modifier.width(8.dp))
-                Text("换一批")
+            AppCard {
+                AppSectionHeader(
+                    title = "还想看看别的？",
+                    subtitle = "换一批会重新请求；近期反重复由服务端规则统一处理。",
+                )
+                AppPrimaryButton(
+                    text = "换一批",
+                    icon = Icons.Rounded.Refresh,
+                    onClick = onReroll,
+                )
             }
-            Text(
-                "换一批会重新请求；近期反重复由服务端规则统一处理。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 6.dp),
-            )
-            Spacer(Modifier.height(22.dp))
+            Spacer(Modifier.height(12.dp))
         }
     }
+}
+
+@Composable
+private fun ResultsHero(
+    resultCount: Int,
+    onWhy: () -> Unit,
+) {
+    AppHeroCard(
+        modifier = Modifier.semantics {
+            liveRegion = LiveRegionMode.Polite
+            stateDescription = "推荐完成，找到 $resultCount 个结果"
+        },
+        eyebrow = "本次已筛出 $resultCount 个选择",
+        title = "推荐结果",
+        description = "主推荐与备选排名不会因本地筛选改变",
+        footer = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Surface(
+                    modifier = Modifier.weight(1f),
+                    color = Color.White.copy(alpha = 0.12f),
+                    contentColor = Color.White,
+                    shape = CircleShape,
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
+                ) {
+                    Text(
+                        text = "1 个主推 · 最多 2 个备选",
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                TextButton(
+                    onClick = onWhy,
+                    colors = ButtonDefaults.textButtonColors(contentColor = Color.White),
+                ) {
+                    Icon(Icons.Rounded.Info, contentDescription = null)
+                    Spacer(Modifier.width(4.dp))
+                    Text("为什么")
+                }
+            }
+        },
+    )
 }
 
 private enum class ResultsPresentation {
@@ -432,23 +565,63 @@ private fun ResultsPresentationToggle(
     selected: ResultsPresentation,
     onSelected: (ResultsPresentation) -> Unit,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        FilterChip(
-            selected = selected == ResultsPresentation.LIST,
-            onClick = { onSelected(ResultsPresentation.LIST) },
-            label = { Text("列表") },
-            modifier = Modifier.weight(1f),
-        )
-        FilterChip(
-            selected = selected == ResultsPresentation.ORIENTATION,
-            onClick = { onSelected(ResultsPresentation.ORIENTATION) },
-            label = { Text("附近方位图") },
-            modifier = Modifier.weight(1f),
-        )
+    val palette = currentAppVisualPalette()
+    AppCard(contentPadding = PaddingValues(7.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            ResultsPresentationChip(
+                selected = selected == ResultsPresentation.LIST,
+                onClick = { onSelected(ResultsPresentation.LIST) },
+                label = "列表",
+                modifier = Modifier.weight(1f),
+                selectedColor = palette.accentSoft,
+            )
+            ResultsPresentationChip(
+                selected = selected == ResultsPresentation.ORIENTATION,
+                onClick = { onSelected(ResultsPresentation.ORIENTATION) },
+                label = "附近方位图",
+                modifier = Modifier.weight(1f),
+                selectedColor = palette.accentSoft,
+            )
+        }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ResultsPresentationChip(
+    selected: Boolean,
+    onClick: () -> Unit,
+    label: String,
+    selectedColor: Color,
+    modifier: Modifier = Modifier,
+) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label, fontWeight = FontWeight.SemiBold) },
+        leadingIcon = if (selected) {
+            { Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
+        } else {
+            null
+        },
+        modifier = modifier.heightIn(min = AppDimens.MinTouchTarget),
+        shape = RoundedCornerShape(AppDimens.CompactRadius),
+        colors = FilterChipDefaults.filterChipColors(
+            containerColor = Color.Transparent,
+            labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            selectedContainerColor = selectedColor,
+            selectedLabelColor = MaterialTheme.colorScheme.primary,
+        ),
+        border = FilterChipDefaults.filterChipBorder(
+            enabled = true,
+            selected = selected,
+            borderColor = Color.Transparent,
+            selectedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.58f),
+        ),
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -460,27 +633,39 @@ private fun ResultsLocalFilters(
     totalCount: Int,
     onFilterChange: (RecommendationResultsFilterState) -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "本次结果筛选",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.weight(1f).semantics { heading() },
-            )
-            if (filter.isActive) {
-                TextButton(onClick = { onFilterChange(RecommendationResultsFilterState()) }) {
-                    Text("清除")
+    val palette = currentAppVisualPalette()
+    AppCard {
+        AppSectionHeader(
+            title = "本次结果筛选",
+            subtitle = RecommendationResultsFilter.countSummary(visibleCount, totalCount, filter),
+            trailing = if (filter.isActive) {
+                {
+                    TextButton(onClick = { onFilterChange(RecommendationResultsFilterState()) }) {
+                        Text("清除")
+                    }
                 }
-            }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            } else {
+                null
+            },
+        )
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             FilterChip(
                 selected = filter.openNowOnly,
                 onClick = { onFilterChange(filter.copy(openNowOnly = !filter.openNowOnly)) },
                 label = { Text("仅营业中") },
+                leadingIcon = if (filter.openNowOnly) {
+                    { Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                } else {
+                    null
+                },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = palette.greenSoft,
+                    selectedLabelColor = palette.greenStrong,
+                ),
             )
             FilterChip(
                 selected = filter.knownPriceWithinBudgetOnly,
@@ -496,6 +681,15 @@ private fun ResultsLocalFilters(
                         budgetMaxYuan?.let { "价格已知且不超 $it 元" } ?: "仅价格已知",
                     )
                 },
+                leadingIcon = if (filter.knownPriceWithinBudgetOnly) {
+                    { Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                } else {
+                    null
+                },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = palette.blueSoft,
+                    selectedLabelColor = palette.blueStrong,
+                ),
             )
         }
         OutlinedTextField(
@@ -509,11 +703,6 @@ private fun ResultsLocalFilters(
             placeholder = { Text("例如：川菜、面食、咖啡") },
         )
         Text(
-            RecommendationResultsFilter.countSummary(visibleCount, totalCount, filter),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
             "筛选仅作用于本次最多 3 条结果；未知营业状态不会标成已打烊，未知价格不会标成超预算。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -523,22 +712,16 @@ private fun ResultsLocalFilters(
 
 @Composable
 private fun EmptyFilteredResults(onClear: () -> Unit) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-        shape = MaterialTheme.shapes.large,
+    AppEmptyState(
+        title = "没有符合当前筛选的结果",
+        body = "原来的主推荐和备选仍在本次会话中，清除筛选即可恢复。",
+        modifier = Modifier.semantics {
+            liveRegion = LiveRegionMode.Polite
+            stateDescription = "当前筛选结果为空"
+        },
+        icon = AppIcons.Tune,
     ) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text("没有符合当前筛选的结果", style = MaterialTheme.typography.titleLarge)
-            Text(
-                "原来的主推荐和备选仍在本次会话中，清除筛选即可恢复。",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Button(onClick = onClear) { Text("一键清除筛选") }
-        }
+        Button(onClick = onClear) { Text("一键清除筛选") }
     }
 }
 
@@ -556,23 +739,18 @@ private fun NearbyOrientationMap(
     val resultsByRank = remember(results) { results.associateBy(RecommendationResult::rank) }
     val gridColor = MaterialTheme.colorScheme.outlineVariant
     val axisColor = MaterialTheme.colorScheme.outline
-    val mapFill = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f)
+    val palette = currentAppVisualPalette()
+    val mapFill = palette.blueSoft.copy(alpha = 0.56f)
 
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(
-            "附近方位图（非道路导航图）",
-            style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.semantics { heading() },
-        )
-        Text(
-            "只表示本次起点与结果的大致相对方位；不含道路、入口、实时路况或导航能力。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+    AppCard {
+        AppSectionHeader(
+            title = "附近方位图（非道路导航图）",
+            subtitle = "只表示本次起点与结果的大致相对方位；不含道路、入口、实时路况或导航能力。",
         )
         Surface(
-            shape = MaterialTheme.shapes.large,
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 2.dp,
+            shape = RoundedCornerShape(AppDimens.CardRadius),
+            color = palette.cardMuted,
+            border = BorderStroke(1.dp, palette.border),
         ) {
             BoxWithConstraints(
                 modifier = Modifier.fillMaxWidth().height(MAP_HEIGHT).padding(8.dp),
@@ -631,16 +809,18 @@ private fun NearbyOrientationMap(
                 CompassLabel("南", Modifier.align(Alignment.BottomCenter))
                 CompassLabel("西", Modifier.align(Alignment.CenterStart))
 
+                val markerScale = LocalDensity.current.fontScale.coerceIn(1f, 1.35f)
+                val userMarkerSize = USER_MARKER_SIZE * markerScale
                 Surface(
                     shape = CircleShape,
                     color = MaterialTheme.colorScheme.secondaryContainer,
                     contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                     modifier = Modifier
                         .offset(
-                            x = maxWidth * CENTER_FRACTION - USER_MARKER_SIZE / 2f,
-                            y = maxHeight * CENTER_FRACTION - USER_MARKER_SIZE / 2f,
+                            x = maxWidth * CENTER_FRACTION - userMarkerSize / 2f,
+                            y = maxHeight * CENTER_FRACTION - userMarkerSize / 2f,
                         )
-                        .size(USER_MARKER_SIZE)
+                        .size(userMarkerSize)
                         .clearAndSetSemantics { },
                 ) {
                     Box(contentAlignment = Alignment.Center) {
@@ -650,11 +830,17 @@ private fun NearbyOrientationMap(
 
                 projection.points.forEach { point ->
                     val result = resultsByRank[point.rank] ?: return@forEach
-                    val markerSize = if (point.isPrimary) PRIMARY_MARKER_SIZE else ALTERNATIVE_MARKER_SIZE
+                    val markerSize = (
+                        if (point.isPrimary) PRIMARY_MARKER_SIZE else ALTERNATIVE_MARKER_SIZE
+                    ) * markerScale
+                    val markerX = (maxWidth * point.xFraction - markerSize / 2f)
+                        .coerceIn(0.dp, maxWidth - markerSize)
+                    val markerY = (maxHeight * point.yFraction - markerSize / 2f)
+                        .coerceIn(0.dp, maxHeight - markerSize)
                     val markerModifier = Modifier
                         .offset(
-                            x = maxWidth * point.xFraction - markerSize / 2f,
-                            y = maxHeight * point.yFraction - markerSize / 2f,
+                            x = markerX,
+                            y = markerY,
                         )
                         .size(markerSize)
                     val markerColor = if (point.isPrimary) {
@@ -734,11 +920,12 @@ private fun NearbyOrientationMap(
             }
         }
         if (projection.skippedCount > 0) {
-            Text(
-                "有 " + projection.skippedCount +
+            AppStatusBanner(
+                title = "部分结果未绘制",
+                body = "有 " + projection.skippedCount +
                     " 条因坐标基准不一致、距离异常或坐标无效而未绘制；列表仍完整可用。",
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall,
+                tone = AppTone.WARNING,
+                icon = Icons.Rounded.Warning,
             )
         }
         if (projection.points.isEmpty()) {
@@ -799,15 +986,24 @@ private fun RecommendationCard(
     primary: Boolean,
     onClick: (() -> Unit)?,
 ) {
-    val colors = CardDefaults.cardColors(
-        containerColor = if (primary) MaterialTheme.colorScheme.primaryContainer
-        else MaterialTheme.colorScheme.surface,
+    val palette = currentAppVisualPalette()
+    val colors = CardDefaults.cardColors(containerColor = palette.card)
+    val elevation = CardDefaults.cardElevation(defaultElevation = if (primary) 3.dp else 1.dp)
+    val border = BorderStroke(
+        width = if (primary) 1.5.dp else 1.dp,
+        color = if (primary) {
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.32f)
+        } else {
+            palette.border
+        },
     )
-    val elevation = CardDefaults.cardElevation(defaultElevation = if (primary) 4.dp else 1.dp)
+    val shape = RoundedCornerShape(AppDimens.CardRadius)
     if (onClick == null) {
         Card(
             colors = colors,
             elevation = elevation,
+            border = border,
+            shape = shape,
             modifier = Modifier.fillMaxWidth(),
         ) {
             RecommendationCardBody(
@@ -822,6 +1018,8 @@ private fun RecommendationCard(
             onClick = onClick,
             colors = colors,
             elevation = elevation,
+            border = border,
+            shape = shape,
             modifier = Modifier.fillMaxWidth(),
         ) {
             RecommendationCardBody(
@@ -841,80 +1039,177 @@ private fun RecommendationCardBody(
     primary: Boolean,
     detailActionsAvailable: Boolean,
 ) {
-    result.imageUrl?.let { url ->
-        AsyncImage(
-            model = url,
-            contentDescription = "${result.name}图片，来源：${result.sourceAttribution}",
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxWidth().height(if (primary) 170.dp else 120.dp),
+    val palette = currentAppVisualPalette()
+    var imageLoaded by remember(result.imageUrl) { mutableStateOf(false) }
+    val imageAlpha by animateFloatAsState(
+        targetValue = if (imageLoaded) 1f else 0f,
+        animationSpec = tween(AppMotion.ContentMillis),
+        label = "recommendation image",
+    )
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(if (primary) 176.dp else 122.dp)
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(palette.accentSoft, palette.blueSoft),
+                ),
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = AppIcons.Restaurant,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.72f),
+            modifier = Modifier.size(if (primary) 52.dp else 42.dp),
         )
+        result.imageUrl?.let { url ->
+            AsyncImage(
+                model = url,
+                contentDescription = if (imageLoaded) {
+                    "${result.name}图片，来源：${result.sourceAttribution}"
+                } else {
+                    null
+                },
+                contentScale = ContentScale.Crop,
+                onLoading = { imageLoaded = false },
+                onSuccess = { imageLoaded = true },
+                onError = { imageLoaded = false },
+                modifier = Modifier.matchParentSize().alpha(imageAlpha),
+            )
+        }
+        Surface(
+            modifier = Modifier.align(Alignment.TopStart).padding(12.dp),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            shape = CircleShape,
+            border = BorderStroke(1.dp, palette.border.copy(alpha = 0.8f)),
+        ) {
+            Text(
+                text = if (primary) "主推荐 · 第 1 名" else "备选 · 第 ${result.rank} 名",
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+            )
+        }
     }
-    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.Top) {
             Column(Modifier.weight(1f)) {
-                Text(result.name, style = if (primary) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.titleLarge)
-                Text(result.address, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    result.name,
+                    style = if (primary) {
+                        MaterialTheme.typography.headlineSmall
+                    } else {
+                        MaterialTheme.typography.titleLarge
+                    },
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    result.address,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 3.dp),
+                )
             }
             if (dataRightsMode == DataRightsMode.LICENSED_ENRICHMENT && result.fitScore != null) {
-                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary) {
-                    Text(
-                        "适合 ${result.fitScore.toInt()}",
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        style = MaterialTheme.typography.labelLarge,
+                AppBadge(text = "适合 ${result.fitScore.toInt()}", tone = AppTone.ACCENT)
+            }
+        }
+
+        Surface(
+            color = palette.cardMuted,
+            shape = RoundedCornerShape(AppDimens.CompactRadius),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 9.dp),
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                result.sourceRating?.let {
+                    Fact(
+                        icon = Icons.Rounded.Star,
+                        text = "来源评分 ${oneDecimal(it)}",
+                        modifier = Modifier.weight(1f),
                     )
                 }
+                Fact(
+                    icon = Icons.Rounded.LocationOn,
+                    text = distanceLabel(result.distanceMeters),
+                    modifier = Modifier.weight(1f),
+                )
+                Fact(
+                    icon = AppIcons.AccessTime,
+                    text = "约 ${result.estimatedTravelMinutes.toInt()} 分钟",
+                    modifier = Modifier.weight(1f),
+                )
             }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            result.sourceRating?.let {
-                Fact(Icons.Rounded.Star, "来源评分 ${oneDecimal(it)}")
-            }
-            Fact(Icons.Rounded.LocationOn, distanceLabel(result.distanceMeters))
-            Fact(AppIcons.AccessTime, "约 ${result.estimatedTravelMinutes.toInt()} 分钟")
-        }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             StatusPill(result.openStatus)
-            Text(result.averageCostYuan?.let { "人均约 ${it.toInt()} 元" } ?: "人均暂无可靠信息")
+            AppBadge(
+                text = result.averageCostYuan?.let { "人均约 ${it.toInt()} 元" }
+                    ?: "人均暂无可靠信息",
+                tone = AppTone.NEUTRAL,
+            )
         }
 
-        result.reasons.take(3).forEach { reason ->
-            Text("• ${reason.text}", style = MaterialTheme.typography.bodyMedium)
+        result.reasons.take(3).forEachIndexed { index, reason ->
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Surface(
+                    color = palette.accentSoft,
+                    contentColor = MaterialTheme.colorScheme.primary,
+                    shape = CircleShape,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = (index + 1).toString(),
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+                Text(reason.text, style = MaterialTheme.typography.bodyMedium)
+            }
         }
 
         if (result.aiAssisted) {
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.tertiaryContainer,
-                contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                ) {
-                    Icon(Icons.Rounded.Star, contentDescription = null, Modifier.size(17.dp))
-                    Text("AI 辅助推荐", style = MaterialTheme.typography.labelLarge)
-                }
-            }
+            AppBadge(text = "AI 辅助推荐", tone = AppTone.SUCCESS)
         }
 
         result.warnings.firstOrNull()?.let { warning ->
-            Row(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.Top) {
-                Icon(Icons.Rounded.Warning, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
-                Text(warning, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-            }
+            AppStatusBanner(
+                title = "请先确认",
+                body = warning,
+                tone = AppTone.WARNING,
+                icon = Icons.Rounded.Warning,
+            )
         }
 
         HorizontalDivider()
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            "${confidenceLabel(result.confidence)} · ${result.sourceAttribution}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
-                "${confidenceLabel(result.confidence)} · ${result.sourceAttribution}",
-                style = MaterialTheme.typography.bodySmall,
+                if (detailActionsAvailable) {
+                    "点击卡片查看完整信息"
+                } else {
+                    "当前结果仍可用于本次参考"
+                },
+                style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
             )
             Text(
                 if (detailActionsAvailable) "查看详情" else "仅展示，详情与操作暂不可用",
@@ -923,6 +1218,7 @@ private fun RecommendationCardBody(
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 },
+                modifier = Modifier.align(Alignment.End),
                 fontWeight = FontWeight.SemiBold,
             )
         }
@@ -930,24 +1226,30 @@ private fun RecommendationCardBody(
 }
 
 @Composable
-private fun Fact(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
+private fun Fact(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    Row(modifier = modifier, verticalAlignment = Alignment.Top) {
         Icon(icon, null, modifier = Modifier.size(17.dp), tint = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.width(3.dp))
-        Text(text, style = MaterialTheme.typography.bodySmall)
+        Text(
+            text = text,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.labelSmall,
+        )
     }
 }
 
 @Composable
 private fun StatusPill(status: OpenStatus) {
-    val (label, color) = when (status) {
-        OpenStatus.OPEN -> "营业中" to MaterialTheme.colorScheme.secondary
-        OpenStatus.CLOSED -> "已打烊" to MaterialTheme.colorScheme.error
-        OpenStatus.UNKNOWN -> "营业状态待确认" to MaterialTheme.colorScheme.outline
+    val (label, tone) = when (status) {
+        OpenStatus.OPEN -> "营业中" to AppTone.SUCCESS
+        OpenStatus.CLOSED -> "已打烊" to AppTone.ERROR
+        OpenStatus.UNKNOWN -> "营业状态待确认" to AppTone.NEUTRAL
     }
-    Surface(shape = CircleShape, color = color.copy(alpha = 0.14f)) {
-        Text(label, color = color, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp))
-    }
+    AppBadge(text = label, tone = tone)
 }
 
 @Composable
@@ -956,27 +1258,73 @@ private fun WhyRecommendationDialog(
     input: DecisionInput,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
+    AppDialog(
         onDismissRequest = onDismiss,
-        icon = { Icon(Icons.Rounded.Info, null) },
+        icon = {
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            ) {
+                Icon(
+                    Icons.Rounded.Info,
+                    contentDescription = null,
+                    modifier = Modifier.padding(12.dp),
+                )
+            }
+        },
         title = { Text("为什么推荐这些") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    "本次条件：${input.mealPeriod.displayName()} · " +
-                        "${input.budgetMaxYuan?.let { "人均 ${it} 元内" } ?: "预算不限"} · " +
-                        "${input.availableMinutes} 分钟 · 最远 ${distanceLabel(input.radiusMeters.toDouble())}",
-                    fontWeight = FontWeight.SemiBold,
-                )
-                if (response.dataRightsMode == DataRightsMode.LIVE_DISPLAY_ONLY) {
-                    Text("系统先过滤明确停业、超距离和超预算结果，再保持数据源返回顺序；当前不进行自有综合评分或排序。")
-                    Text("当前为实时展示模式，未取得数据增强授权，因此不展示自有适合度。", color = MaterialTheme.colorScheme.primary)
-                } else {
-                    Text("系统先过滤明确停业、超距离和超预算结果，再综合路程、时间、餐段、质量信号与多样性排序。")
-                    Text("适合度表示“是否适合此刻”，不等于平台来源评分。")
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    shape = RoundedCornerShape(AppDimens.CompactRadius),
+                ) {
+                    Text(
+                        "本次条件：${input.mealPeriod.displayName()} · " +
+                            "${input.budgetMaxYuan?.let { "人均 ${it} 元内" } ?: "预算不限"} · " +
+                            "${input.availableMinutes} 分钟 · 最远 ${distanceLabel(input.radiusMeters.toDouble())}",
+                        modifier = Modifier.padding(12.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
                 }
-                Text("规则 ${response.ruleVersion} · 提示词 ${response.promptVersion} · 模型 ${response.modelVersion}", style = MaterialTheme.typography.bodySmall)
-                if (response.aiFallbackUsed) Text("本次 AI 不可用，已使用确定性规则回退。")
+                if (response.dataRightsMode == DataRightsMode.LIVE_DISPLAY_ONLY) {
+                    Text(
+                        "系统先过滤明确停业、超距离和超预算结果，再保持数据源返回顺序；当前不进行自有综合评分或排序。",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        "当前为实时展示模式，未取得数据增强授权，因此不展示自有适合度。",
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                } else {
+                    Text(
+                        "系统先过滤明确停业、超距离和超预算结果，再综合路程、时间、餐段、质量信号与多样性排序。",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        "适合度表示“是否适合此刻”，不等于平台来源评分。",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Text(
+                    "规则 ${response.ruleVersion} · 提示词 ${response.promptVersion} · 模型 ${response.modelVersion}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (response.aiFallbackUsed) {
+                    Text(
+                        "本次 AI 不可用，已使用确定性规则回退。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = currentAppVisualPalette().amberStrong,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("知道了") } },

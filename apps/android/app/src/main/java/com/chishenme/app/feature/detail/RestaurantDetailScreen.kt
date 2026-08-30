@@ -1,7 +1,9 @@
 package com.chishenme.app.feature.detail
 
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,11 +14,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.Share
@@ -24,18 +27,13 @@ import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -45,6 +43,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.semantics
@@ -63,7 +62,18 @@ import com.chishenme.app.data.remote.PrivateFeedbackType
 import com.chishenme.app.feature.saved.SavedResourcesUiState
 import com.chishenme.app.feature.saved.label
 import com.chishenme.app.feature.session.ResultSessionState
+import com.chishenme.app.ui.AppBadge
+import com.chishenme.app.ui.AppCard
+import com.chishenme.app.ui.AppDimens
+import com.chishenme.app.ui.AppEmptyState
 import com.chishenme.app.ui.AppIcons
+import com.chishenme.app.ui.AppMotion
+import com.chishenme.app.ui.AppSectionHeader
+import com.chishenme.app.ui.AppSnackbarHost
+import com.chishenme.app.ui.AppStatusBanner
+import com.chishenme.app.ui.AppTone
+import com.chishenme.app.ui.AppTopBar
+import com.chishenme.app.ui.currentAppVisualPalette
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -83,7 +93,7 @@ fun RestaurantDetailScreen(
     val context = LocalContext.current
     val actionAvailability = RestaurantActionAvailabilityPolicy.evaluate(result, resultSessionState)
     val resultSessionCurrent = resultSessionState == ResultSessionState.CURRENT
-    val shareScope = rememberCoroutineScope()
+    val uiScope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     var shareInProgress by remember(result.resultToken) { mutableStateOf(false) }
 
@@ -96,39 +106,71 @@ fun RestaurantDetailScreen(
 
     BackHandler(onBack = onBack)
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            TopAppBar(
-                title = { Text("餐厅详情") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回推荐结果")
-                    }
-                },
+            AppTopBar(
+                title = "餐厅详情",
+                subtitle = "信息、操作与私有记录",
+                onBack = onBack,
+                navigationContentDescription = "返回推荐结果",
             )
         },
-        snackbarHost = { SnackbarHost(snackbar) },
+        snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 36.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            contentPadding = PaddingValues(
+                start = AppDimens.ScreenHorizontal,
+                end = AppDimens.ScreenHorizontal,
+                top = AppDimens.ScreenVertical,
+                bottom = 36.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(AppDimens.SectionGap),
         ) {
-            result.imageUrl?.let { imageUrl ->
-                item {
-                    AsyncImage(
-                        model = imageUrl,
-                        contentDescription = "${result.name}图片，来源：${result.sourceAttribution}",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxWidth().height(210.dp),
-                    )
+            item {
+                AppCard(contentPadding = PaddingValues(0.dp)) {
+                    RestaurantHeroImage(result)
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                            AppBadge(
+                                openStatusLabel(result.openStatus),
+                                tone = if (result.openStatus == OpenStatus.OPEN) {
+                                    AppTone.SUCCESS
+                                } else {
+                                    AppTone.NEUTRAL
+                                },
+                            )
+                            result.averageCostYuan?.let {
+                                AppBadge("约 ¥${it.toInt()}/人", tone = AppTone.WARNING)
+                            }
+                        }
+                        Text(
+                            result.name,
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            result.address,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            "数据来源：${result.sourceAttribution}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
             item {
-                Text(result.name, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                Text(result.address, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AppCard {
+                    AppSectionHeader(
+                        title = "到店操作",
+                        subtitle = "仅在当前结果会话和数据授权允许时启用",
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = {
                             if (!actionAvailability.navigate.enabled) {
@@ -141,7 +183,7 @@ fun RestaurantDetailScreen(
                             ) {
                                 onEvent(RecommendationEventType.NAVIGATION)
                             } else {
-                                Toast.makeText(context, "没有可用的地图应用", Toast.LENGTH_SHORT).show()
+                                uiScope.launch { snackbar.showSnackbar("没有可用的地图应用") }
                             }
                         },
                         enabled = actionAvailability.navigate.enabled,
@@ -163,11 +205,9 @@ fun RestaurantDetailScreen(
                                     result,
                                     resultSessionStateProvider,
                                 )
-                                Toast.makeText(
-                                    context,
-                                    if (copied) "地址已复制" else "暂时无法复制地址",
-                                    Toast.LENGTH_SHORT,
-                                ).show()
+                                uiScope.launch {
+                                    snackbar.showSnackbar(if (copied) "地址已复制" else "暂时无法复制地址")
+                                }
                             }
                         },
                         enabled = actionAvailability.copyAddress.enabled,
@@ -179,45 +219,39 @@ fun RestaurantDetailScreen(
                         Spacer(Modifier.width(5.dp))
                         Text("复制地址")
                     }
-                }
-            }
-            item {
-                OutlinedButton(
-                    onClick = {
-                        if (!actionAvailability.call.enabled) {
-                            return@OutlinedButton
-                        } else if (AndroidRestaurantActions.dial(
-                                context,
-                                result,
-                                resultSessionStateProvider,
-                            )
-                        ) {
-                            onEvent(RecommendationEventType.CALL)
-                        } else {
-                            Toast.makeText(context, "没有可用的拨号应用", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    enabled = actionAvailability.call.enabled,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .actionStateDescription(actionAvailability.call, "联系商户"),
-                ) {
-                    Icon(Icons.Rounded.Call, contentDescription = null)
-                    Spacer(Modifier.width(7.dp))
-                    Text("联系商户")
-                }
-            }
-            item {
-                Surface(
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    shape = MaterialTheme.shapes.large,
-                ) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth().padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            if (!actionAvailability.call.enabled) {
+                                return@OutlinedButton
+                            } else if (AndroidRestaurantActions.dial(
+                                    context,
+                                    result,
+                                    resultSessionStateProvider,
+                                )
+                            ) {
+                                onEvent(RecommendationEventType.CALL)
+                            } else {
+                                uiScope.launch { snackbar.showSnackbar("没有可用的拨号应用") }
+                            }
+                        },
+                        enabled = actionAvailability.call.enabled,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .actionStateDescription(actionAvailability.call, "联系商户"),
                     ) {
-                        Text("保存到账号", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Icon(Icons.Rounded.Call, contentDescription = null)
+                        Spacer(Modifier.width(7.dp))
+                        Text("联系商户")
+                    }
+                }
+            }
+            item {
+                AppCard(containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
+                        AppSectionHeader(
+                            title = "保存到账号",
+                            subtitle = "仅保存 App 自有引用，不保存坐标、电话或外部图片",
+                        )
                         Text(
                             "仅在已登录且数据授权允许时保存 App 自有引用；不会保存坐标、电话、外部图片或供应商地点 ID。",
                             style = MaterialTheme.typography.bodySmall,
@@ -249,12 +283,14 @@ fun RestaurantDetailScreen(
                                 Text("前往登录账号")
                             }
                         }
-                    }
                 }
             }
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                    Text("给自己留个反馈", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                AppCard {
+                    AppSectionHeader(
+                        title = "给自己留个反馈",
+                        subtitle = "始终私有，不形成公开评分",
+                    )
                     Text(
                         "反馈始终私有，不形成公开评分。一次点击只记录所选结构化类型。",
                         style = MaterialTheme.typography.bodySmall,
@@ -285,7 +321,12 @@ fun RestaurantDetailScreen(
             val actionMessages = actionAvailability.pageMessages()
             if (actionMessages.isNotEmpty()) {
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    AppCard(containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
+                        Text(
+                            "部分操作暂不可用",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
                         actionMessages.forEach { message ->
                             Text(
                                 message,
@@ -305,7 +346,7 @@ fun RestaurantDetailScreen(
                             }
                             if (shareInProgress) return@OutlinedButton
                             shareInProgress = true
-                            shareScope.launch {
+                            uiScope.launch {
                                 try {
                                     when (AndroidRestaurantActions.share(
                                         context,
@@ -313,16 +354,10 @@ fun RestaurantDetailScreen(
                                         resultSessionStateProvider,
                                     )) {
                                         RestaurantShareOutcome.STARTED -> Unit
-                                        RestaurantShareOutcome.NO_TARGET -> Toast.makeText(
-                                            context,
-                                            "没有可用的分享应用",
-                                            Toast.LENGTH_SHORT,
-                                        ).show()
-                                        RestaurantShareOutcome.GENERATION_FAILED -> Toast.makeText(
-                                            context,
-                                            "暂时无法生成分享卡，请稍后重试",
-                                            Toast.LENGTH_SHORT,
-                                        ).show()
+                                        RestaurantShareOutcome.NO_TARGET ->
+                                            snackbar.showSnackbar("没有可用的分享应用")
+                                        RestaurantShareOutcome.GENERATION_FAILED ->
+                                            snackbar.showSnackbar("暂时无法生成分享卡，请稍后重试")
                                         RestaurantShareOutcome.NOT_ALLOWED -> Unit
                                     }
                                 } finally {
@@ -342,13 +377,16 @@ fun RestaurantDetailScreen(
                 }
             }
             item {
-                HorizontalDivider()
-                Spacer(Modifier.height(10.dp))
-                Text("信息与提醒", style = MaterialTheme.typography.titleMedium)
-                Text("数据来源：${result.sourceAttribution}")
-                Text("数据置信度：${confidenceLabel(result.confidence)}")
-                Text("营业状态：${openStatusLabel(result.openStatus)}")
-                Text(result.averageCostYuan?.let { "参考人均：约 ${it.toInt()} 元" } ?: "参考人均：暂无可靠信息")
+                AppCard {
+                    AppSectionHeader(
+                        title = "信息与提醒",
+                        subtitle = "出发前请再次核实动态信息",
+                    )
+                    Text("数据来源：${result.sourceAttribution}")
+                    Text("数据置信度：${confidenceLabel(result.confidence)}")
+                    Text("营业状态：${openStatusLabel(result.openStatus)}")
+                    Text(result.averageCostYuan?.let { "参考人均：约 ${it.toInt()} 元" } ?: "参考人均：暂无可靠信息")
+                }
             }
             if (result.aiAssisted) {
                 item {
@@ -368,12 +406,23 @@ fun RestaurantDetailScreen(
                 }
             }
             if (result.tags.isNotEmpty()) {
-                item { Text("标签：${result.tags.joinToString(" · ")}") }
+                item {
+                    AppCard {
+                        AppSectionHeader(title = "标签")
+                        Text("标签：${result.tags.joinToString(" · ")}")
+                    }
+                }
             }
             if (result.warnings.isNotEmpty()) {
                 item {
-                    Surface(color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.medium) {
-                        Column(Modifier.padding(14.dp)) {
+                    AppCard(containerColor = MaterialTheme.colorScheme.errorContainer) {
+                        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Text(
+                                "请特别注意",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                            )
                             result.warnings.forEach { warning ->
                                 Text("• $warning", color = MaterialTheme.colorScheme.onErrorContainer)
                             }
@@ -398,24 +447,58 @@ private fun Notice(
     text: String,
     isWarning: Boolean = false,
 ) {
-    val background = if (isWarning) {
-        MaterialTheme.colorScheme.errorContainer
-    } else {
-        MaterialTheme.colorScheme.tertiaryContainer
-    }
-    val foreground = if (isWarning) {
-        MaterialTheme.colorScheme.onErrorContainer
-    } else {
-        MaterialTheme.colorScheme.onTertiaryContainer
-    }
-    Surface(color = background, contentColor = foreground, shape = MaterialTheme.shapes.medium) {
-        Row(
-            modifier = Modifier.padding(14.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.Top,
-        ) {
-            Icon(icon, contentDescription = null)
-            Text(text)
+    AppStatusBanner(
+        title = if (isWarning) "演示数据提醒" else "AI 辅助提醒",
+        body = text,
+        tone = if (isWarning) AppTone.ERROR else AppTone.INFO,
+        icon = icon,
+    )
+}
+
+@Composable
+private fun RestaurantHeroImage(result: RecommendationResult) {
+    val palette = currentAppVisualPalette()
+    var imageLoaded by remember(result.imageUrl) { mutableStateOf(false) }
+    val imageAlpha by animateFloatAsState(
+        targetValue = if (imageLoaded) 1f else 0f,
+        animationSpec = tween(AppMotion.ContentMillis),
+        label = "restaurant detail image",
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(210.dp)
+            .clip(MaterialTheme.shapes.large)
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(palette.accentSoft, palette.blueSoft),
+                ),
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = AppIcons.Restaurant,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.72f),
+            modifier = Modifier.size(52.dp),
+        )
+        result.imageUrl?.let { imageUrl ->
+            AsyncImage(
+                model = imageUrl,
+                contentDescription = if (imageLoaded) {
+                    "${result.name}图片，来源：${result.sourceAttribution}"
+                } else {
+                    null
+                },
+                contentScale = ContentScale.Crop,
+                onLoading = { imageLoaded = false },
+                onSuccess = { imageLoaded = true },
+                onError = { imageLoaded = false },
+                modifier = Modifier
+                    .matchParentSize()
+                    .alpha(imageAlpha),
+            )
         }
     }
 }
@@ -425,40 +508,31 @@ private fun Notice(
 fun DetailSessionExpiredScreen(onBack: () -> Unit) {
     BackHandler(onBack = onBack)
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            TopAppBar(
-                title = { Text("餐厅详情") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回推荐结果")
-                    }
-                },
+            AppTopBar(
+                title = "餐厅详情",
+                subtitle = "当前结果会话",
+                onBack = onBack,
+                navigationContentDescription = "返回推荐结果",
             )
         },
     ) { padding ->
-        Box(
-            modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
-            contentAlignment = Alignment.Center,
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+            contentPadding = PaddingValues(24.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                ) {
-                    Icon(
-                        Icons.Rounded.Warning,
-                        contentDescription = null,
-                        modifier = Modifier.padding(18.dp),
-                    )
-                }
-                Spacer(Modifier.height(16.dp))
-                Text("详情会话已失效", style = MaterialTheme.typography.headlineSmall)
-                Text(
-                    "为避免持久保存第三方餐厅数据，请返回结果页重新打开。",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 8.dp),
+            item {
+                AppEmptyState(
+                    title = "详情会话已失效",
+                    body = "为避免持久保存第三方餐厅数据，请返回结果页重新打开。",
+                    icon = Icons.Rounded.Warning,
+                    action = { TextButton(onClick = onBack) { Text("返回推荐结果") } },
                 )
-                TextButton(onClick = onBack) { Text("返回推荐结果") }
             }
         }
     }

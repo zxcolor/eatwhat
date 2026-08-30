@@ -4,6 +4,6 @@
     android:height="48dp"
     android:viewportWidth="48"
     android:viewportHeight="48">
-    <path android:fillColor="#F36B2B" android:pathData="M24,0a24,24 0,1 0,0 48a24,24 0,1 0,0 -48" />
-    <path android:fillColor="#FFF8F0" android:pathData="M14,10h3v13c0,4 2,6 5,7v7h4v-7c3,-1 5,-3 5,-7V10h3v13c0,6 -3,9 -8,11v6h-4v-6c-5,-2 -8,-5 -8,-11zM20,10h3v12h-3zM26,10h3v12h-3z" />
+    <path android:fillColor="@color/launcher_raspberry" android:pathData="M24,0a24,24 0,1 0,0 48a24,24 0,1 0,0 -48" />
+    <path android:fillColor="@color/launcher_mark" android:pathData="M14,10h3v13c0,4 2,6 5,7v7h4v-7c3,-1 5,-3 5,-7V10h3v13c0,6 -3,9 -8,11v6h-4v-6c-5,-2 -8,-5 -8,-11zM20,10h3v12h-3zM26,10h3v12h-3z" />
 </vector>

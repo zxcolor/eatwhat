@@ -54,8 +54,10 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -63,6 +65,41 @@ import retrofit2.Response
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class SavedResourcesCapabilityRefreshLifecycleTest {
+    @Test
+    fun `collection load failure remains distinct from a real empty page until retry succeeds`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val api = ControlledSavedResourcesApi().apply {
+                nextFavoritesResponse = Response.error(503, "temporarily unavailable".toResponseBody())
+                favoritePages.addLast(FavoritesPage(emptyList(), null))
+            }
+            val viewModel = viewModel(api)
+            runCurrent()
+
+            viewModel.start(enabledConfig())
+            runCurrent()
+
+            val failed = viewModel.state.value
+            assertFalse(failed.busy)
+            assertTrue(failed.favorites.isEmpty())
+            assertFalse(SavedResourcesSection.FAVORITES in failed.loadedSections)
+            assertNotNull(failed.loadFailureMessage)
+
+            viewModel.consumeMessage()
+            assertNotNull(viewModel.state.value.loadFailureMessage)
+
+            viewModel.refresh()
+            runCurrent()
+
+            val recovered = viewModel.state.value
+            assertNull(recovered.loadFailureMessage)
+            assertTrue(SavedResourcesSection.FAVORITES in recovered.loadedSections)
+            assertTrue(recovered.favorites.isEmpty())
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
     @Test
     fun `runtime gate refresh revokes resources and discards a late page`() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
@@ -278,6 +315,7 @@ private class ControlledSavedResourcesApi : SavedResourcesApi {
     var blockNextFavoriteCreate = false
     var listFavoritesCalls = 0
     var createFavoriteCalls = 0
+    var nextFavoritesResponse: Response<FavoritesPage>? = null
     private var favoritesPageContinuation: Continuation<Response<FavoritesPage>>? = null
     private var favoriteCreateContinuation: Continuation<Response<FavoriteRecord>>? = null
 
@@ -288,6 +326,10 @@ private class ControlledSavedResourcesApi : SavedResourcesApi {
         group: FavoriteGroup?,
     ): Response<FavoritesPage> {
         listFavoritesCalls += 1
+        nextFavoritesResponse?.let { response ->
+            nextFavoritesResponse = null
+            return response
+        }
         if (blockNextFavoritesPage) {
             blockNextFavoritesPage = false
             return suspendCoroutine { continuation ->

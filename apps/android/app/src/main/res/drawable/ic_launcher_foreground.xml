@@ -5,9 +5,9 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
     <path
-        android:fillColor="#FFF8F0"
+        android:fillColor="@color/launcher_mark"
         android:pathData="M32,25h6v29c0,7 4,12 11,14v15h10V68c7,-2 11,-7 11,-14V25h6v29c0,10 -6,18 -17,21v14H49V75C38,72 32,64 32,54z" />
     <path
-        android:fillColor="#FFF8F0"
+        android:fillColor="@color/launcher_mark"
         android:pathData="M45,25h6v27h-6zM57,25h6v27h-6z" />
 </vector>
