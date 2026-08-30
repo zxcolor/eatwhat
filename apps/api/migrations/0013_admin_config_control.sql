@@ -629,9 +629,10 @@ BEGIN
     RETURN NEXT;
     RETURN;
   END IF;
-  SELECT * INTO actor_admin
-  FROM public.admin_users
-  WHERE id = actor_session.admin_user_id AND status = 'ACTIVE';
+  SELECT active_admin.* INTO actor_admin
+  FROM public.admin_users AS active_admin
+  WHERE active_admin.id = actor_session.admin_user_id
+    AND active_admin.status = 'ACTIVE';
   IF NOT FOUND THEN
     status := 'UNAUTHORIZED';
     RETURN NEXT;
@@ -794,9 +795,10 @@ BEGIN
     RETURN NEXT;
     RETURN;
   END IF;
-  SELECT * INTO actor_admin
-  FROM public.admin_users
-  WHERE id = actor_session.admin_user_id AND status = 'ACTIVE';
+  SELECT active_admin.* INTO actor_admin
+  FROM public.admin_users AS active_admin
+  WHERE active_admin.id = actor_session.admin_user_id
+    AND active_admin.status = 'ACTIVE';
   IF NOT FOUND THEN
     status := 'UNAUTHORIZED';
     RETURN NEXT;

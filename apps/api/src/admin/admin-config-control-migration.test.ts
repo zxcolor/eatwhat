@@ -38,6 +38,14 @@ describe("administrator configuration control migration", () => {
 		expect(sql).toContain(
 			"COALESCE(MAX(config_version.version)::bigint, 0) + 1",
 		);
+		expect(
+			sql.match(
+				/SELECT active_admin\.\* INTO actor_admin\s+FROM public\.admin_users AS active_admin\s+WHERE active_admin\.id = actor_session\.admin_user_id\s+AND active_admin\.status = 'ACTIVE';/gu,
+			),
+		).toHaveLength(2);
+		expect(sql).not.toMatch(
+			/WHERE id = actor_session\.admin_user_id AND status = 'ACTIVE'/u,
+		);
 	});
 
 	it("fences direct table writes and exposes only controlled functions", async () => {
