@@ -242,6 +242,10 @@ function mealMatchScore(
 	return clamp(4 + (mealTypeMatch ? 6 : 0) + strongestCuisineWeight * 5, 0, 15);
 }
 
+function applyPreference(score: number, preference: number): number {
+	return score * (preference / 100);
+}
+
 function candidateConfidence(
 	candidate: PlaceCandidate,
 ): "LOW" | "MEDIUM" | "HIGH" {
@@ -283,7 +287,9 @@ function candidateReasons(
 	candidate: PlaceCandidate,
 	context: RecommendationContext,
 	intent: IntentProfile,
+	dataRightsMode: DataRightsMode,
 ): RecommendationReason[] {
+	const describesProviderResult = dataRightsMode === "LIVE_DISPLAY_ONLY";
 	const reasons: RecommendationReason[] = [
 		{
 			code: "DISTANCE_FIT",
@@ -302,7 +308,10 @@ function candidateReasons(
 	}
 	const totalMinutes =
 		candidate.estimatedTravelMinutes * 2 + candidate.estimatedMealMinutes;
-	if (totalMinutes <= context.availableMinutes) {
+	if (
+		totalMinutes <= context.availableMinutes &&
+		(describesProviderResult || context.preferenceVector.time > 0)
+	) {
 		reasons.push({
 			code: "TIME_FIT",
 			text: `预计往返加用餐约 ${totalMinutes} 分钟，符合 ${context.availableMinutes} 分钟时间预算`,
@@ -311,13 +320,21 @@ function candidateReasons(
 	const intentMatch = intent.mealTypes.find((type) =>
 		candidate.tags.some((tag) => normalize(tag) === normalize(type)),
 	);
-	if (intentMatch !== undefined && reasons.length < 3) {
+	if (
+		intentMatch !== undefined &&
+		reasons.length < 3 &&
+		(describesProviderResult || context.preferenceVector.mealMatch > 0)
+	) {
 		reasons.push({
 			code: "MEAL_FIT",
 			text: `餐厅标签包含“${intentMatch}”，符合本次用餐方向`,
 		});
 	}
-	if (candidate.sourceRating !== null && reasons.length < 3) {
+	if (
+		candidate.sourceRating !== null &&
+		reasons.length < 3 &&
+		(describesProviderResult || context.preferenceVector.quality > 0)
+	) {
 		reasons.push({
 			code: "QUALITY_SIGNAL",
 			text: `数据源评分 ${candidate.sourceRating.toFixed(1)} 分，仅作为质量参考`,
@@ -333,19 +350,28 @@ function scoreCandidate(
 	const isRecent =
 		input.recentPlaceIds?.has(candidate.providerPlaceId) ?? false;
 	const diversity = isRecent ? 2 : 10;
+	const preferences = input.context.preferenceVector;
 	const rawScore =
-		qualityScore(candidate) +
-		timeScore(candidate, input.context) +
-		budgetScore(candidate, input.context) +
-		mealMatchScore(candidate, input.intent) +
-		diversity +
+		applyPreference(qualityScore(candidate), preferences.quality) +
+		applyPreference(timeScore(candidate, input.context), preferences.time) +
+		applyPreference(budgetScore(candidate, input.context), preferences.budget) +
+		applyPreference(
+			mealMatchScore(candidate, input.intent),
+			preferences.mealMatch,
+		) +
+		applyPreference(diversity, preferences.diversity) +
 		candidate.editorialAdjustment;
 	return {
 		candidate,
 		fitScore: Math.round(clamp(rawScore, 0, 100)),
 		confidence: candidateConfidence(candidate),
 		warnings: candidateWarnings(candidate, input.context),
-		reasons: candidateReasons(candidate, input.context, input.intent),
+		reasons: candidateReasons(
+			candidate,
+			input.context,
+			input.intent,
+			input.dataRightsMode,
+		),
 	};
 }
 
@@ -355,13 +381,21 @@ function primaryTag(candidate: PlaceCandidate): string {
 
 function selectLicensedResults(
 	scored: readonly ScoredCandidate[],
-	explorationMode: RecommendationContext["explorationMode"],
+	context: RecommendationContext,
 ): ScoredCandidate[] {
 	const remaining = [...scored];
 	const selected: ScoredCandidate[] = [];
 	const usedTags = new Set<string>();
-	const duplicateTagPenalty =
-		explorationMode === "SAFE" ? 2 : explorationMode === "BALANCED" ? 7 : 12;
+	const baseDuplicateTagPenalty =
+		context.explorationMode === "SAFE"
+			? 2
+			: context.explorationMode === "BALANCED"
+				? 7
+				: 12;
+	const duplicateTagPenalty = applyPreference(
+		baseDuplicateTagPenalty,
+		context.preferenceVector.diversity,
+	);
 
 	while (remaining.length > 0 && selected.length < 3) {
 		remaining.sort((a, b) => {
@@ -392,7 +426,7 @@ export function rankCandidates(
 		input.dataRightsMode === "LICENSED_ENRICHMENT"
 			? selectLicensedResults(
 					filtered.map((candidate) => scoreCandidate(candidate, input)),
-					input.context.explorationMode,
+					input.context,
 				)
 			: filtered
 					.sort((a, b) => a.providerRank - b.providerRank)
@@ -404,7 +438,12 @@ export function rankCandidates(
 						fitScore: 0,
 						confidence: candidateConfidence(candidate),
 						warnings: candidateWarnings(candidate, input.context),
-						reasons: candidateReasons(candidate, input.context, input.intent),
+						reasons: candidateReasons(
+							candidate,
+							input.context,
+							input.intent,
+							input.dataRightsMode,
+						),
 					}));
 
 	return selected.map(

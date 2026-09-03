@@ -153,6 +153,45 @@ describe("rankCandidates", () => {
 		expect(results.every((result) => result.fitScore === null)).toBe(true);
 	});
 
+	it("ignores preference weights in live-display-only mode", () => {
+		const candidates = [
+			candidate({
+				providerPlaceId: "provider-first",
+				providerRank: 1,
+				sourceRating: 1,
+				estimatedTravelMinutes: 30,
+			}),
+			candidate({
+				providerPlaceId: "provider-second",
+				providerRank: 2,
+				sourceRating: 5,
+				estimatedTravelMinutes: 1,
+				name: "高分近距离测试面馆",
+				location: { latitude: 39.994, longitude: 116.316, crs: "WGS84" },
+			}),
+		];
+		const results = rankCandidates({
+			context: context({
+				preferenceVector: {
+					quality: 0,
+					time: 0,
+					budget: 0,
+					mealMatch: 0,
+					diversity: 0,
+				},
+			}),
+			intent: intent(),
+			dataRightsMode: "LIVE_DISPLAY_ONLY",
+			candidates,
+		});
+
+		expect(results.map((result) => result.providerPlaceId)).toEqual([
+			"provider-first",
+			"provider-second",
+		]);
+		expect(results.map((result) => result.fitScore)).toEqual([null, null]);
+	});
+
 	it("sorts by transparent suitability only when licensed", () => {
 		const results = rankCandidates({
 			context: context(),
@@ -173,6 +212,150 @@ describe("rankCandidates", () => {
 		expect(results[0]?.fitScore).toBeTypeOf("number");
 	});
 
+	it("keeps the established licensed score when preferences are omitted", () => {
+		const [result] = rankCandidates({
+			context: context(),
+			intent: intent(),
+			dataRightsMode: "LICENSED_ENRICHMENT",
+			candidates: [candidate()],
+		});
+
+		expect(result?.fitScore).toBe(93);
+	});
+
+	it("applies user preference weights to licensed transparent ranking", () => {
+		const candidates = [
+			candidate({
+				providerPlaceId: "quality",
+				providerRank: 1,
+				sourceRating: 5,
+				estimatedTravelMinutes: 20,
+				estimatedMealMinutes: 50,
+			}),
+			candidate({
+				providerPlaceId: "time",
+				providerRank: 2,
+				sourceRating: 2,
+				estimatedTravelMinutes: 2,
+				estimatedMealMinutes: 20,
+				name: "快速测试面馆",
+				location: { latitude: 39.994, longitude: 116.316, crs: "WGS84" },
+			}),
+		];
+		const rankWith = (quality: number, time: number) =>
+			rankCandidates({
+				context: context({
+					preferenceVector: {
+						quality,
+						time,
+						budget: 0,
+						mealMatch: 0,
+						diversity: 0,
+					},
+				}),
+				intent: intent(),
+				dataRightsMode: "LICENSED_ENRICHMENT",
+				candidates,
+			});
+
+		expect(rankWith(100, 0)[0]?.providerPlaceId).toBe("quality");
+		expect(rankWith(0, 100)[0]?.providerPlaceId).toBe("time");
+	});
+
+	it("does not describe zero-weight licensed dimensions as ranking reasons", () => {
+		const [result] = rankCandidates({
+			context: context({
+				budgetMaxYuan: null,
+				preferenceVector: {
+					quality: 0,
+					time: 0,
+					budget: 0,
+					mealMatch: 0,
+					diversity: 0,
+				},
+			}),
+			intent: intent(),
+			dataRightsMode: "LICENSED_ENRICHMENT",
+			candidates: [candidate()],
+		});
+
+		expect(result?.reasons.map((reason) => reason.code)).toEqual([
+			"DISTANCE_FIT",
+		]);
+	});
+
+	it("keeps descriptive provider facts in live mode when weights are zero", () => {
+		const [result] = rankCandidates({
+			context: context({
+				budgetMaxYuan: null,
+				preferenceVector: {
+					quality: 0,
+					time: 0,
+					budget: 0,
+					mealMatch: 0,
+					diversity: 0,
+				},
+			}),
+			intent: intent(),
+			dataRightsMode: "LIVE_DISPLAY_ONLY",
+			candidates: [candidate()],
+		});
+
+		expect(result?.fitScore).toBeNull();
+		expect(result?.reasons.map((reason) => reason.code)).toEqual([
+			"DISTANCE_FIT",
+			"TIME_FIT",
+			"MEAL_FIT",
+		]);
+	});
+
+	it("uses the diversity preference for licensed duplicate-tag selection", () => {
+		const candidates = [
+			candidate({ providerPlaceId: "best", providerRank: 1, sourceRating: 5 }),
+			candidate({
+				providerPlaceId: "same-tag",
+				providerRank: 2,
+				sourceRating: 4.8,
+				name: "另一家测试面馆",
+				location: { latitude: 39.994, longitude: 116.316, crs: "WGS84" },
+			}),
+			candidate({
+				providerPlaceId: "different-tag",
+				providerRank: 3,
+				sourceRating: 4.1,
+				name: "测试盖饭",
+				tags: ["米饭", "快餐"],
+				location: { latitude: 39.995, longitude: 116.317, crs: "WGS84" },
+			}),
+		];
+		const rankWith = (diversity: number) =>
+			rankCandidates({
+				context: context({
+					preferenceVector: {
+						quality: 100,
+						time: 0,
+						budget: 0,
+						mealMatch: 0,
+						diversity,
+					},
+				}),
+				intent: intent(),
+				dataRightsMode: "LICENSED_ENRICHMENT",
+				candidates,
+			});
+
+		expect(rankWith(100).map((result) => result.providerPlaceId)).toEqual([
+			"best",
+			"different-tag",
+			"same-tag",
+		]);
+		expect(rankWith(0).map((result) => result.providerPlaceId)).toEqual([
+			"best",
+			"same-tag",
+			"different-tag",
+		]);
+	});
+
 	it.each([
 		["closed", { openStatus: "CLOSED" as const }],
 		["blocked", { blocked: true }],
@@ -182,7 +365,16 @@ describe("rankCandidates", () => {
 		["hierarchical excluded cuisine", { tags: ["重庆火锅"] }],
 	])("hard-filters %s candidates", (_label, overrides) => {
 		const results = rankCandidates({
-			context: context({ excludedCuisines: ["火锅"] }),
+			context: context({
+				excludedCuisines: ["火锅"],
+				preferenceVector: {
+					quality: 0,
+					time: 0,
+					budget: 0,
+					mealMatch: 0,
+					diversity: 0,
+				},
+			}),
 			intent: intent(),
 			dataRightsMode: "LICENSED_ENRICHMENT",
 			candidates: [candidate(overrides)],

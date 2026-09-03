@@ -74,6 +74,32 @@ export const CoordinateSchema = z.object({
 });
 export type Coordinate = z.infer<typeof CoordinateSchema>;
 
+/**
+ * User-controlled multipliers for the existing transparent suitability score.
+ * A value of 100 keeps the established contribution unchanged; 0 ignores that
+ * soft-score dimension. Hard filters are never affected by these preferences.
+ */
+export const DEFAULT_RECOMMENDATION_PREFERENCE_VECTOR = Object.freeze({
+	quality: 100,
+	time: 100,
+	budget: 100,
+	mealMatch: 100,
+	diversity: 100,
+});
+
+export const RecommendationPreferenceVectorSchema = z
+	.object({
+		quality: z.number().int().min(0).max(100),
+		time: z.number().int().min(0).max(100),
+		budget: z.number().int().min(0).max(100),
+		mealMatch: z.number().int().min(0).max(100),
+		diversity: z.number().int().min(0).max(100),
+	})
+	.strict();
+export type RecommendationPreferenceVector = z.infer<
+	typeof RecommendationPreferenceVectorSchema
+>;
+
 export const RecommendationContextSchema = z.object({
 	location: CoordinateSchema,
 	locationLabel: z.string().trim().min(1).max(80).optional(),
@@ -94,6 +120,9 @@ export const RecommendationContextSchema = z.object({
 	partySize: z.number().int().min(1).max(30).default(1),
 	excludedCuisines: z.array(CuisinePreferenceSchema).max(20).default([]),
 	preferredCuisines: z.array(CuisinePreferenceSchema).max(20).default([]),
+	preferenceVector: RecommendationPreferenceVectorSchema.default(() => ({
+		...DEFAULT_RECOMMENDATION_PREFERENCE_VECTOR,
+	})),
 	requestTime: z.iso.datetime().optional(),
 });
 export type RecommendationContext = z.infer<typeof RecommendationContextSchema>;

@@ -727,7 +727,7 @@
 				"operationId": "listRecommendationHistory",
 				"tags": ["Saved recommendations"],
 				"summary": "分页读取 90 天推荐操作历史",
-				"description": "仅表达推荐展示、详情查看、收藏、打开导航、打开拨号器与换一批等 App 操作，不表示用户到店或实际用餐。原始历史在 occurredAt 后恰好 90 天到期；分页默认 20、最多 50 条。",
+				"description": "仅表达推荐展示、详情查看、收藏、打开导航、打开拨号器与按相同条件重新请求等 App 操作，不表示结果一定变化，也不表示用户到店或实际用餐。原始历史在 occurredAt 后恰好 90 天到期；分页默认 20、最多 50 条。",
 				"security": [{ "BearerAuth": [] }],
 				"parameters": [
 					{ "$ref": "#/components/parameters/RequestCorrelationId" },
@@ -1759,6 +1759,46 @@
 						"items": {
 							"$ref": "#/components/schemas/CuisinePreference"
 						}
+					},
+					"preferenceVector": {
+						"default": {
+							"quality": 100,
+							"time": 100,
+							"budget": 100,
+							"mealMatch": 100,
+							"diversity": 100
+						},
+						"type": "object",
+						"description": "用户控制的透明软评分权重。100 保持既有贡献，0 忽略该维度；停业、距离、预算上限和排除菜系等硬过滤不受影响。LIVE_DISPLAY_ONLY 模式接收但不使用这些值重排。",
+						"properties": {
+							"quality": {
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 100
+							},
+							"time": {
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 100
+							},
+							"budget": {
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 100
+							},
+							"mealMatch": {
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 100
+							},
+							"diversity": {
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 100
+							}
+						},
+						"required": ["quality", "time", "budget", "mealMatch", "diversity"],
+						"additionalProperties": false
 					},
 					"requestTime": {
 						"$ref": "#/components/schemas/UtcDateTime",

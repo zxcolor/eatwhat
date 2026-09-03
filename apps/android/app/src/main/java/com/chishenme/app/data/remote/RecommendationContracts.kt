@@ -58,6 +58,30 @@ data class Coordinate(
     val crs: CoordinateReferenceSystem,
 )
 
+/**
+ * Local user controls for the existing transparent score dimensions.
+ * Values are percentages: 100 preserves the established contribution and 0
+ * ignores that soft-score dimension. They never weaken hard safety filters.
+ */
+@Serializable
+data class RecommendationPreferenceVector(
+    val quality: Int = 100,
+    val time: Int = 100,
+    val budget: Int = 100,
+    val mealMatch: Int = 100,
+    val diversity: Int = 100,
+) {
+    init {
+        require(listOf(quality, time, budget, mealMatch, diversity).all { it in 0..100 }) {
+            "Recommendation preference weights must be between 0 and 100"
+        }
+    }
+
+    companion object {
+        val Default = RecommendationPreferenceVector()
+    }
+}
+
 @Serializable
 data class RecommendationContext(
     val location: Coordinate,
@@ -73,6 +97,7 @@ data class RecommendationContext(
     val partySize: Int = 1,
     val excludedCuisines: List<String> = emptyList(),
     val preferredCuisines: List<String> = emptyList(),
+    val preferenceVector: RecommendationPreferenceVector = RecommendationPreferenceVector.Default,
     val requestTime: String? = null,
 )
 

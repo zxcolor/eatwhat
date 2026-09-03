@@ -28,10 +28,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,6 +49,7 @@ import com.chishenme.app.data.local.DecisionHistoryEntry
 import com.chishenme.app.data.local.ThemePreference
 import com.chishenme.app.data.remote.DecisionMode
 import com.chishenme.app.data.remote.MealPeriod
+import com.chishenme.app.data.remote.RecommendationPreferenceVector
 import com.chishenme.app.data.remote.TravelMode
 import com.chishenme.app.domain.AppVersionPolicy
 import com.chishenme.app.domain.AppVersionStatus
@@ -62,6 +65,7 @@ import com.chishenme.app.ui.AppTopBar
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlin.math.roundToInt
 
 private enum class SettingsDocument { PRIVACY, DATA_SOURCES, ALGORITHM, SDK, HELP, CHANGELOG, VERSION }
 
@@ -71,8 +75,14 @@ fun SettingsScreen(
     aiEnabled: Boolean,
     aiServiceAvailable: Boolean,
     theme: ThemePreference,
+    preferenceVector: RecommendationPreferenceVector,
+    preferenceVectorStored: Boolean,
+    preferenceVectorCanAffectRanking: Boolean,
     onAiEnabledChange: (Boolean) -> Unit,
     onThemeChange: (ThemePreference) -> Unit,
+    onPreferenceVectorChange: (RecommendationPreferenceVector) -> Unit,
+    onResetPreferenceVector: () -> Unit,
+    onClearPreferenceVector: () -> Unit,
     onBack: () -> Unit,
     onWithdrawPrivacy: () -> Unit,
     decisionHistory: List<DecisionHistoryEntry>,
@@ -197,6 +207,16 @@ fun SettingsScreen(
             }
 
             item { SettingsHeader("推荐透明度") }
+            item {
+                PreferenceVectorCard(
+                    vector = preferenceVector,
+                    stored = preferenceVectorStored,
+                    canAffectRanking = preferenceVectorCanAffectRanking,
+                    onChange = onPreferenceVectorChange,
+                    onReset = onResetPreferenceVector,
+                    onClear = onClearPreferenceVector,
+                )
+            }
             item {
                 SettingsCard(
                     icon = { Icon(Icons.Rounded.Info, null) },
@@ -333,7 +353,7 @@ fun SettingsScreen(
         AppDialog(
             onDismissRequest = { confirmWithdraw = false },
             title = { Text("撤回隐私同意？") },
-            text = { Text("撤回后立即回到首次隐私页面，推荐网络层将不再被界面调用，本机最近决策会清空；主题偏好会保留。") },
+            text = { Text("撤回后立即回到首次隐私页面，推荐网络层将不再被界面调用，本机最近决策与推荐偏好会清空；主题偏好会保留。") },
             confirmButton = {
                 TextButton(onClick = {
                     confirmWithdraw = false
@@ -341,6 +361,172 @@ fun SettingsScreen(
                 }) { Text("确认撤回", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = { TextButton(onClick = { confirmWithdraw = false }) { Text("取消") } },
+        )
+    }
+}
+
+@Composable
+private fun PreferenceVectorCard(
+    vector: RecommendationPreferenceVector,
+    stored: Boolean,
+    canAffectRanking: Boolean,
+    onChange: (RecommendationPreferenceVector) -> Unit,
+    onReset: () -> Unit,
+    onClear: () -> Unit,
+) {
+    var draft by remember { mutableStateOf(PreferenceVectorDraftState(vector)) }
+    LaunchedEffect(vector, stored) {
+        draft = draft.synchronize(persisted = vector, stored = stored)
+    }
+    AppCard(contentPadding = PaddingValues(0.dp)) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                androidx.compose.material3.Surface(
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(42.dp),
+                ) {
+                    androidx.compose.foundation.layout.Box(contentAlignment = Alignment.Center) {
+                        Icon(AppIcons.Tune, contentDescription = null)
+                    }
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("可控偏好向量", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        if (canAffectRanking) {
+                            "仅调节经授权透明评分；不会改变停业、距离、预算和排除菜系等硬规则。"
+                        } else {
+                            "当前实时展示模式不会使用这些数值重排，也不会生成自有适合度。"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        if (stored) "存在本机设置" else "当前使用应用默认值",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+
+            Text(
+                "100% 保持既有权重，0% 表示该软评分维度不参与；只随单次推荐请求发送五个数值，不保存位置、餐厅或跨请求标识。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            PreferenceWeightControl(
+                label = "质量信号",
+                value = draft.value.quality,
+                onValueChange = { draft = draft.edit(draft.value.copy(quality = it)) },
+                onValueChangeFinished = {
+                    val committed = draft.expectStored()
+                    draft = committed
+                    onChange(committed.value)
+                },
+            )
+            PreferenceWeightControl(
+                label = "时间匹配",
+                value = draft.value.time,
+                onValueChange = { draft = draft.edit(draft.value.copy(time = it)) },
+                onValueChangeFinished = {
+                    val committed = draft.expectStored()
+                    draft = committed
+                    onChange(committed.value)
+                },
+            )
+            PreferenceWeightControl(
+                label = "预算匹配",
+                value = draft.value.budget,
+                onValueChange = { draft = draft.edit(draft.value.copy(budget = it)) },
+                onValueChangeFinished = {
+                    val committed = draft.expectStored()
+                    draft = committed
+                    onChange(committed.value)
+                },
+            )
+            PreferenceWeightControl(
+                label = "餐段与偏好匹配",
+                value = draft.value.mealMatch,
+                onValueChange = { draft = draft.edit(draft.value.copy(mealMatch = it)) },
+                onValueChangeFinished = {
+                    val committed = draft.expectStored()
+                    draft = committed
+                    onChange(committed.value)
+                },
+            )
+            PreferenceWeightControl(
+                label = "结果多样性",
+                value = draft.value.diversity,
+                onValueChange = { draft = draft.edit(draft.value.copy(diversity = it)) },
+                onValueChangeFinished = {
+                    val committed = draft.expectStored()
+                    draft = committed
+                    onChange(committed.value)
+                },
+            )
+
+            Row(
+                modifier = Modifier.align(Alignment.End),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(
+                    onClick = {
+                        draft = draft
+                            .edit(RecommendationPreferenceVector.Default)
+                            .expectStored()
+                        onReset()
+                    },
+                    enabled = draft.value != RecommendationPreferenceVector.Default,
+                ) { Text("恢复默认") }
+                TextButton(
+                    onClick = {
+                        draft = draft.expectCleared()
+                        onClear()
+                    },
+                    enabled = stored,
+                ) { Text("清除本机偏好") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PreferenceWeightControl(
+    label: String,
+    value: Int,
+    onValueChange: (Int) -> Unit,
+    onValueChangeFinished: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "$value%",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        Slider(
+            value = value.toFloat(),
+            onValueChange = { onValueChange(it.roundToInt().coerceIn(0, 100)) },
+            onValueChangeFinished = onValueChangeFinished,
+            valueRange = 0f..100f,
+            steps = 19,
+            modifier = Modifier.fillMaxWidth().semantics {
+                contentDescription = "$label 权重 $value%"
+            },
         )
     }
 }

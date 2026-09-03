@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">吃什么</string>
+    <string name="widget_decision_name">吃什么：开始决定</string>
+    <string name="widget_decision_description">从桌面快速打开吃什么，开始一次新的用餐决定</string>
+    <string name="widget_decision_action">开始决定</string>
 </resources>

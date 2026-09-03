@@ -5,11 +5,13 @@ import com.chishenme.app.data.remote.CoordinateReferenceSystem
 import com.chishenme.app.data.remote.DecisionMode
 import com.chishenme.app.data.remote.ExplorationMode
 import com.chishenme.app.data.remote.MealPeriod
+import com.chishenme.app.data.remote.RecommendationPreferenceVector
 import com.chishenme.app.data.remote.TravelMode
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -59,6 +61,33 @@ class DecisionInputTest {
         val request = RecommendationRequestFactory().create(validInput)
 
         assertEquals(false, request.aiAssistanceEnabled)
+        assertEquals(RecommendationPreferenceVector.Default, request.preferenceVector)
+    }
+
+    @Test
+    fun `request factory sends only the current bounded preference vector`() {
+        val preferences = RecommendationPreferenceVector(
+            quality = 80,
+            time = 95,
+            budget = 60,
+            mealMatch = 75,
+            diversity = 30,
+        )
+
+        val request = RecommendationRequestFactory().create(
+            validInput,
+            aiAssistanceEnabled = false,
+            preferenceVector = preferences,
+        )
+
+        assertEquals(preferences, request.preferenceVector)
+    }
+
+    @Test
+    fun `preference vector rejects out of range weights before serialization`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            RecommendationPreferenceVector(quality = 101)
+        }
     }
 
     @Test

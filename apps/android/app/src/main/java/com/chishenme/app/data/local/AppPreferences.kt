@@ -4,7 +4,9 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.chishenme.app.data.remote.RecommendationPreferenceVector
 import java.io.IOException
 import java.time.Instant
 import javax.inject.Inject
@@ -45,6 +47,13 @@ class AppPreferences @Inject constructor(
             ?: ThemePreference.SYSTEM
     }
 
+    val recommendationPreferenceVector: Flow<RecommendationPreferenceVector> =
+        safeData.map { preferences -> readRecommendationPreferenceVector(preferences) }
+
+    val recommendationPreferenceVectorStored: Flow<Boolean> = safeData.map { preferences ->
+        RecommendationPreferenceKeys.any { key -> preferences[key] != null }
+    }
+
     suspend fun setPrivacyAccepted(accepted: Boolean) {
         dataStore.edit { preferences ->
             preferences[PrivacyAccepted] = accepted
@@ -57,6 +66,7 @@ class AppPreferences @Inject constructor(
             } else {
                 preferences[ConsentWithdrawnAt] = Instant.now().toString()
                 preferences.remove(DecisionHistoryJson)
+                RecommendationPreferenceKeys.forEach(preferences::remove)
                 AuthPreferenceKeys.sessionKeys.forEach(preferences::remove)
                 preferences.remove(AuthPreferenceKeys.InstallationId)
             }
@@ -69,6 +79,26 @@ class AppPreferences @Inject constructor(
 
     suspend fun setThemePreference(theme: ThemePreference) {
         dataStore.edit { it[ThemeMode] = theme.name }
+    }
+
+    suspend fun setRecommendationPreferenceVector(vector: RecommendationPreferenceVector) {
+        dataStore.edit { preferences ->
+            preferences[RecommendationQualityPreference] = vector.quality
+            preferences[RecommendationTimePreference] = vector.time
+            preferences[RecommendationBudgetPreference] = vector.budget
+            preferences[RecommendationMealMatchPreference] = vector.mealMatch
+            preferences[RecommendationDiversityPreference] = vector.diversity
+        }
+    }
+
+    suspend fun resetRecommendationPreferenceVector() {
+        setRecommendationPreferenceVector(RecommendationPreferenceVector.Default)
+    }
+
+    suspend fun clearRecommendationPreferenceVector() {
+        dataStore.edit { preferences ->
+            RecommendationPreferenceKeys.forEach(preferences::remove)
+        }
     }
 
     private val safeData: Flow<Preferences>
@@ -86,5 +116,33 @@ class AppPreferences @Inject constructor(
         val ConsentWithdrawnAt = stringPreferencesKey("consent_withdrawn_at")
         val AiAssistanceEnabled = booleanPreferencesKey("ai_assistance_enabled")
         val ThemeMode = stringPreferencesKey("theme_mode")
+        val RecommendationQualityPreference = intPreferencesKey("recommendation_preference_quality_v1")
+        val RecommendationTimePreference = intPreferencesKey("recommendation_preference_time_v1")
+        val RecommendationBudgetPreference = intPreferencesKey("recommendation_preference_budget_v1")
+        val RecommendationMealMatchPreference = intPreferencesKey("recommendation_preference_meal_match_v1")
+        val RecommendationDiversityPreference = intPreferencesKey("recommendation_preference_diversity_v1")
+        val RecommendationPreferenceKeys = listOf(
+            RecommendationQualityPreference,
+            RecommendationTimePreference,
+            RecommendationBudgetPreference,
+            RecommendationMealMatchPreference,
+            RecommendationDiversityPreference,
+        )
+
+        fun readRecommendationPreferenceVector(preferences: Preferences): RecommendationPreferenceVector {
+            val defaults = RecommendationPreferenceVector.Default
+            return RecommendationPreferenceVector(
+                quality = preferences[RecommendationQualityPreference]
+                    ?.takeIf { it in 0..100 } ?: defaults.quality,
+                time = preferences[RecommendationTimePreference]
+                    ?.takeIf { it in 0..100 } ?: defaults.time,
+                budget = preferences[RecommendationBudgetPreference]
+                    ?.takeIf { it in 0..100 } ?: defaults.budget,
+                mealMatch = preferences[RecommendationMealMatchPreference]
+                    ?.takeIf { it in 0..100 } ?: defaults.mealMatch,
+                diversity = preferences[RecommendationDiversityPreference]
+                    ?.takeIf { it in 0..100 } ?: defaults.diversity,
+            )
+        }
     }
 }

@@ -124,7 +124,12 @@ internal fun recommendationResultsAccessPolicy(
 }
 
 internal const val GUEST_RULES_ONLY_NOTICE =
-    "远程配置暂不可用：本次仅展示不含 AI 的规则推荐。为保护数据，餐厅详情、导航、电话、复制地址及推荐事件均已关闭；“换一批”仍可使用。"
+    "远程配置暂不可用：本次仅展示不含 AI 的规则推荐。为保护数据，餐厅详情、导航、电话、复制地址及推荐事件均已关闭；仍可按相同条件重新请求，结果可能相同。"
+
+internal const val SAME_CONDITIONS_RETRY_DESCRIPTION =
+    "按相同条件重新请求，结果可能相同。"
+internal const val SAME_CONDITIONS_RETRY_ACTION = "按相同条件重新请求"
+internal const val ADJUST_CONDITIONS_ACTION = "返回调整条件"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -174,6 +179,7 @@ fun ResultsScreen(
                     accessPolicy = accessPolicy,
                     onWhy = { showWhy = true },
                     onReroll = onReroll,
+                    onAdjustConditions = onBack,
                     onSelect = onOpenDetail,
                     modifier = Modifier.padding(padding),
                 )
@@ -279,7 +285,7 @@ private fun ErrorContent(
             title = "这次没决定出来",
             body = message,
             modifier = Modifier.semantics {
-                liveRegion = LiveRegionMode.Polite
+                liveRegion = LiveRegionMode.Assertive
                 stateDescription = "推荐失败：$message"
             },
             icon = Icons.Rounded.Warning,
@@ -294,7 +300,7 @@ private fun ErrorContent(
                     icon = Icons.Rounded.Refresh,
                     onClick = onRetry,
                 )
-                TextButton(onClick = onBack) { Text("返回调整条件") }
+                TextButton(onClick = onBack) { Text(ADJUST_CONDITIONS_ACTION) }
             }
         }
     }
@@ -307,6 +313,7 @@ private fun ReadyContent(
     accessPolicy: RecommendationResultsAccessPolicy,
     onWhy: () -> Unit,
     onReroll: () -> Unit,
+    onAdjustConditions: () -> Unit,
     onSelect: (RecommendationResult) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -329,7 +336,22 @@ private fun ReadyContent(
                 },
                 icon = Icons.Rounded.LocationOn,
             ) {
-                OutlinedButton(onClick = onReroll) { Text("再试一次") }
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = SAME_CONDITIONS_RETRY_DESCRIPTION,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedButton(onClick = onReroll) {
+                        Text(SAME_CONDITIONS_RETRY_ACTION)
+                    }
+                    TextButton(onClick = onAdjustConditions) {
+                        Text(ADJUST_CONDITIONS_ACTION)
+                    }
+                }
             }
         }
         return
@@ -495,13 +517,19 @@ private fun ReadyContent(
             AppCard {
                 AppSectionHeader(
                     title = "还想看看别的？",
-                    subtitle = "换一批会重新请求；近期反重复由服务端规则统一处理。",
+                    subtitle = SAME_CONDITIONS_RETRY_DESCRIPTION,
                 )
                 AppPrimaryButton(
-                    text = "换一批",
+                    text = SAME_CONDITIONS_RETRY_ACTION,
                     icon = Icons.Rounded.Refresh,
                     onClick = onReroll,
                 )
+                TextButton(
+                    onClick = onAdjustConditions,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(ADJUST_CONDITIONS_ACTION)
+                }
             }
             Spacer(Modifier.height(12.dp))
         }

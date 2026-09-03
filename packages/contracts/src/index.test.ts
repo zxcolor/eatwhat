@@ -127,6 +127,52 @@ describe("Recommendation contracts", () => {
 		if (result.success) {
 			expect(result.data.aiAssistanceEnabled).toBe(true);
 			expect(result.data.location.crs).toBe("WGS84");
+			expect(result.data.preferenceVector).toEqual({
+				quality: 100,
+				time: 100,
+				budget: 100,
+				mealMatch: 100,
+				diversity: 100,
+			});
+		}
+	});
+
+	it("accepts only a complete bounded preference vector", () => {
+		const request = {
+			location: { latitude: 39.9928, longitude: 116.3109 },
+			mealPeriod: "LUNCH",
+			radiusMeters: 1_500,
+		};
+		expect(
+			RecommendationContextSchema.safeParse({
+				...request,
+				preferenceVector: {
+					quality: 80,
+					time: 100,
+					budget: 55,
+					mealMatch: 70,
+					diversity: 25,
+				},
+			}).success,
+		).toBe(true);
+		for (const preferenceVector of [
+			{ quality: -1, time: 100, budget: 100, mealMatch: 100, diversity: 100 },
+			{ quality: 100, time: 101, budget: 100, mealMatch: 100, diversity: 100 },
+			{ quality: 100, time: 100, budget: 2.5, mealMatch: 100, diversity: 100 },
+			{ quality: 100, time: 100, budget: 100, mealMatch: 100 },
+			{
+				quality: 100,
+				time: 100,
+				budget: 100,
+				mealMatch: 100,
+				diversity: 100,
+				locationHistory: true,
+			},
+		]) {
+			expect(
+				RecommendationContextSchema.safeParse({ ...request, preferenceVector })
+					.success,
+			).toBe(false);
 		}
 	});
 

@@ -4,8 +4,10 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.mutablePreferencesOf
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.chishenme.app.data.remote.RecommendationPreferenceVector
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -47,6 +49,54 @@ class AppPreferencesTest {
     }
 
     @Test
+    fun `recommendation preferences default locally and can be stored and cleared`() = runTest {
+        val preferences = AppPreferences(InMemoryPreferencesDataStore())
+        val customized = RecommendationPreferenceVector(
+            quality = 85,
+            time = 100,
+            budget = 45,
+            mealMatch = 70,
+            diversity = 20,
+        )
+
+        assertEquals(RecommendationPreferenceVector.Default, preferences.recommendationPreferenceVector.first())
+        assertFalse(preferences.recommendationPreferenceVectorStored.first())
+
+        preferences.setRecommendationPreferenceVector(customized)
+
+        assertEquals(customized, preferences.recommendationPreferenceVector.first())
+        assertTrue(preferences.recommendationPreferenceVectorStored.first())
+
+        preferences.resetRecommendationPreferenceVector()
+
+        assertEquals(RecommendationPreferenceVector.Default, preferences.recommendationPreferenceVector.first())
+        assertTrue(preferences.recommendationPreferenceVectorStored.first())
+
+        preferences.setRecommendationPreferenceVector(customized)
+
+        preferences.clearRecommendationPreferenceVector()
+
+        assertEquals(RecommendationPreferenceVector.Default, preferences.recommendationPreferenceVector.first())
+        assertFalse(preferences.recommendationPreferenceVectorStored.first())
+    }
+
+    @Test
+    fun `corrupt stored recommendation weights fail back to safe defaults per dimension`() = runTest {
+        val store = InMemoryPreferencesDataStore(
+            mutablePreferencesOf(
+                intPreferencesKey("recommendation_preference_quality_v1") to 101,
+                intPreferencesKey("recommendation_preference_time_v1") to -1,
+                intPreferencesKey("recommendation_preference_budget_v1") to 40,
+            ),
+        )
+
+        assertEquals(
+            RecommendationPreferenceVector(budget = 40),
+            AppPreferences(store).recommendationPreferenceVector.first(),
+        )
+    }
+
+    @Test
     fun `privacy withdrawal atomically rejects consent and removes DataStore session material`() = runTest {
         val store = InMemoryPreferencesDataStore(
             mutablePreferencesOf(
@@ -56,6 +106,11 @@ class AppPreferencesTest {
                 stringPreferencesKey("sdk_list_version") to ConsentDocumentVersions.SDK,
                 stringPreferencesKey("ai_notice_version") to ConsentDocumentVersions.AI,
                 DecisionHistoryJson to "[]",
+                intPreferencesKey("recommendation_preference_quality_v1") to 80,
+                intPreferencesKey("recommendation_preference_time_v1") to 90,
+                intPreferencesKey("recommendation_preference_budget_v1") to 70,
+                intPreferencesKey("recommendation_preference_meal_match_v1") to 60,
+                intPreferencesKey("recommendation_preference_diversity_v1") to 50,
                 AuthPreferenceKeys.InstallationId to "10000000-0000-4000-8000-000000000001",
                 AuthPreferenceKeys.RefreshEnvelope to "encrypted-refresh-token",
                 AuthPreferenceKeys.UserId to "20000000-0000-4000-8000-000000000001",
@@ -72,6 +127,11 @@ class AppPreferencesTest {
         assertFalse(preferences.privacyAccepted.first())
         val snapshot = store.data.first()
         assertNull(snapshot[DecisionHistoryJson])
+        assertNull(snapshot[intPreferencesKey("recommendation_preference_quality_v1")])
+        assertNull(snapshot[intPreferencesKey("recommendation_preference_time_v1")])
+        assertNull(snapshot[intPreferencesKey("recommendation_preference_budget_v1")])
+        assertNull(snapshot[intPreferencesKey("recommendation_preference_meal_match_v1")])
+        assertNull(snapshot[intPreferencesKey("recommendation_preference_diversity_v1")])
         assertNull(snapshot[AuthPreferenceKeys.InstallationId])
         AuthPreferenceKeys.sessionKeys.forEach { key -> assertNull(snapshot[key]) }
         assertFalse(

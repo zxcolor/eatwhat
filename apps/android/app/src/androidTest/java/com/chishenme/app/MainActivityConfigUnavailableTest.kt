@@ -254,8 +254,12 @@ class MainActivityConfigUnavailableTest {
         BLOCKED_DETAIL_AND_OUTBOUND_ACTIONS.forEach { action ->
             composeRule.onNodeWithText(action).assertDoesNotExist()
         }
-        scrollResultsListTo("换一批")
-        composeRule.onNode(hasText("换一批") and hasClickAction())
+        scrollResultsListTo(SAME_CONDITIONS_RETRY_ACTION)
+        composeRule.onNode(hasText(SAME_CONDITIONS_RETRY_ACTION) and hasClickAction())
+            .assertIsDisplayed()
+            .assertIsEnabled()
+        scrollResultsListTo(ADJUST_CONDITIONS_ACTION)
+        composeRule.onNode(hasText(ADJUST_CONDITIONS_ACTION) and hasClickAction())
             .assertIsDisplayed()
             .assertIsEnabled()
     }
@@ -413,7 +417,9 @@ class MainActivityConfigUnavailableTest {
         private const val LIVE_DISPLAY_ONLY_EXPLANATION =
             "当前为实时展示模式，未取得数据增强授权，因此不展示自有适合度。"
         private const val GUEST_RULES_ONLY_NOTICE =
-            "远程配置暂不可用：本次仅展示不含 AI 的规则推荐。为保护数据，餐厅详情、导航、电话、复制地址及推荐事件均已关闭；“换一批”仍可使用。"
+            "远程配置暂不可用：本次仅展示不含 AI 的规则推荐。为保护数据，餐厅详情、导航、电话、复制地址及推荐事件均已关闭；仍可按相同条件重新请求，结果可能相同。"
+        private const val SAME_CONDITIONS_RETRY_ACTION = "按相同条件重新请求"
+        private const val ADJUST_CONDITIONS_ACTION = "返回调整条件"
         private val BLOCKED_DETAIL_AND_OUTBOUND_ACTIONS = listOf(
             "餐厅详情",
             "地图查询",

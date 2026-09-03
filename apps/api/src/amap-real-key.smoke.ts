@@ -1,8 +1,9 @@
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import type {
-	PlaceSearchRequest,
-	RecommendationContext,
+import {
+	DEFAULT_RECOMMENDATION_PREFERENCE_VECTOR,
+	type PlaceSearchRequest,
+	type RecommendationContext,
 } from "@chi-shen-me/contracts";
 import { loadAppConfig } from "./config/app-config.js";
 import { LocationSearchProviderUnavailableError } from "./location-search/location-search.provider.js";
@@ -70,6 +71,7 @@ const recommendationContext: RecommendationContext = Object.freeze({
 	partySize: 1,
 	excludedCuisines: [],
 	preferredCuisines: [],
+	preferenceVector: { ...DEFAULT_RECOMMENDATION_PREFERENCE_VECTOR },
 });
 
 const placeSearchRequest: PlaceSearchRequest = Object.freeze({

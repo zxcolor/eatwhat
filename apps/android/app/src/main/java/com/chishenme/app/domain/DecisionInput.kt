@@ -6,6 +6,7 @@ import com.chishenme.app.data.remote.DecisionMode
 import com.chishenme.app.data.remote.ExplorationMode
 import com.chishenme.app.data.remote.MealPeriod
 import com.chishenme.app.data.remote.RecommendationContext
+import com.chishenme.app.data.remote.RecommendationPreferenceVector
 import com.chishenme.app.data.remote.TravelMode
 import java.time.Clock
 import java.time.Instant
@@ -60,6 +61,7 @@ class RecommendationRequestFactory(
     fun create(
         input: DecisionInput,
         aiAssistanceEnabled: Boolean = false,
+        preferenceVector: RecommendationPreferenceVector = RecommendationPreferenceVector.Default,
     ): RecommendationContext {
         val location = requireNotNull(input.location) { "Location must be validated before creating request" }
         return RecommendationContext(
@@ -76,6 +78,7 @@ class RecommendationRequestFactory(
             partySize = input.partySize,
             excludedCuisines = input.excludedCuisines.sorted(),
             preferredCuisines = input.preferredCuisines.sorted(),
+            preferenceVector = preferenceVector,
             requestTime = Instant.now(clock).toString(),
         )
     }

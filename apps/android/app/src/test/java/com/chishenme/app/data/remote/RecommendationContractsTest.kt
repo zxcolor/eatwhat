@@ -43,6 +43,12 @@ class RecommendationContractsTest {
             "WGS84",
             parsed.getValue("location").jsonObject.getValue("crs").toString().trim('"'),
         )
+        val preferenceVector = parsed.getValue("preferenceVector").jsonObject
+        assertEquals(
+            setOf("quality", "time", "budget", "mealMatch", "diversity"),
+            preferenceVector.keys,
+        )
+        assertTrue(preferenceVector.values.all { it.toString() == "100" })
         assertFalse(parsed.keys.any { it.contains("phone", ignoreCase = true) })
     }
 

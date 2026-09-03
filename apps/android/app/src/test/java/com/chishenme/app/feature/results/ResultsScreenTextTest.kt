@@ -19,8 +19,18 @@ class ResultsScreenTextTest {
 
         assertFalse(policy.detailActionsAvailable)
         assertEquals(GUEST_RULES_ONLY_NOTICE, policy.persistentNotice)
-        assertTrue(requireNotNull(policy.persistentNotice).contains("换一批"))
+        assertTrue(requireNotNull(policy.persistentNotice).contains("按相同条件重新请求"))
+        assertTrue(policy.persistentNotice.contains("结果可能相同"))
+        assertFalse(policy.persistentNotice.contains("换一批"))
         assertTrue(policy.persistentNotice.contains("推荐事件均已关闭"))
+    }
+
+    @Test
+    fun `same-condition retry copy does not promise different results`() {
+        assertEquals("按相同条件重新请求，结果可能相同。", SAME_CONDITIONS_RETRY_DESCRIPTION)
+        assertEquals("按相同条件重新请求", SAME_CONDITIONS_RETRY_ACTION)
+        assertEquals("返回调整条件", ADJUST_CONDITIONS_ACTION)
+        assertFalse(SAME_CONDITIONS_RETRY_DESCRIPTION.contains("反重复"))
     }
 
     @Test

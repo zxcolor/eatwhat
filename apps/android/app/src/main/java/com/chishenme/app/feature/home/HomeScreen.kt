@@ -100,6 +100,7 @@ import com.chishenme.app.data.remote.LocationSearchQueryValidator
 import com.chishenme.app.data.remote.TravelMode
 import com.chishenme.app.data.remote.effectiveServiceCapabilities
 import com.chishenme.app.domain.BuiltInQuickLocations
+import com.chishenme.app.domain.DecisionScenario
 import com.chishenme.app.domain.LocationChoice
 import com.chishenme.app.feature.decision.DecisionUiState
 import com.chishenme.app.feature.decision.DecisionViewModel
@@ -379,6 +380,18 @@ fun HomeScreen(
 
             item {
                 OptionSection(
+                    title = "主动场景",
+                    subtitle = "一键套用常用条件；地点和已选菜系保持不变",
+                    options = DecisionScenario.entries.map { scenario ->
+                        scenario to scenarioLabel(scenario)
+                    },
+                    selected = state.activeScenario,
+                    onSelected = viewModel::applyScenario,
+                )
+            }
+
+            item {
+                OptionSection(
                     title = "这一顿",
                     options = MealPeriod.entries.map { period ->
                         period to when (period) {
@@ -499,7 +512,7 @@ fun HomeScreen(
                     state.formError?.let { error ->
                         Surface(
                             modifier = Modifier.semantics {
-                                liveRegion = LiveRegionMode.Polite
+                                liveRegion = LiveRegionMode.Assertive
                                 stateDescription = error
                             },
                             color = MaterialTheme.colorScheme.errorContainer,
@@ -1037,12 +1050,13 @@ private fun SectionTitle(title: String, subtitle: String? = null) {
 @Composable
 private fun <T> OptionSection(
     title: String,
+    subtitle: String? = null,
     options: List<Pair<T, String>>,
-    selected: T,
+    selected: T?,
     onSelected: (T) -> Unit,
 ) {
     HomeCard {
-        SectionTitle(title)
+        SectionTitle(title, subtitle)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(options) { (value, label) ->
                 FilterChip(
@@ -1440,4 +1454,11 @@ private fun explorationLabel(mode: ExplorationMode) = when (mode) {
     ExplorationMode.SAFE -> "稳妥吃"
     ExplorationMode.BALANCED -> "平衡选择"
     ExplorationMode.ADVENTUROUS -> "换个口味"
+}
+
+private fun scenarioLabel(scenario: DecisionScenario) = when (scenario) {
+    DecisionScenario.IN_A_HURRY -> "赶时间"
+    DecisionScenario.WORKDAY_LUNCH -> "工作日午餐"
+    DecisionScenario.FRIENDS_GATHERING -> "朋友聚餐"
+    DecisionScenario.BUSINESS_TRIP -> "旅行出差"
 }

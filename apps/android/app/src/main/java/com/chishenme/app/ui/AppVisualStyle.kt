@@ -472,6 +472,9 @@ fun AppStatusBanner(
             .fillMaxWidth()
             .background(background, RoundedCornerShape(AppDimens.CompactRadius))
             .border(1.dp, foreground.copy(alpha = 0.14f), RoundedCornerShape(AppDimens.CompactRadius))
+            // A generic banner may describe persistent or non-actionable state, so it must not
+            // interrupt TalkBack. Immediate form/request failures opt in to Assertive at their
+            // concrete call sites where the user can act on them.
             .semantics { liveRegion = LiveRegionMode.Polite }
             .padding(horizontal = 14.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(11.dp),

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/widget_decision_description"
+    android:initialLayout="@layout/widget_decision_launcher"
+    android:minWidth="200dp"
+    android:minHeight="72dp"
+    android:minResizeWidth="200dp"
+    android:minResizeHeight="72dp"
+    android:resizeMode="horizontal|vertical"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen" />

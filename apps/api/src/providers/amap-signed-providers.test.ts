@@ -1,6 +1,7 @@
-import type {
-	PlaceSearchRequest,
-	RecommendationContext,
+import {
+	DEFAULT_RECOMMENDATION_PREFERENCE_VECTOR,
+	type PlaceSearchRequest,
+	type RecommendationContext,
 } from "@chi-shen-me/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { loadAppConfig } from "../config/app-config.js";
@@ -28,6 +29,7 @@ const recommendationContext: RecommendationContext = Object.freeze({
 	partySize: 1,
 	excludedCuisines: [],
 	preferredCuisines: [],
+	preferenceVector: { ...DEFAULT_RECOMMENDATION_PREFERENCE_VECTOR },
 });
 
 const placeSearchRequest: PlaceSearchRequest = Object.freeze({

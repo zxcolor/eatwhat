@@ -37,6 +37,7 @@ import com.chishenme.app.feature.saved.SavedResourcesScreen
 import com.chishenme.app.feature.saved.SavedResourcesViewModel
 import com.chishenme.app.feature.update.UpdateRequiredScreen
 import com.chishenme.app.data.remote.FeatureConfig
+import com.chishenme.app.data.remote.DataRightsMode
 import com.chishenme.app.data.remote.RecommendationEventType
 
 private object Routes {
@@ -256,13 +257,24 @@ fun AppNavigation(
             val aiEnabled by settingsViewModel.aiEnabled.collectAsStateWithLifecycle()
             val theme by settingsViewModel.theme.collectAsStateWithLifecycle()
             val decisionHistory by settingsViewModel.decisionHistory.collectAsStateWithLifecycle()
+            val preferenceVector by
+                settingsViewModel.recommendationPreferenceVector.collectAsStateWithLifecycle()
+            val preferenceVectorStored by
+                settingsViewModel.recommendationPreferenceVectorStored.collectAsStateWithLifecycle()
 
             SettingsScreen(
                 aiEnabled = aiEnabled,
                 aiServiceAvailable = effectiveFeatureConfig?.aiEnabled == true,
                 theme = theme,
+                preferenceVector = preferenceVector,
+                preferenceVectorStored = preferenceVectorStored,
+                preferenceVectorCanAffectRanking =
+                    effectiveFeatureConfig?.dataRightsMode == DataRightsMode.LICENSED_ENRICHMENT,
                 onAiEnabledChange = settingsViewModel::setAiEnabled,
                 onThemeChange = settingsViewModel::setTheme,
+                onPreferenceVectorChange = settingsViewModel::setRecommendationPreferenceVector,
+                onResetPreferenceVector = settingsViewModel::resetRecommendationPreferenceVector,
+                onClearPreferenceVector = settingsViewModel::clearRecommendationPreferenceVector,
                 onBack = { navController.popBackStack() },
                 decisionHistory = decisionHistory,
                 onClearDecisionHistory = settingsViewModel::clearDecisionHistory,

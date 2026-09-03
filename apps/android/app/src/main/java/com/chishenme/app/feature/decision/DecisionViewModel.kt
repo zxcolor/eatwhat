@@ -25,11 +25,13 @@ import com.chishenme.app.data.remote.TravelMode
 import com.chishenme.app.data.remote.effectiveServiceCapabilities
 import com.chishenme.app.domain.DecisionInput
 import com.chishenme.app.domain.DecisionInputValidator
+import com.chishenme.app.domain.DecisionScenario
 import com.chishenme.app.domain.InputValidation
 import com.chishenme.app.domain.LocationChoice
 import com.chishenme.app.domain.LocationSearchSelectionMapper
 import com.chishenme.app.domain.MealPeriodResolver
 import com.chishenme.app.domain.RecommendationRequestFactory
+import com.chishenme.app.domain.applyScenario
 import com.chishenme.app.feature.config.RemoteFeatureConfigState
 import com.chishenme.app.feature.config.RuntimeAppVersionGate
 import com.chishenme.app.feature.config.configOrNull
@@ -93,6 +95,7 @@ sealed interface LocationSearchUiState {
 
 data class DecisionUiState(
     val input: DecisionInput = defaultDecisionInput(),
+    val activeScenario: DecisionScenario? = null,
     val loadState: RecommendationLoadState = RecommendationLoadState.Idle,
     val formError: String? = null,
     val transientMessage: String? = null,
@@ -262,6 +265,16 @@ class DecisionViewModel @Inject constructor(
             runtimeAppVersionGate.currentState.observedConfigurationGeneration == generation
 
     fun setDecisionMode(value: DecisionMode) = updateInput { copy(decisionMode = value) }
+
+    fun applyScenario(value: DecisionScenario) {
+        _uiState.update { state ->
+            state.copy(
+                input = state.input.applyScenario(value),
+                activeScenario = value,
+                formError = null,
+            )
+        }
+    }
 
     fun setMealPeriod(value: MealPeriod) = updateInput {
         val defaultRadius = when (value) {
@@ -580,7 +593,8 @@ class DecisionViewModel @Inject constructor(
         recommendationJob = viewModelScope.launch {
             val aiAssistanceEnabled =
                 preferences.aiAssistanceEnabled.first() && _uiState.value.featureConfig?.aiEnabled == true
-            val request = requestFactory.create(input, aiAssistanceEnabled)
+            val preferenceVector = preferences.recommendationPreferenceVector.first()
+            val request = requestFactory.create(input, aiAssistanceEnabled, preferenceVector)
             when (val outcome = repository.recommend(request)) {
                 is RecommendationOutcome.Success -> {
                     currentCoroutineContext().ensureActive()
@@ -688,7 +702,13 @@ class DecisionViewModel @Inject constructor(
     }
 
     private fun updateInput(transform: DecisionInput.() -> DecisionInput) {
-        _uiState.update { state -> state.copy(input = state.input.transform(), formError = null) }
+        _uiState.update { state ->
+            state.copy(
+                input = state.input.transform(),
+                activeScenario = null,
+                formError = null,
+            )
+        }
     }
 
     private fun currentRemoteAccessLease(): RuntimeAppVersionGate.RemoteAccessLease? {
