@@ -197,12 +197,12 @@ class MainActivityDecisionFlowTest {
                 .assertIsDisplayed()
                 .performClick()
             composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
-                hasText("这顿就吃它") || hasText(RECOMMENDATION_EXPIRED_MARKER)
+                hasText("本次用餐候选") || hasText(RECOMMENDATION_EXPIRED_MARKER)
             }
             if (hasText(RECOMMENDATION_EXPIRED_MARKER)) {
                 fail("从重建后的详情返回时推荐结果会话意外失效")
             }
-            composeRule.onNodeWithText("这顿就吃它").assertIsDisplayed()
+            composeRule.onNodeWithText("本次用餐候选").assertIsDisplayed()
             composeRule.onNode(hasScrollToIndexAction()).performScrollToNode(
                 androidx.compose.ui.test.hasText("仅营业中"),
             )

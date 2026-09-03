@@ -26,6 +26,7 @@ import {
 	type RankedPlaceResult,
 	rankCandidates,
 } from "./domain/recommendation-engine.js";
+import { buildRecommendationQueryPlan } from "./domain/recommendation-query-plan.js";
 import { IntentCoordinator } from "./providers/intent-coordinator.js";
 
 function toPublicResult(
@@ -65,13 +66,13 @@ export function recommendationNotice(
 	dataRightsMode: DataRightsMode,
 ): string | null {
 	if (dataMode === "DEMO") {
-		return "当前使用虚构演示餐厅，仅用于验证产品流程，不可用于真实就餐决策";
+		return "当前使用虚构演示餐饮地点，仅用于验证产品流程，不可用于真实就餐决策";
 	}
 	if (resultCount === 0) {
-		return "当前条件下没有可靠结果，请调整预算、距离或排除条件";
+		return "当前条件下没有符合条件的候选，请调整预算、距离或排除条件";
 	}
 	if (dataRightsMode === "LIVE_DISPLAY_ONLY") {
-		return "当前按数据授权边界实时展示，不保存外部餐厅数据且不显示自有适合度";
+		return "当前按数据授权边界实时展示，不保存外部餐饮地点数据且不显示自有适合度";
 	}
 	return null;
 }
@@ -94,15 +95,28 @@ export class RecommendationsService {
 		// Client clocks are untrusted. Business-hours evaluation must use server
 		// time so a forged requestTime cannot turn a closed place into an open one.
 		const trustedContext = { ...context, requestTime: generatedAt };
+		const queryPlan = buildRecommendationQueryPlan(trustedContext);
+		let queryPlanSupported = false;
+		try {
+			queryPlanSupported = this.places.supportsQueryPlan(queryPlan);
+		} catch {
+			queryPlanSupported = false;
+		}
+		if (!queryPlanSupported) {
+			throw new ServiceUnavailableException({
+				code: "PLACE_PROVIDER_UNAVAILABLE",
+				message: "餐厅数据服务暂时不可用，请稍后重试",
+			});
+		}
 
-		const resolvedIntent = await this.intents.resolve(trustedContext);
+		const resolvedIntent = await this.intents.resolve(
+			trustedContext,
+			queryPlan,
+		);
 		let candidates: readonly PlaceCandidate[];
 		try {
 			// 模型只在此调用之前获得脱敏用餐条件；POI 从不传入千问。
-			candidates = await this.places.search(
-				trustedContext,
-				resolvedIntent.profile.mealTypes,
-			);
+			candidates = await this.places.search(trustedContext, queryPlan);
 		} catch {
 			throw new ServiceUnavailableException({
 				code: "PLACE_PROVIDER_UNAVAILABLE",
@@ -166,6 +180,8 @@ export class RecommendationsService {
 				promptVersion: this.config.versions.prompt,
 				modelVersion: resolvedIntent.modelVersion,
 				aiFallbackUsed: resolvedIntent.fallbackUsed,
+				profile: queryPlan.profile,
+				weatherApplication: queryPlan.weatherApplication,
 				results: publicResults,
 				notice,
 			});

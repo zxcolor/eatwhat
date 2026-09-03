@@ -11,6 +11,7 @@ import { AmapLocationSearchProvider } from "./location-search/providers/amap-loc
 import { PlaceKeywordSearchProviderUnavailableError } from "./place-search/place-keyword-search.provider.js";
 import { AmapPlaceKeywordSearchProvider } from "./place-search/providers/amap-place-keyword-search.provider.js";
 import { getAmapFailureDiagnostic } from "./providers/amap-response-status.js";
+import { buildRecommendationQueryPlan } from "./recommendations/domain/recommendation-query-plan.js";
 import {
 	AmapPlaceProvider,
 	PlaceProviderUnavailableError,
@@ -61,6 +62,8 @@ const recommendationContext: RecommendationContext = Object.freeze({
 		crs: "GCJ02" as const,
 	}),
 	mealPeriod: "LUNCH" as const,
+	target: "MEAL" as const,
+	weatherContext: Object.freeze({ kind: "NONE" as const }),
 	decisionMode: "QUICK" as const,
 	travelMode: "WALK" as const,
 	explorationMode: "BALANCED" as const,
@@ -262,7 +265,7 @@ export async function runAmapLiveSmoke(
 			async (fetchImpl) =>
 				await new AmapPlaceProvider(config, fetchImpl).search(
 					recommendationContext,
-					["午餐"],
+					buildRecommendationQueryPlan(recommendationContext),
 				),
 		),
 	);

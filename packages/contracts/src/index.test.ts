@@ -32,12 +32,18 @@ import {
 	RecommendationContextSchema,
 	RecommendationEventSchema,
 	RecommendationHistoryItemSchema,
+	RecommendationProfileSchema,
+	RecommendationResponseSchema,
 	RecommendationResultSchema,
+	RecommendationTargetSchema,
 	ServiceCapabilitiesSchema,
+	SpecialtyCapabilitiesSchema,
 	SupportFeedbackCategorySchema,
 	SupportFeedbackRequestSchema,
 	SupportFeedbackResponseSchema,
 	UpdateFavoriteGroupRequestSchema,
+	WeatherApplicationSchema,
+	WeatherContextRequestSchema,
 } from "./index.js";
 
 const VALID_RESULT_TOKEN = "A".repeat(43);
@@ -127,6 +133,8 @@ describe("Recommendation contracts", () => {
 		if (result.success) {
 			expect(result.data.aiAssistanceEnabled).toBe(true);
 			expect(result.data.location.crs).toBe("WGS84");
+			expect(result.data.target).toBe("MEAL");
+			expect(result.data.weatherContext).toEqual({ kind: "NONE" });
 			expect(result.data.preferenceVector).toEqual({
 				quality: 100,
 				time: 100,
@@ -135,6 +143,155 @@ describe("Recommendation contracts", () => {
 				diversity: 100,
 			});
 		}
+	});
+
+	it("accepts only fixed targets and a strict user-reported weather union", () => {
+		expect(RecommendationTargetSchema.options).toEqual([
+			"MEAL",
+			"MILK_TEA",
+			"COFFEE",
+			"DESSERT",
+		]);
+		expect(
+			WeatherContextRequestSchema.parse({
+				kind: "USER_REPORTED",
+				preference: "MINIMIZE_EXPOSURE",
+			}),
+		).toEqual({
+			kind: "USER_REPORTED",
+			preference: "MINIMIZE_EXPOSURE",
+		});
+		for (const weatherContext of [
+			{ kind: "NONE", preference: "WARMING" },
+			{ kind: "USER_REPORTED" },
+			{ kind: "USER_REPORTED", preference: "RAIN" },
+			{ kind: "PROVIDER_OBSERVED", preference: "COOLING" },
+			{
+				kind: "USER_REPORTED",
+				preference: "COOLING",
+				temperatureCelsius: 31,
+			},
+		]) {
+			expect(
+				WeatherContextRequestSchema.safeParse(weatherContext).success,
+			).toBe(false);
+		}
+	});
+
+	it("keeps the v1 request's top-level unknown-field stripping semantics", () => {
+		const request = {
+			location: { latitude: 39.9928, longitude: 116.3109 },
+			mealPeriod: "DINNER",
+			radiusMeters: 1_500,
+		};
+		expect(
+			RecommendationContextSchema.safeParse({
+				...request,
+				target: "COFFEE",
+				weatherContext: {
+					kind: "USER_REPORTED",
+					preference: "WARMING",
+				},
+			}).success,
+		).toBe(true);
+		const legacyCompatible = RecommendationContextSchema.parse({
+			...request,
+			weatherSource: "provider",
+		});
+		expect(legacyCompatible).not.toHaveProperty("weatherSource");
+	});
+
+	it("defaults old responses only to the legacy meal and no-weather profiles", () => {
+		const parsed = RecommendationResponseSchema.parse({
+			requestId: VALID_UUID,
+			generatedAt: "2026-09-03T00:00:00.000Z",
+			coverage: "NATIONWIDE",
+			dataRightsMode: "LIVE_DISPLAY_ONLY",
+			ruleVersion: "recommendation-rules-v2",
+			promptVersion: "recommendation-prompt-v1",
+			modelVersion: "rule-fallback-v1",
+			aiFallbackUsed: true,
+			results: [],
+			notice: null,
+		});
+		expect(parsed.profile).toEqual({
+			target: "MEAL",
+			family: "MEAL_LEGACY",
+			version: "meal-legacy-v1",
+			providerCapabilityRequired: false,
+		});
+		expect(parsed.weatherApplication).toEqual({
+			kind: "NONE",
+			version: "weather-none-v1",
+			queryModifier: null,
+		});
+	});
+
+	it("enforces exact profile and weather-application mappings", () => {
+		expect(
+			RecommendationProfileSchema.safeParse({
+				target: "MILK_TEA",
+				family: "MILK_TEA",
+				version: "milk-tea-v2",
+				providerCapabilityRequired: true,
+			}).success,
+		).toBe(true);
+		for (const profile of [
+			{
+				target: "MILK_TEA",
+				family: "MILK_TEA",
+				version: "milk-tea-v1",
+				providerCapabilityRequired: false,
+			},
+			{
+				target: "MILK_TEA",
+				family: "MEAL_LUNCH",
+				version: "meal-lunch-v1",
+				providerCapabilityRequired: false,
+			},
+			{
+				target: "COFFEE",
+				family: "COFFEE",
+				version: "milk-tea-v2",
+				providerCapabilityRequired: true,
+			},
+			{
+				target: "DESSERT",
+				family: "DESSERT",
+				version: "dessert-v1",
+				providerCapabilityRequired: true,
+				providerTaxonomy: "unapproved",
+			},
+		]) {
+			expect(RecommendationProfileSchema.safeParse(profile).success).toBe(
+				false,
+			);
+		}
+
+		expect(
+			WeatherApplicationSchema.safeParse({
+				kind: "USER_REPORTED",
+				version: "user-reported-weather-v2",
+				preference: "COOLING",
+				queryModifier: "PREFER_COOLING_OPTIONS",
+			}).success,
+		).toBe(true);
+		expect(
+			WeatherApplicationSchema.safeParse({
+				kind: "USER_REPORTED",
+				version: "user-reported-weather-v1",
+				preference: "WARMING",
+				queryModifier: "PREFER_COOLING_OPTIONS",
+			}).success,
+		).toBe(false);
+		expect(
+			WeatherApplicationSchema.safeParse({
+				kind: "NONE",
+				version: "weather-none-v1",
+				queryModifier: null,
+				rawTemperature: 31,
+			}).success,
+		).toBe(false);
 	});
 
 	it("accepts only a complete bounded preference vector", () => {
@@ -574,6 +731,59 @@ describe("Private persisted recommendation contracts", () => {
 				locationSearchEnabled: true,
 				placeSearchEnabled: true,
 				providerCode: "AMAP",
+			}).success,
+		).toBe(false);
+	});
+
+	it("accepts specialty capabilities only as a complete strict atomic object", () => {
+		const base = {
+			coverageName: "全国范围",
+			dataRightsMode: "LIVE_DISPLAY_ONLY" as const,
+			aiEnabled: false,
+			accountsEnabled: false,
+			favoritesEnabled: false,
+			minimumSupportedVersion: "0.1.0",
+			ruleVersion: "rule-v1",
+			promptVersion: "prompt-v1",
+			modelVersion: "rules",
+		};
+		const complete = {
+			breakfastProfileEnabled: true,
+			dinnerProfileEnabled: true,
+			milkTeaEnabled: false,
+			coffeeEnabled: false,
+			dessertEnabled: false,
+			userReportedWeatherEnabled: false,
+		};
+
+		expect(
+			FeatureConfigSchema.parse(base).specialtyCapabilities,
+		).toBeUndefined();
+		expect(SpecialtyCapabilitiesSchema.parse(complete)).toEqual(complete);
+		expect(
+			FeatureConfigSchema.parse({
+				...base,
+				specialtyCapabilities: complete,
+			}).specialtyCapabilities,
+		).toEqual(complete);
+		expect(
+			FeatureConfigSchema.safeParse({
+				...base,
+				specialtyCapabilities: {
+					breakfastProfileEnabled: true,
+				},
+			}).success,
+		).toBe(false);
+		expect(
+			SpecialtyCapabilitiesSchema.safeParse({
+				...complete,
+				providerCode: "DEMO",
+			}).success,
+		).toBe(false);
+		expect(
+			SpecialtyCapabilitiesSchema.safeParse({
+				...complete,
+				coffeeEnabled: "true",
 			}).success,
 		).toBe(false);
 	});

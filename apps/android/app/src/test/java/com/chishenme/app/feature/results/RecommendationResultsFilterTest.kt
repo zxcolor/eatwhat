@@ -3,6 +3,7 @@ package com.chishenme.app.feature.results
 import com.chishenme.app.data.remote.Confidence
 import com.chishenme.app.data.remote.Coordinate
 import com.chishenme.app.data.remote.CoordinateReferenceSystem
+import com.chishenme.app.data.remote.DataRightsMode
 import com.chishenme.app.data.remote.OpenStatus
 import com.chishenme.app.data.remote.ReasonCode
 import com.chishenme.app.data.remote.RecommendationActions
@@ -85,11 +86,32 @@ class RecommendationResultsFilterTest {
             visibleCount = 1,
             totalCount = results.size,
             filter = RecommendationResultsFilterState(openNowOnly = true),
+            dataRightsMode = DataRightsMode.LIVE_DISPLAY_ONLY,
         )
 
         assertEquals("本地筛选显示 1 / 3 条", summary)
         assertFalse(summary.contains(token))
         assertFalse(summary.contains("resultToken"))
+    }
+
+    @Test
+    fun countSummaryUsesCandidateLanguageForLiveDisplayOnly() {
+        val live = RecommendationResultsFilter.countSummary(
+            visibleCount = 3,
+            totalCount = 3,
+            filter = RecommendationResultsFilterState(),
+            dataRightsMode = DataRightsMode.LIVE_DISPLAY_ONLY,
+        )
+        val licensed = RecommendationResultsFilter.countSummary(
+            visibleCount = 3,
+            totalCount = 3,
+            filter = RecommendationResultsFilterState(),
+            dataRightsMode = DataRightsMode.LICENSED_ENRICHMENT,
+        )
+
+        assertEquals("本次共 3 个候选", live)
+        assertFalse(live.contains("推荐"))
+        assertEquals("本次共 3 条推荐", licensed)
     }
 
     private fun result(

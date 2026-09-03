@@ -216,7 +216,7 @@ private fun DocumentDialog(document: ConsentDocument, onDismiss: () -> Unit) {
         }
         ConsentDocument.AI -> {
             title = "AI 使用说明"
-            content = "千问只用于理解餐段、预算、时间和用户主动选择的偏好，不接收手机号、第三方账号、设备标识或精确坐标。所有实际使用 AI 的结果会显示“AI 辅助推荐”，失败时由确定性规则回退。"
+            content = "千问只用于理解餐段、预算、时间和用户主动选择的偏好，不接收手机号、第三方账号、设备标识或精确坐标。实际使用 AI 理解条件时会明确标识；仅在获授权增强模式下称为 AI 辅助推荐，失败时由确定性规则回退。"
         }
     }
     AppDialog(

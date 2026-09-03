@@ -5,6 +5,7 @@ import type {
 	RecommendationActions,
 	RecommendationContext,
 } from "@chi-shen-me/contracts";
+import type { RecommendationQueryPlan } from "./recommendation-query-plan.js";
 
 export interface PlaceCandidate {
 	readonly provider: DataSourceCode;
@@ -32,9 +33,10 @@ export interface PlaceCandidate {
 export interface PlaceProvider {
 	readonly kind: DataSourceCode;
 	readonly dataMode: DataMode;
+	supportsQueryPlan(plan: RecommendationQueryPlan): boolean;
 	search(
 		context: RecommendationContext,
-		mealTypes: readonly string[],
+		plan: RecommendationQueryPlan,
 	): Promise<readonly PlaceCandidate[]>;
 }
 

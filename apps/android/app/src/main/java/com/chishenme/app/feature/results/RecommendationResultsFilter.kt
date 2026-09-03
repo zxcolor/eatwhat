@@ -1,5 +1,6 @@
 package com.chishenme.app.feature.results
 
+import com.chishenme.app.data.remote.DataRightsMode
 import com.chishenme.app.data.remote.OpenStatus
 import com.chishenme.app.data.remote.RecommendationResult
 import java.util.Locale
@@ -42,8 +43,11 @@ internal object RecommendationResultsFilter {
         visibleCount: Int,
         totalCount: Int,
         filter: RecommendationResultsFilterState,
+        dataRightsMode: DataRightsMode,
     ): String = if (filter.isActive) {
         "本地筛选显示 " + visibleCount + " / " + totalCount.coerceAtMost(MAX_RESULTS) + " 条"
+    } else if (dataRightsMode == DataRightsMode.LIVE_DISPLAY_ONLY) {
+        "本次共 " + totalCount.coerceAtMost(MAX_RESULTS) + " 个候选"
     } else {
         "本次共 " + totalCount.coerceAtMost(MAX_RESULTS) + " 条推荐"
     }

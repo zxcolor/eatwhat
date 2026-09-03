@@ -49,7 +49,85 @@ class RecommendationContractsTest {
             preferenceVector.keys,
         )
         assertTrue(preferenceVector.values.all { it.toString() == "100" })
+        assertEquals("MEAL", parsed.getValue("target").toString().trim('"'))
+        assertEquals(
+            setOf("kind"),
+            parsed.getValue("weatherContext").jsonObject.keys,
+        )
+        assertEquals(
+            "NONE",
+            parsed.getValue("weatherContext").jsonObject.getValue("kind").toString().trim('"'),
+        )
         assertFalse(parsed.keys.any { it.contains("phone", ignoreCase = true) })
+    }
+
+    @Test
+    fun `user reported weather serializes only a bounded request preference`() {
+        val request = RecommendationContext(
+            location = Coordinate(39.9928, 116.3109, crs = CoordinateReferenceSystem.WGS84),
+            mealPeriod = MealPeriod.LUNCH,
+            target = RecommendationTarget.COFFEE,
+            weatherContext = WeatherContextRequest(
+                kind = WeatherContextKind.USER_REPORTED,
+                preference = UserReportedWeatherPreference.WARMING,
+            ),
+            radiusMeters = 1_500,
+        )
+
+        val weather = json.parseToJsonElement(json.encodeToString(request))
+            .jsonObject
+            .getValue("weatherContext")
+            .jsonObject
+
+        assertEquals(setOf("kind", "preference"), weather.keys)
+        assertEquals("USER_REPORTED", weather.getValue("kind").toString().trim('"'))
+        assertEquals("WARMING", weather.getValue("preference").toString().trim('"'))
+    }
+
+    @Test
+    fun `weather request rejects impossible discriminator combinations locally`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            WeatherContextRequest(
+                kind = WeatherContextKind.NONE,
+                preference = UserReportedWeatherPreference.COOLING,
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            WeatherContextRequest(kind = WeatherContextKind.USER_REPORTED)
+        }
+    }
+
+    @Test
+    fun `specialty capabilities fail closed when absent and reject partial objects`() {
+        val base = """
+            {
+              "coverageName":"全国范围",
+              "dataRightsMode":"LIVE_DISPLAY_ONLY",
+              "aiEnabled":false,
+              "accountsEnabled":false,
+              "favoritesEnabled":false,
+              "minimumSupportedVersion":"0.1.0",
+              "ruleVersion":"rule-v1",
+              "promptVersion":"prompt-v1",
+              "modelVersion":"rule-fallback",
+              "serviceCapabilities":{
+                "recommendationsEnabled":true,
+                "locationSearchEnabled":false,
+                "placeSearchEnabled":false
+              }
+            }
+        """.trimIndent()
+        val legacy = json.decodeFromString<FeatureConfig>(base)
+
+        assertEquals(SpecialtyCapabilities.Disabled, legacy.effectiveSpecialtyCapabilities())
+        val partial = base.replace(
+            "\"modelVersion\":\"rule-fallback\"",
+            "\"modelVersion\":\"rule-fallback\"," +
+                "\"specialtyCapabilities\":{\"coffeeEnabled\":true}",
+        )
+        assertThrows(SerializationException::class.java) {
+            json.decodeFromString<FeatureConfig>(partial)
+        }
     }
 
     @Test
@@ -92,7 +170,7 @@ class RecommendationContractsTest {
               "ruleVersion":"v1",
               "promptVersion":"v1",
               "modelVersion":"rule-fallback",
-              "aiFallbackUsed":true,
+              "aiFallbackUsed":false,
               "results":[{
                 "provider":"LOCAL_PARTNER_7","resultToken":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","dataMode":"LIVE",
                 "actions":{"navigate":true,"call":false,"copyAddress":true,"share":false},
@@ -122,6 +200,8 @@ class RecommendationContractsTest {
         assertNull(response.results.first().fitScore)
         assertNull(response.results.first().averageCostYuan)
         assertEquals(Confidence.LOW, response.results.first().confidence)
+        assertEquals(RecommendationProfile.Legacy, response.profile)
+        assertEquals(WeatherApplication.None, response.weatherApplication)
         assertTrue(RecommendationResponseValidator.isValid(response, requestContext))
 
         val duplicate = response.copy(results = listOf(response.results.first(), response.results.first()))

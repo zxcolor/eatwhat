@@ -8,10 +8,10 @@
 | `RecommendationContext` | 描述这一顿的限制 | 单次位置、餐段、预算、时间、半径、人数、交通、主动偏好、`preferenceVector` | 精确位置是敏感个人信息，不落库、不进日志、不发 AI |
 | `RecommendationPreferenceVector` | 调节既有透明软评分 | `quality`、`time`、`budget`、`mealMatch`、`diversity`，均为 0–100 整数且默认 100 | Android 只在本机保存五个数值并随单次推荐请求发送；不含位置、餐厅或跨请求标识，不改变硬过滤。仅 `LICENSED_ENRICHMENT` 可用于软评分；`LIVE_DISPLAY_ONLY` 不据此重排且 `fitScore=null` |
 | `IntentProfile` | 把场景转成餐饮方向 | 菜系权重、餐饮类型、速度、多样性 | 只含派生/主动输入；Schema 失败立即回退 |
-| `RecommendationResult` | 展示主推荐和备选 | 数据源代码、请求作用域 `resultToken`、来源评分、可选适合度、时间/距离、原因、警告、置信度 | 事实只能来自合法数据源；缺失时明确未知；公开响应和客户端均不知道稳定地点 ID |
+| `RecommendationResult` | 展示最多 3 个候选 | 数据源代码、请求作用域 `resultToken`、来源评分、可选适合度、时间/距离、原因、警告、置信度 | `LIVE_DISPLAY_ONLY` 只区分首个/其他候选并保持数据源顺序、`fitScore=null`；只有获授权增强模式才可表达自有排序。事实只能来自合法数据源；缺失时明确未知；公开响应和客户端均不知道稳定地点 ID |
 | `RecommendationEvent` | 计算推荐漏斗 | `requestId`、`resultToken`、事件类型、时间 | 严格对象；令牌仅在原推荐请求内使用并由服务端最多保留两小时，不接受来源、稳定地点 ID、坐标、手机号或任意扩展字段 |
 | `FeatureConfig` | 客户端安全开关 | 数据权利模式、AI/账号/收藏开关、最低版本和算法版本 | 服务端为唯一可信来源 |
-| `IdentityBinding` | 账号身份登记 | PHONE、WECHAT、QQ、EMAIL | Android 1.0 只允许 EMAIL/QQ 后续绑定；PHONE/WECHAT 是注册身份且无绑定入口；第三方授权材料仅后端验证，冲突不得静默合并 |
+| `IdentityBinding` | 账号身份登记 | PHONE、WECHAT、QQ、EMAIL | Android 工程候选以 PHONE 注册/登录；已登录账号可绑定 EMAIL/WECHAT/QQ，四种已绑定身份可用于对应登录。入口必须由服务端能力明确开放；第三方授权材料仅后端验证，冲突不得静默合并 |
 
 ## 保留期限
 

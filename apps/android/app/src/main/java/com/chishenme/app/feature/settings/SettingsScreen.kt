@@ -173,7 +173,7 @@ fun SettingsScreen(
                     icon = { Icon(Icons.Rounded.Star, null) },
                     title = "AI 辅助偏好",
                     description = if (aiServiceAvailable) {
-                        "保存在本机。关闭后请求会明确禁止 AI；服务失败会回退到规则引擎。"
+                        "保存在本机。关闭后请求会明确禁止 AI；当前仅普通午餐且未选手动体感时可生效，服务失败会回退到规则引擎。"
                     } else {
                         "服务端 AI 当前关闭或远程配置不可用，本次只使用规则引擎。"
                     },
@@ -229,7 +229,11 @@ fun SettingsScreen(
                 SettingsCard(
                     icon = { Icon(Icons.AutoMirrored.Rounded.List, null) },
                     title = "推荐规则摘要",
-                    description = "先执行营业、距离、预算和排除项硬规则，再做可解释排序。",
+                    description = if (preferenceVectorCanAffectRanking) {
+                        "先执行营业、距离、预算和排除项硬规则，再做可解释排序。"
+                    } else {
+                        "先执行营业、距离、预算和排除项硬过滤；当前实时展示保持数据源顺序，不生成自有适合度。"
+                    },
                     action = { TextButton(onClick = { document = SettingsDocument.ALGORITHM }) { Text("查看") } },
                 )
             }

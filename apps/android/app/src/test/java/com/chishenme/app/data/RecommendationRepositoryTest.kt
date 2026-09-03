@@ -366,7 +366,7 @@ class RecommendationRepositoryTest {
         ruleVersion = "rule-v1",
         promptVersion = "prompt-v1",
         modelVersion = "rule-fallback",
-        aiFallbackUsed = true,
+        aiFallbackUsed = false,
         results = listOf(
             RecommendationResult(
                 provider = "DEMO",

@@ -1,5 +1,7 @@
 package com.chishenme.app.feature.results
 
+import com.chishenme.app.data.remote.DataRightsMode
+import com.chishenme.app.data.remote.RecommendationTarget
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -7,6 +9,28 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ResultsScreenTextTest {
+    @Test
+    fun `live display copy describes candidates and AI condition parsing only`() {
+        assertEquals(
+            "本次用餐候选",
+            RecommendationTarget.MEAL.resultHeadline(DataRightsMode.LIVE_DISPLAY_ONLY),
+        )
+        assertEquals(
+            "本次咖啡候选",
+            RecommendationTarget.COFFEE.resultHeadline(DataRightsMode.LIVE_DISPLAY_ONLY),
+        )
+        assertEquals("AI 辅助理解条件", aiAssistanceLabel(DataRightsMode.LIVE_DISPLAY_ONLY))
+    }
+
+    @Test
+    fun `licensed copy may express a selected recommendation`() {
+        assertEquals(
+            "这杯咖啡就选它",
+            RecommendationTarget.COFFEE.resultHeadline(DataRightsMode.LICENSED_ENRICHMENT),
+        )
+        assertEquals("AI 辅助推荐", aiAssistanceLabel(DataRightsMode.LICENSED_ENRICHMENT))
+    }
+
     @Test
     fun `alternative heading follows the actual candidate count`() {
         assertEquals("另一个靠谱选择", alternativeHeading(totalResultCount = 2))

@@ -4,13 +4,23 @@ import {
 	type RecommendationContext,
 } from "@chi-shen-me/contracts";
 import { Injectable } from "@nestjs/common";
+import {
+	buildRecommendationQueryPlan,
+	type RecommendationQueryPlan,
+} from "../domain/recommendation-query-plan.js";
 
 export interface IntentProvider {
-	resolve(context: RecommendationContext): Promise<IntentProfile>;
+	resolve(
+		context: RecommendationContext,
+		plan?: RecommendationQueryPlan,
+	): Promise<IntentProfile>;
 }
 
-export function buildRuleIntent(context: RecommendationContext): IntentProfile {
-	const mealTypes =
+export function buildRuleIntent(
+	context: RecommendationContext,
+	plan: RecommendationQueryPlan = buildRecommendationQueryPlan(context),
+): IntentProfile {
+	const legacyMealTypes =
 		context.mealPeriod === "BREAKFAST"
 			? ["早餐", "包子", "粥", "面食", "快餐"]
 			: context.mealPeriod === "DINNER"
@@ -20,6 +30,8 @@ export function buildRuleIntent(context: RecommendationContext): IntentProfile {
 				: context.availableMinutes <= 45
 					? ["午餐", "快餐", "盖饭", "面食", "简餐"]
 					: ["午餐", "家常菜", "盖饭", "面食", "正餐"];
+	const mealTypes =
+		plan.profile.target === "MEAL" ? legacyMealTypes : plan.queryTerms;
 	const cuisineWeights = Object.fromEntries(
 		context.preferredCuisines.map((cuisine, index) => [
 			cuisine,
@@ -28,10 +40,13 @@ export function buildRuleIntent(context: RecommendationContext): IntentProfile {
 	);
 	return IntentProfileSchema.parse({
 		cuisineWeights,
-		mealTypes: [...new Set([...context.preferredCuisines, ...mealTypes])].slice(
-			0,
-			8,
-		),
+		mealTypes: [
+			...new Set(
+				plan.profile.target === "MEAL"
+					? [...context.preferredCuisines, ...mealTypes]
+					: mealTypes,
+			),
+		].slice(0, 8),
 		speedPreference:
 			context.availableMinutes <= 45
 				? "FAST"
@@ -45,14 +60,19 @@ export function buildRuleIntent(context: RecommendationContext): IntentProfile {
 					? 0.9
 					: 0.55,
 		explanationSeed:
-			"根据餐段、预算、时间和用户主动选择生成，不使用位置或账号信息",
+			plan.profile.target === "MEAL" && plan.weatherApplication.kind === "NONE"
+				? "根据餐段、预算、时间和用户主动选择生成，不使用位置或账号信息"
+				: "根据版本化目标和用户主动选择生成，不使用位置、账号或外部天气信息",
 		provider: "RULE_FALLBACK",
 	});
 }
 
 @Injectable()
 export class RuleIntentProvider implements IntentProvider {
-	async resolve(context: RecommendationContext): Promise<IntentProfile> {
-		return buildRuleIntent(context);
+	async resolve(
+		context: RecommendationContext,
+		plan?: RecommendationQueryPlan,
+	): Promise<IntentProfile> {
+		return buildRuleIntent(context, plan);
 	}
 }

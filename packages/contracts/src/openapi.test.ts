@@ -61,18 +61,23 @@ import {
 	RecommendationEventSchema,
 	RecommendationHistoryItemSchema,
 	RecommendationHistoryPageSchema,
+	RecommendationProfileSchema,
 	RecommendationResponseSchema,
 	RecommendationResultReferenceInputSchema,
 	RecommendationResultSchema,
+	RecommendationTargetSchema,
 	RefreshRequestSchema,
 	RevokeSessionResponseSchema,
 	ServiceCapabilitiesSchema,
 	SessionIdPathSchema,
 	SessionsResponseSchema,
+	SpecialtyCapabilitiesSchema,
 	SupportFeedbackCategorySchema,
 	SupportFeedbackResponseSchema,
 	UnbindIdentityResponseSchema,
 	UpdateFavoriteGroupRequestSchema,
+	WeatherApplicationSchema,
+	WeatherContextRequestSchema,
 } from "./index.js";
 
 type JsonObject = Record<string, unknown>;
@@ -942,6 +947,8 @@ describe("OpenAPI v1", () => {
 
 	it("keeps Zod request and response constraints in sync", () => {
 		const comparisons = [
+			["RecommendationTarget", RecommendationTargetSchema, "input"],
+			["WeatherContextRequest", WeatherContextRequestSchema, "input"],
 			["RecommendationContext", RecommendationContextSchema, "input"],
 			["RecommendationEvent", RecommendationEventSchema, "input"],
 			[
@@ -978,11 +985,14 @@ describe("OpenAPI v1", () => {
 			["FeedbackIdPath", FeedbackIdPathSchema, "input"],
 			["PersistenceCapabilities", PersistenceCapabilitiesSchema, "output"],
 			["ServiceCapabilities", ServiceCapabilitiesSchema, "output"],
+			["SpecialtyCapabilities", SpecialtyCapabilitiesSchema, "output"],
 			["FeatureConfig", FeatureConfigSchema, "output"],
 			["LocationSearchRequest", LocationSearchRequestSchema, "input"],
 			["LocationSearchResponse", LocationSearchResponseSchema, "output"],
 			["PlaceSearchRequest", PlaceSearchRequestSchema, "input"],
 			["PlaceSearchResponse", PlaceSearchResponseSchema, "output"],
+			["RecommendationProfile", RecommendationProfileSchema, "output"],
+			["WeatherApplication", WeatherApplicationSchema, "output"],
 			["RecommendationResponse", RecommendationResponseSchema, "output"],
 			["SupportFeedbackCategory", SupportFeedbackCategorySchema, "input"],
 			["SupportFeedbackResponse", SupportFeedbackResponseSchema, "output"],
@@ -1159,10 +1169,8 @@ describe("OpenAPI v1", () => {
 			const qqBranch = schema.oneOf.find(
 				(branch) =>
 					isObject(branch) &&
-					objectValue(
-						objectValue(branch, "properties"),
-						discriminator,
-					).const === "QQ",
+					objectValue(objectValue(branch, "properties"), discriminator)
+						.const === "QQ",
 			);
 			if (!isObject(qqBranch)) {
 				throw new Error(`Missing QQ branch in ${schemaName}`);
@@ -1440,6 +1448,39 @@ describe("OpenAPI v1", () => {
 		expect(objectValue(properties, "coverage")).toEqual({
 			type: "string",
 			const: "NATIONWIDE",
+		});
+	});
+
+	it("documents fail-closed target, weather, and profile compatibility defaults", () => {
+		const requestProperties = objectValue(
+			objectValue(documentedSchema("RecommendationContext"), "properties"),
+			"target",
+		);
+		expect(requestProperties.default).toBe("MEAL");
+		expect(
+			documentedSchema("RecommendationContext").additionalProperties,
+		).toBeUndefined();
+		const weatherRequest = documentedSchema("WeatherContextRequest");
+		expect(JSON.stringify(weatherRequest)).not.toMatch(
+			/temperature|coordinates|providerObserved/i,
+		);
+
+		const responseProperties = objectValue(
+			documentedSchema("RecommendationResponse"),
+			"properties",
+		);
+		expect(objectValue(responseProperties, "profile").default).toEqual({
+			target: "MEAL",
+			family: "MEAL_LEGACY",
+			version: "meal-legacy-v1",
+			providerCapabilityRequired: false,
+		});
+		expect(
+			objectValue(responseProperties, "weatherApplication").default,
+		).toEqual({
+			kind: "NONE",
+			version: "weather-none-v1",
+			queryModifier: null,
 		});
 	});
 
@@ -1736,6 +1777,34 @@ describe("OpenAPI v1", () => {
 			locationSearchEnabled: false,
 			placeSearchEnabled: false,
 		});
+	});
+
+	it("documents specialty capabilities as one optional strict atomic object", () => {
+		const capabilities = documentedSchema("SpecialtyCapabilities");
+		const properties = objectValue(capabilities, "properties");
+		expect(Object.keys(properties)).toEqual([
+			"breakfastProfileEnabled",
+			"dinnerProfileEnabled",
+			"milkTeaEnabled",
+			"coffeeEnabled",
+			"dessertEnabled",
+			"userReportedWeatherEnabled",
+		]);
+		for (const property of Object.values(properties)) {
+			expect(property).toEqual({ type: "boolean" });
+		}
+		expect(capabilities.required).toEqual(Object.keys(properties));
+		expect(capabilities.additionalProperties).toBe(false);
+		expect(JSON.stringify(capabilities)).not.toMatch(
+			/amap|credential|secret|apiKey/iu,
+		);
+
+		const config = documentedSchema("FeatureConfig");
+		const configProperties = objectValue(config, "properties");
+		expect(configProperties.specialtyCapabilities).toMatchObject({
+			$ref: "#/components/schemas/SpecialtyCapabilities",
+		});
+		expect(config.required).not.toContain("specialtyCapabilities");
 	});
 
 	it("documents vendor-neutral recommendation sources and strict action capabilities", () => {

@@ -8,6 +8,34 @@ export const CURRENT_CONTRACT_VERSION = "1" as const;
 export const MealPeriodSchema = z.enum(["BREAKFAST", "LUNCH", "DINNER"]);
 export type MealPeriod = z.infer<typeof MealPeriodSchema>;
 
+export const RecommendationTargetSchema = z.enum([
+	"MEAL",
+	"MILK_TEA",
+	"COFFEE",
+	"DESSERT",
+]);
+export type RecommendationTarget = z.infer<typeof RecommendationTargetSchema>;
+
+export const UserReportedWeatherPreferenceSchema = z.enum([
+	"MINIMIZE_EXPOSURE",
+	"WARMING",
+	"COOLING",
+]);
+export type UserReportedWeatherPreference = z.infer<
+	typeof UserReportedWeatherPreferenceSchema
+>;
+
+export const WeatherContextRequestSchema = z.discriminatedUnion("kind", [
+	z.object({ kind: z.literal("NONE") }).strict(),
+	z
+		.object({
+			kind: z.literal("USER_REPORTED"),
+			preference: UserReportedWeatherPreferenceSchema,
+		})
+		.strict(),
+]);
+export type WeatherContextRequest = z.infer<typeof WeatherContextRequestSchema>;
+
 export const DecisionModeSchema = z.enum(["QUICK", "GUIDED"]);
 export type DecisionMode = z.infer<typeof DecisionModeSchema>;
 
@@ -104,6 +132,10 @@ export const RecommendationContextSchema = z.object({
 	location: CoordinateSchema,
 	locationLabel: z.string().trim().min(1).max(80).optional(),
 	mealPeriod: MealPeriodSchema,
+	target: RecommendationTargetSchema.default("MEAL"),
+	weatherContext: WeatherContextRequestSchema.default(() => ({
+		kind: "NONE" as const,
+	})),
 	decisionMode: DecisionModeSchema.default("QUICK"),
 	travelMode: TravelModeSchema.default("WALK"),
 	explorationMode: ExplorationModeSchema.default("BALANCED"),
@@ -187,6 +219,116 @@ export const RecommendationResultSchema = z.object({
 });
 export type RecommendationResult = z.infer<typeof RecommendationResultSchema>;
 
+export const RecommendationProfileFamilySchema = z.enum([
+	"MEAL_LEGACY",
+	"MEAL_BREAKFAST",
+	"MEAL_LUNCH",
+	"MEAL_DINNER",
+	"MILK_TEA",
+	"COFFEE",
+	"DESSERT",
+]);
+export type RecommendationProfileFamily = z.infer<
+	typeof RecommendationProfileFamilySchema
+>;
+
+const recommendationProfileVariant = <
+	const Target extends RecommendationTarget,
+	const Family extends RecommendationProfileFamily,
+	const RequiresCapability extends boolean,
+>(
+	target: Target,
+	family: Family,
+	versionPrefix: string,
+	providerCapabilityRequired: RequiresCapability,
+) =>
+	z
+		.object({
+			target: z.literal(target),
+			family: z.literal(family),
+			version: z
+				.string()
+				.max(80)
+				.regex(new RegExp(`^${versionPrefix}-v[1-9]\\d*$`, "u")),
+			providerCapabilityRequired: z.literal(providerCapabilityRequired),
+		})
+		.strict();
+
+export const RecommendationProfileSchema = z.discriminatedUnion("family", [
+	recommendationProfileVariant("MEAL", "MEAL_LEGACY", "meal-legacy", false),
+	recommendationProfileVariant(
+		"MEAL",
+		"MEAL_BREAKFAST",
+		"meal-breakfast",
+		false,
+	),
+	recommendationProfileVariant("MEAL", "MEAL_LUNCH", "meal-lunch", false),
+	recommendationProfileVariant("MEAL", "MEAL_DINNER", "meal-dinner", false),
+	recommendationProfileVariant("MILK_TEA", "MILK_TEA", "milk-tea", true),
+	recommendationProfileVariant("COFFEE", "COFFEE", "coffee", true),
+	recommendationProfileVariant("DESSERT", "DESSERT", "dessert", true),
+]);
+export type RecommendationProfile = z.infer<typeof RecommendationProfileSchema>;
+
+export const WeatherQueryModifierSchema = z.enum([
+	"MINIMIZE_OUTDOOR_EXPOSURE",
+	"PREFER_WARMING_OPTIONS",
+	"PREFER_COOLING_OPTIONS",
+]);
+export type WeatherQueryModifier = z.infer<typeof WeatherQueryModifierSchema>;
+
+const userReportedWeatherApplicationVariant = <
+	const Preference extends UserReportedWeatherPreference,
+	const Modifier extends WeatherQueryModifier,
+>(
+	preference: Preference,
+	queryModifier: Modifier,
+) =>
+	z
+		.object({
+			kind: z.literal("USER_REPORTED"),
+			version: z
+				.string()
+				.max(80)
+				.regex(/^user-reported-weather-v[1-9]\d*$/u),
+			preference: z.literal(preference),
+			queryModifier: z.literal(queryModifier),
+		})
+		.strict();
+
+export const WeatherApplicationSchema = z.union([
+	z
+		.object({
+			kind: z.literal("NONE"),
+			version: z
+				.string()
+				.max(80)
+				.regex(/^weather-none-v[1-9]\d*$/u),
+			queryModifier: z.null(),
+		})
+		.strict(),
+	userReportedWeatherApplicationVariant(
+		"MINIMIZE_EXPOSURE",
+		"MINIMIZE_OUTDOOR_EXPOSURE",
+	),
+	userReportedWeatherApplicationVariant("WARMING", "PREFER_WARMING_OPTIONS"),
+	userReportedWeatherApplicationVariant("COOLING", "PREFER_COOLING_OPTIONS"),
+]);
+export type WeatherApplication = z.infer<typeof WeatherApplicationSchema>;
+
+export const DEFAULT_RECOMMENDATION_PROFILE = Object.freeze({
+	target: "MEAL" as const,
+	family: "MEAL_LEGACY" as const,
+	version: "meal-legacy-v1" as const,
+	providerCapabilityRequired: false as const,
+});
+
+export const DEFAULT_WEATHER_APPLICATION = Object.freeze({
+	kind: "NONE" as const,
+	version: "weather-none-v1" as const,
+	queryModifier: null,
+});
+
 export const RecommendationResponseSchema = z.object({
 	requestId: z.uuid(),
 	generatedAt: z.iso.datetime(),
@@ -196,6 +338,12 @@ export const RecommendationResponseSchema = z.object({
 	promptVersion: z.string(),
 	modelVersion: z.string(),
 	aiFallbackUsed: z.boolean(),
+	profile: RecommendationProfileSchema.default(() => ({
+		...DEFAULT_RECOMMENDATION_PROFILE,
+	})),
+	weatherApplication: WeatherApplicationSchema.default(() => ({
+		...DEFAULT_WEATHER_APPLICATION,
+	})),
 	results: z.array(RecommendationResultSchema).max(3),
 	notice: z.string().nullable(),
 });
@@ -1044,6 +1192,28 @@ export const DISABLED_SERVICE_CAPABILITIES: Readonly<ServiceCapabilities> =
 		placeSearchEnabled: false,
 	});
 
+export const SpecialtyCapabilitiesSchema = z
+	.object({
+		breakfastProfileEnabled: z.boolean(),
+		dinnerProfileEnabled: z.boolean(),
+		milkTeaEnabled: z.boolean(),
+		coffeeEnabled: z.boolean(),
+		dessertEnabled: z.boolean(),
+		userReportedWeatherEnabled: z.boolean(),
+	})
+	.strict();
+export type SpecialtyCapabilities = z.infer<typeof SpecialtyCapabilitiesSchema>;
+
+export const DISABLED_SPECIALTY_CAPABILITIES: Readonly<SpecialtyCapabilities> =
+	Object.freeze({
+		breakfastProfileEnabled: false,
+		dinnerProfileEnabled: false,
+		milkTeaEnabled: false,
+		coffeeEnabled: false,
+		dessertEnabled: false,
+		userReportedWeatherEnabled: false,
+	});
+
 export const FeatureConfigSchema = z
 	.object({
 		coverageName: z.string(),
@@ -1068,6 +1238,10 @@ export const FeatureConfigSchema = z
 		serviceCapabilities: ServiceCapabilitiesSchema.default(
 			DISABLED_SERVICE_CAPABILITIES,
 		),
+		// Older v1 services did not advertise specialty query-plan support. The
+		// whole object may therefore be absent, but a present object is atomic:
+		// consumers must never infer omitted fields as enabled capabilities.
+		specialtyCapabilities: SpecialtyCapabilitiesSchema.optional(),
 	})
 	.strict()
 	.superRefine((config, context) => {

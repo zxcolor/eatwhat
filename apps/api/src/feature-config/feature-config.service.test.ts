@@ -4,12 +4,15 @@ import type { DataRightsPolicy } from "../config/data-rights-policy.js";
 import type { LocationSearchProvider } from "../location-search/location-search.provider.js";
 import type { PlaceKeywordSearchProvider } from "../place-search/place-keyword-search.provider.js";
 import type { PlaceProvider } from "../recommendations/domain/place-candidate.js";
+import type { RecommendationQueryPlan } from "../recommendations/domain/recommendation-query-plan.js";
 import type { SupportFeedbackService } from "../support-feedback/support-feedback.service.js";
 import { FeatureConfigService } from "./feature-config.service.js";
 
 const placeProvider = {
 	kind: "AMAP",
 	dataMode: "LIVE",
+	supportsQueryPlan: (plan: RecommendationQueryPlan) =>
+		plan.profile.target === "MEAL" && plan.weatherApplication.kind === "NONE",
 } as PlaceProvider;
 const locationSearchProvider = {
 	dataSource: "AMAP",
@@ -118,7 +121,101 @@ describe("FeatureConfigService persistence capabilities", () => {
 				privateFeedbackEnabled: false,
 				savedResourceIdsEnabled: false,
 			},
+			specialtyCapabilities: {
+				breakfastProfileEnabled: true,
+				dinnerProfileEnabled: true,
+				milkTeaEnabled: false,
+				coffeeEnabled: false,
+				dessertEnabled: false,
+				userReportedWeatherEnabled: false,
+			},
 		});
+	});
+
+	it("derives specialty capabilities only from concrete query-plan support", async () => {
+		const fullyCapableProvider = {
+			kind: "AUTHORIZED_VENDOR",
+			dataMode: "LIVE",
+			supportsQueryPlan: vi.fn(() => true),
+		} as unknown as PlaceProvider;
+		const service = new FeatureConfigService(
+			config(),
+			fullyCapableProvider,
+			locationSearchProvider,
+			placeSearchProvider,
+			policy(),
+			supportFeedback(),
+		);
+
+		await expect(service.getPublicConfig()).resolves.toMatchObject({
+			specialtyCapabilities: {
+				breakfastProfileEnabled: true,
+				dinnerProfileEnabled: true,
+				milkTeaEnabled: true,
+				coffeeEnabled: true,
+				dessertEnabled: true,
+				userReportedWeatherEnabled: true,
+			},
+		});
+		expect(fullyCapableProvider.supportsQueryPlan).toHaveBeenCalled();
+	});
+
+	it("fails adapter capability errors closed without exposing the failure", async () => {
+		const failingProvider = {
+			kind: "DEMO",
+			dataMode: "DEMO",
+			supportsQueryPlan: vi.fn(() => {
+				throw new Error("private capability failure");
+			}),
+		} as unknown as PlaceProvider;
+		const service = new FeatureConfigService(
+			config(),
+			failingProvider,
+			locationSearchProvider,
+			placeSearchProvider,
+			policy(),
+			supportFeedback(),
+		);
+
+		const result = await service.getPublicConfig();
+		expect(result.serviceCapabilities.recommendationsEnabled).toBe(false);
+		expect(result.specialtyCapabilities).toEqual({
+			breakfastProfileEnabled: false,
+			dinnerProfileEnabled: false,
+			milkTeaEnabled: false,
+			coffeeEnabled: false,
+			dessertEnabled: false,
+			userReportedWeatherEnabled: false,
+		});
+		expect(JSON.stringify(result)).not.toContain("private capability failure");
+	});
+
+	it("keeps an unavailable adapter closed even when it understands meal plans", async () => {
+		const unavailableProvider = {
+			kind: "UNAVAILABLE",
+			dataMode: "LIVE",
+			supportsQueryPlan: vi.fn(() => true),
+		} as unknown as PlaceProvider;
+		const service = new FeatureConfigService(
+			config(),
+			unavailableProvider,
+			locationSearchProvider,
+			placeSearchProvider,
+			policy(),
+			supportFeedback(),
+		);
+
+		const result = await service.getPublicConfig();
+		expect(result.serviceCapabilities.recommendationsEnabled).toBe(false);
+		expect(result.specialtyCapabilities).toEqual({
+			breakfastProfileEnabled: false,
+			dinnerProfileEnabled: false,
+			milkTeaEnabled: false,
+			coffeeEnabled: false,
+			dessertEnabled: false,
+			userReportedWeatherEnabled: false,
+		});
+		expect(unavailableProvider.supportsQueryPlan).not.toHaveBeenCalled();
 	});
 
 	it("advertises only individually deployed and licensed capabilities", async () => {
@@ -265,7 +362,9 @@ describe("FeatureConfigService persistence capabilities", () => {
 		);
 		const failedResult = await failedReadiness.getPublicConfig();
 		expect(failedResult.supportFeedbackEnabled).toBe(false);
-		expect(JSON.stringify(failedResult)).not.toContain("private readiness failure");
+		expect(JSON.stringify(failedResult)).not.toContain(
+			"private readiness failure",
+		);
 	});
 
 	it("advertises only the three actually selected provider capabilities", async () => {

@@ -4,6 +4,10 @@ import { type AppConfig, loadAppConfig } from "../../config/app-config.js";
 import { getAmapFailureDiagnostic } from "../../providers/amap-response-status.js";
 import { toGcj02 } from "../domain/geo.js";
 import {
+	buildRecommendationQueryPlan,
+	type RecommendationQueryPlan,
+} from "../domain/recommendation-query-plan.js";
+import {
 	AMAP_RESPONSE_MAX_BYTES,
 	AmapPlaceProvider,
 	interpretAmapOpenStatus,
@@ -13,6 +17,7 @@ import { DemoPlaceProvider } from "./demo-place.provider.js";
 import { IntentCoordinator } from "./intent-coordinator.js";
 import { QwenIntentProvider } from "./qwen-intent.provider.js";
 import { buildRuleIntent, RuleIntentProvider } from "./rule-intent.provider.js";
+import { UnavailablePlaceProvider } from "./unavailable-place.provider.js";
 
 const recommendationContext = RecommendationContextSchema.parse({
 	location: {
@@ -28,6 +33,16 @@ const recommendationContext = RecommendationContextSchema.parse({
 	availableMinutes: 45,
 	preferredCuisines: ["面食"],
 });
+
+function queryPlan(
+	context = recommendationContext,
+	queryTerms?: readonly string[],
+): RecommendationQueryPlan {
+	const plan = buildRecommendationQueryPlan(context);
+	return queryTerms === undefined
+		? plan
+		: Object.freeze({ ...plan, queryTerms: Object.freeze([...queryTerms]) });
+}
 
 function enabledConfig(overrides: Partial<AppConfig> = {}): AppConfig {
 	const base = loadAppConfig({
@@ -120,13 +135,64 @@ describe("intent providers", () => {
 		expect(result.fallbackUsed).toBe(false);
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
+
+	it.each([
+		{
+			name: "breakfast profile",
+			context: RecommendationContextSchema.parse({
+				...recommendationContext,
+				mealPeriod: "BREAKFAST",
+			}),
+			expectedFirstTerm: "面食",
+		},
+		{
+			name: "dinner profile",
+			context: RecommendationContextSchema.parse({
+				...recommendationContext,
+				mealPeriod: "DINNER",
+			}),
+			expectedFirstTerm: "面食",
+		},
+		{
+			name: "specialty target",
+			context: RecommendationContextSchema.parse({
+				...recommendationContext,
+				target: "COFFEE",
+			}),
+			expectedFirstTerm: "咖啡店",
+		},
+		{
+			name: "user-reported weather",
+			context: RecommendationContextSchema.parse({
+				...recommendationContext,
+				weatherContext: { kind: "USER_REPORTED", preference: "WARMING" },
+			}),
+			expectedFirstTerm: "面食",
+		},
+	] as const)("forces deterministic rules for $name", async (entry) => {
+		const fetchMock = vi.fn();
+		const config = enabledConfig();
+		const coordinator = new IntentCoordinator(
+			config,
+			new QwenIntentProvider(config, fetchMock as typeof fetch),
+			new RuleIntentProvider(),
+		);
+		const plan = buildRecommendationQueryPlan(entry.context);
+
+		const result = await coordinator.resolve(entry.context, plan);
+
+		expect(result.profile.provider).toBe("RULE_FALLBACK");
+		expect(result.profile.mealTypes[0]).toBe(entry.expectedFirstTerm);
+		expect(result.fallbackUsed).toBe(false);
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
 });
 
 describe("place providers", () => {
 	it("returns only clearly marked fictional demo restaurants", async () => {
 		const results = await new DemoPlaceProvider().search(
 			recommendationContext,
-			[],
+			queryPlan(),
 		);
 		expect(results.length).toBeGreaterThanOrEqual(3);
 		expect(results.every((result) => result.name.startsWith("演示·"))).toBe(
@@ -155,10 +221,137 @@ describe("place providers", () => {
 			...recommendationContext,
 			location: toGcj02(recommendationContext.location),
 		};
-		const results = await new DemoPlaceProvider().search(gcjContext, []);
+		const results = await new DemoPlaceProvider().search(
+			gcjContext,
+			queryPlan(gcjContext),
+		);
 		expect(results.every((result) => result.location.crs === "GCJ02")).toBe(
 			true,
 		);
+	});
+
+	it("supports all six current v1 demo profiles with bounded user weather", () => {
+		const provider = new DemoPlaceProvider();
+		const profiles = [
+			{ target: "MEAL" as const, mealPeriod: "BREAKFAST" as const },
+			{ target: "MEAL" as const, mealPeriod: "LUNCH" as const },
+			{ target: "MEAL" as const, mealPeriod: "DINNER" as const },
+			{ target: "MILK_TEA" as const, mealPeriod: "LUNCH" as const },
+			{ target: "COFFEE" as const, mealPeriod: "LUNCH" as const },
+			{ target: "DESSERT" as const, mealPeriod: "LUNCH" as const },
+		];
+
+		for (const profile of profiles) {
+			for (const weatherContext of [
+				{ kind: "NONE" as const },
+				{ kind: "USER_REPORTED" as const, preference: "WARMING" as const },
+			]) {
+				const context = RecommendationContextSchema.parse({
+					...recommendationContext,
+					...profile,
+					weatherContext,
+				});
+				expect(
+					provider.supportsQueryPlan(buildRecommendationQueryPlan(context)),
+				).toBe(true);
+			}
+		}
+	});
+
+	it.each([
+		["MILK_TEA", "奶茶店"],
+		["COFFEE", "咖啡店"],
+		["DESSERT", "甜品店"],
+	] as const)(
+		"returns a distinct fictional %s fixture in stable provider order",
+		async (target, expectedTag) => {
+			const context = RecommendationContextSchema.parse({
+				...recommendationContext,
+				target,
+			});
+			const plan = buildRecommendationQueryPlan(context);
+			const provider = new DemoPlaceProvider();
+
+			expect(provider.supportsQueryPlan(plan)).toBe(true);
+			const first = await provider.search(context, plan);
+			const second = await provider.search(context, plan);
+
+			expect(first).toHaveLength(4);
+			expect(first.map((candidate) => candidate.providerRank)).toEqual([
+				1, 2, 3, 4,
+			]);
+			expect(first.map((candidate) => candidate.providerPlaceId)).toEqual(
+				second.map((candidate) => candidate.providerPlaceId),
+			);
+			expect(
+				first.every(
+					(candidate) =>
+						candidate.name.startsWith("演示·") &&
+						candidate.tags.includes(expectedTag),
+				),
+			).toBe(true);
+		},
+	);
+
+	it("applies user-reported weather only as an explicit demo query modifier", async () => {
+		const context = RecommendationContextSchema.parse({
+			...recommendationContext,
+			target: "COFFEE",
+			weatherContext: { kind: "USER_REPORTED", preference: "WARMING" },
+		});
+		const plan = buildRecommendationQueryPlan(context);
+		const provider = new DemoPlaceProvider();
+		const results = await provider.search(context, plan);
+
+		expect(results.map((candidate) => candidate.providerRank)).toEqual([
+			2, 3, 4,
+		]);
+		expect(
+			results.every((candidate) =>
+				candidate.tags.includes("演示查询条件·用户自报偏暖已应用"),
+			),
+		).toBe(true);
+		expect(
+			results.flatMap((candidate) => candidate.tags).join(" "),
+		).not.toMatch(/真实天气|实时天气|气温/u);
+	});
+
+	it("fails specialty and user-reported plans closed before live provider I/O", async () => {
+		const config = loadAppConfig({
+			NODE_ENV: "test",
+			AMAP_ENABLED: "true",
+			AMAP_WEB_SERVICE_KEY: "test-key",
+		});
+		const fetchMock = vi.fn();
+		const amap = new AmapPlaceProvider(config, fetchMock as typeof fetch);
+		const unavailable = new UnavailablePlaceProvider();
+		const specialty = buildRecommendationQueryPlan(
+			RecommendationContextSchema.parse({
+				...recommendationContext,
+				target: "COFFEE",
+			}),
+		);
+		const weather = buildRecommendationQueryPlan(
+			RecommendationContextSchema.parse({
+				...recommendationContext,
+				weatherContext: { kind: "USER_REPORTED", preference: "COOLING" },
+			}),
+		);
+		const capabilityRequiredMeal = Object.freeze({
+			...queryPlan(),
+			providerCapabilityRequired: true,
+		}) satisfies RecommendationQueryPlan;
+
+		expect(amap.supportsQueryPlan(queryPlan())).toBe(true);
+		expect(unavailable.supportsQueryPlan(queryPlan())).toBe(true);
+		for (const plan of [specialty, weather, capabilityRequiredMeal]) {
+			expect(amap.supportsQueryPlan(plan)).toBe(false);
+			expect(unavailable.supportsQueryPlan(plan)).toBe(false);
+			await expect(
+				amap.search(recommendationContext, plan),
+			).rejects.toMatchObject({ reason: "UNSUPPORTED_QUERY_PLAN" });
+		}
+		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
 	it("does not call AMap when it is disabled", async () => {
@@ -168,9 +361,37 @@ describe("place providers", () => {
 			fetchMock as typeof fetch,
 		);
 		await expect(
-			provider.search(recommendationContext, ["面食"]),
+			provider.search(recommendationContext, queryPlan()),
 		).rejects.toThrow();
 		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it("keeps the breakfast profile keyword ahead of user cuisine for AMap", async () => {
+		const breakfastContext = RecommendationContextSchema.parse({
+			...recommendationContext,
+			mealPeriod: "BREAKFAST",
+			preferredCuisines: ["火锅"],
+		});
+		const breakfastPlan = buildRecommendationQueryPlan(breakfastContext);
+		const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
+			expect(new URL(String(input)).searchParams.get("keywords")).toBe("早餐");
+			return new Response(
+				JSON.stringify({ status: "1", infocode: "10000", pois: [] }),
+				{ status: 200 },
+			);
+		});
+		const provider = new AmapPlaceProvider(
+			loadAppConfig({
+				NODE_ENV: "test",
+				AMAP_ENABLED: "true",
+				AMAP_WEB_SERVICE_KEY: "test-key",
+			}),
+			fetchMock as typeof fetch,
+		);
+
+		expect(breakfastPlan.queryTerms).toEqual(["早餐", "火锅"]);
+		await provider.search(breakfastContext, breakfastPlan);
+		expect(fetchMock).toHaveBeenCalledOnce();
 	});
 
 	it("uses the official HTTPS around query, maps a live-shaped response and never caches", async () => {
@@ -238,16 +459,14 @@ describe("place providers", () => {
 			AMAP_WEB_SERVICE_KEY: "test-key",
 		});
 		const provider = new AmapPlaceProvider(config, fetchMock as typeof fetch);
-		const first = await provider.search(recommendationContext, [
-			"面食",
-			"午餐",
-			"面食",
-		]);
-		const second = await provider.search(recommendationContext, [
-			"面食",
-			"午餐",
-			"面食",
-		]);
+		const first = await provider.search(
+			recommendationContext,
+			queryPlan(recommendationContext, ["面食", "午餐", "面食"]),
+		);
+		const second = await provider.search(
+			recommendationContext,
+			queryPlan(recommendationContext, ["面食", "午餐", "面食"]),
+		);
 		expect(first).toHaveLength(1);
 		expect(first[0]).toMatchObject({
 			provider: "AMAP",
@@ -292,7 +511,7 @@ describe("place providers", () => {
 			fetchMock as typeof fetch,
 		);
 
-		await provider.search(gcjContext, ["午餐"]);
+		await provider.search(gcjContext, queryPlan(gcjContext));
 		expect(fetchMock).toHaveBeenCalledOnce();
 	});
 
@@ -328,10 +547,10 @@ describe("place providers", () => {
 			}),
 			fetchMock as typeof fetch,
 		);
-		const [candidate] = await provider.search(recommendationContext, [
-			"手机号13800138000",
-			"面食",
-		]);
+		const [candidate] = await provider.search(
+			recommendationContext,
+			queryPlan(recommendationContext, ["手机号13800138000", "面食"]),
+		);
 		expect(candidate?.sourceRating).toBeNull();
 		expect(candidate?.averageCostYuan).toBeNull();
 		expect(candidate?.distanceMeters).toBeGreaterThan(100);
@@ -384,7 +603,7 @@ describe("place providers", () => {
 			fetchMock as typeof fetch,
 		);
 
-		const results = await provider.search(recommendationContext, []);
+		const results = await provider.search(recommendationContext, queryPlan());
 
 		expect(results).toHaveLength(2);
 		expect(results[0]).toMatchObject({
@@ -437,7 +656,7 @@ describe("place providers", () => {
 			fetchMock as typeof fetch,
 		);
 
-		const results = await provider.search(recommendationContext, ["午餐"]);
+		const results = await provider.search(recommendationContext, queryPlan());
 
 		expect(results).toHaveLength(1);
 		expect(results[0]).toMatchObject({
@@ -469,7 +688,7 @@ describe("place providers", () => {
 		);
 
 		await expect(
-			provider.search(recommendationContext, ["午餐"]),
+			provider.search(recommendationContext, queryPlan()),
 		).rejects.toMatchObject({
 			reason: "RESPONSE_TOO_LARGE",
 		});
@@ -498,7 +717,7 @@ describe("place providers", () => {
 		);
 
 		await expect(
-			provider.search(recommendationContext, ["午餐"]),
+			provider.search(recommendationContext, queryPlan()),
 		).rejects.toMatchObject({
 			reason: "RESPONSE_TOO_LARGE",
 		});
@@ -545,7 +764,7 @@ describe("place providers", () => {
 			);
 
 			const error = await provider
-				.search(recommendationContext, ["午餐"])
+				.search(recommendationContext, queryPlan())
 				.catch((caught) => caught);
 			expect(error).toMatchObject({
 				name: "PlaceProviderUnavailableError",
@@ -591,7 +810,7 @@ describe("place providers", () => {
 		);
 
 		await expect(
-			provider.search(recommendationContext, ["午餐"]),
+			provider.search(recommendationContext, queryPlan()),
 		).rejects.toMatchObject({
 			reason,
 		});
@@ -623,7 +842,7 @@ describe("place providers", () => {
 		const provider = new AmapPlaceProvider(config, fetchMock as typeof fetch);
 
 		await expect(
-			provider.search(recommendationContext, ["午餐"]),
+			provider.search(recommendationContext, queryPlan()),
 		).rejects.toMatchObject({
 			reason: "TIMEOUT",
 		});
@@ -649,7 +868,7 @@ describe("place providers", () => {
 		const provider = new AmapPlaceProvider(config, fetchMock as typeof fetch);
 
 		await expect(
-			provider.search(recommendationContext, ["午餐"]),
+			provider.search(recommendationContext, queryPlan()),
 		).rejects.toMatchObject({
 			reason: "TIMEOUT",
 		});
@@ -679,7 +898,7 @@ describe("place providers", () => {
 		);
 
 		await expect(
-			provider.search(recommendationContext, ["午餐"]),
+			provider.search(recommendationContext, queryPlan()),
 		).rejects.toMatchObject({ reason: "INVALID_RESPONSE" });
 		expect(cancel).toHaveBeenCalledOnce();
 	});
@@ -700,7 +919,7 @@ describe("place providers", () => {
 		);
 
 		const error = await provider
-			.search(recommendationContext, ["午餐"])
+			.search(recommendationContext, queryPlan())
 			.catch((caught) => caught);
 		expect(error).toBeInstanceOf(PlaceProviderUnavailableError);
 		expect(error).toMatchObject({ reason: "NETWORK_ERROR" });

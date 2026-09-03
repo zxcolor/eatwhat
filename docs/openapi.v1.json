@@ -160,7 +160,7 @@
 			"post": {
 				"operationId": "createRecommendations",
 				"tags": ["Recommendations"],
-				"summary": "生成一次最多三个餐厅推荐",
+				"summary": "生成一次最多三个餐饮地点推荐",
 				"description": "精确坐标仅作为本请求的 JSON body 字段接收，不得放入 URL、查询参数、请求头、事件或错误内容。每个客户端 IP 在单进程内最多请求 30 次/60 秒。",
 				"parameters": [
 					{
@@ -1676,9 +1676,281 @@
 				"required": ["latitude", "longitude", "crs"],
 				"additionalProperties": false
 			},
+			"RecommendationTarget": {
+				"type": "string",
+				"enum": ["MEAL", "MILK_TEA", "COFFEE", "DESSERT"],
+				"description": "推荐目标。旧请求缺失时只默认 MEAL；垂类值本身不代表供应商已具备对应授权能力。"
+			},
+			"WeatherContextRequest": {
+				"oneOf": [
+					{
+						"type": "object",
+						"properties": {
+							"kind": { "type": "string", "const": "NONE" }
+						},
+						"required": ["kind"],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"kind": { "type": "string", "const": "USER_REPORTED" },
+							"preference": {
+								"type": "string",
+								"enum": ["MINIMIZE_EXPOSURE", "WARMING", "COOLING"]
+							}
+						},
+						"required": ["kind", "preference"],
+						"additionalProperties": false
+					}
+				],
+				"description": "请求级用户体感。没有供应商观测分支，也不承载原始天气、坐标或来源。"
+			},
+			"RecommendationProfile": {
+				"oneOf": [
+					{
+						"type": "object",
+						"properties": {
+							"target": { "type": "string", "const": "MEAL" },
+							"family": { "type": "string", "const": "MEAL_LEGACY" },
+							"version": {
+								"type": "string",
+								"maxLength": 80,
+								"pattern": "^meal-legacy-v[1-9]\\d*$"
+							},
+							"providerCapabilityRequired": {
+								"type": "boolean",
+								"const": false
+							}
+						},
+						"required": [
+							"target",
+							"family",
+							"version",
+							"providerCapabilityRequired"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"target": { "type": "string", "const": "MEAL" },
+							"family": { "type": "string", "const": "MEAL_BREAKFAST" },
+							"version": {
+								"type": "string",
+								"maxLength": 80,
+								"pattern": "^meal-breakfast-v[1-9]\\d*$"
+							},
+							"providerCapabilityRequired": {
+								"type": "boolean",
+								"const": false
+							}
+						},
+						"required": [
+							"target",
+							"family",
+							"version",
+							"providerCapabilityRequired"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"target": { "type": "string", "const": "MEAL" },
+							"family": { "type": "string", "const": "MEAL_LUNCH" },
+							"version": {
+								"type": "string",
+								"maxLength": 80,
+								"pattern": "^meal-lunch-v[1-9]\\d*$"
+							},
+							"providerCapabilityRequired": {
+								"type": "boolean",
+								"const": false
+							}
+						},
+						"required": [
+							"target",
+							"family",
+							"version",
+							"providerCapabilityRequired"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"target": { "type": "string", "const": "MEAL" },
+							"family": { "type": "string", "const": "MEAL_DINNER" },
+							"version": {
+								"type": "string",
+								"maxLength": 80,
+								"pattern": "^meal-dinner-v[1-9]\\d*$"
+							},
+							"providerCapabilityRequired": {
+								"type": "boolean",
+								"const": false
+							}
+						},
+						"required": [
+							"target",
+							"family",
+							"version",
+							"providerCapabilityRequired"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"target": { "type": "string", "const": "MILK_TEA" },
+							"family": { "type": "string", "const": "MILK_TEA" },
+							"version": {
+								"type": "string",
+								"maxLength": 80,
+								"pattern": "^milk-tea-v[1-9]\\d*$"
+							},
+							"providerCapabilityRequired": {
+								"type": "boolean",
+								"const": true
+							}
+						},
+						"required": [
+							"target",
+							"family",
+							"version",
+							"providerCapabilityRequired"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"target": { "type": "string", "const": "COFFEE" },
+							"family": { "type": "string", "const": "COFFEE" },
+							"version": {
+								"type": "string",
+								"maxLength": 80,
+								"pattern": "^coffee-v[1-9]\\d*$"
+							},
+							"providerCapabilityRequired": {
+								"type": "boolean",
+								"const": true
+							}
+						},
+						"required": [
+							"target",
+							"family",
+							"version",
+							"providerCapabilityRequired"
+						],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"target": { "type": "string", "const": "DESSERT" },
+							"family": { "type": "string", "const": "DESSERT" },
+							"version": {
+								"type": "string",
+								"maxLength": 80,
+								"pattern": "^dessert-v[1-9]\\d*$"
+							},
+							"providerCapabilityRequired": {
+								"type": "boolean",
+								"const": true
+							}
+						},
+						"required": [
+							"target",
+							"family",
+							"version",
+							"providerCapabilityRequired"
+						],
+						"additionalProperties": false
+					}
+				],
+				"description": "服务端实际应用的版本化推荐 profile。MEAL_LEGACY 只用于解析旧响应；垂类 profile 必须通过独立供应商能力门禁。"
+			},
+			"WeatherApplication": {
+				"anyOf": [
+					{
+						"type": "object",
+						"properties": {
+							"kind": { "type": "string", "const": "NONE" },
+							"version": {
+								"type": "string",
+								"maxLength": 80,
+								"pattern": "^weather-none-v[1-9]\\d*$"
+							},
+							"queryModifier": { "type": "null" }
+						},
+						"required": ["kind", "version", "queryModifier"],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"kind": { "type": "string", "const": "USER_REPORTED" },
+							"version": {
+								"type": "string",
+								"maxLength": 80,
+								"pattern": "^user-reported-weather-v[1-9]\\d*$"
+							},
+							"preference": {
+								"type": "string",
+								"const": "MINIMIZE_EXPOSURE"
+							},
+							"queryModifier": {
+								"type": "string",
+								"const": "MINIMIZE_OUTDOOR_EXPOSURE"
+							}
+						},
+						"required": ["kind", "version", "preference", "queryModifier"],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"kind": { "type": "string", "const": "USER_REPORTED" },
+							"version": {
+								"type": "string",
+								"maxLength": 80,
+								"pattern": "^user-reported-weather-v[1-9]\\d*$"
+							},
+							"preference": { "type": "string", "const": "WARMING" },
+							"queryModifier": {
+								"type": "string",
+								"const": "PREFER_WARMING_OPTIONS"
+							}
+						},
+						"required": ["kind", "version", "preference", "queryModifier"],
+						"additionalProperties": false
+					},
+					{
+						"type": "object",
+						"properties": {
+							"kind": { "type": "string", "const": "USER_REPORTED" },
+							"version": {
+								"type": "string",
+								"maxLength": 80,
+								"pattern": "^user-reported-weather-v[1-9]\\d*$"
+							},
+							"preference": { "type": "string", "const": "COOLING" },
+							"queryModifier": {
+								"type": "string",
+								"const": "PREFER_COOLING_OPTIONS"
+							}
+						},
+						"required": ["kind", "version", "preference", "queryModifier"],
+						"additionalProperties": false
+					}
+				],
+				"description": "仅说明当前请求把用户体感转换成了哪种 query modifier；不表示天气观测、结果后排序或持久化。"
+			},
 			"RecommendationContext": {
 				"type": "object",
-				"description": "未知字段会由当前 Zod object 在解析时剥离。requestTime 是兼容字段，服务端始终以自己的 generatedAt 覆盖它来判断营业时间。",
+				"description": "未知字段会由当前 Zod object 在解析时剥离。target 与 weatherContext 对旧请求分别安全默认成 MEAL 与 NONE；requestTime 是兼容字段，服务端始终以自己的 generatedAt 覆盖它来判断营业时间。",
 				"properties": {
 					"location": {
 						"$ref": "#/components/schemas/CoordinateInput",
@@ -1694,6 +1966,15 @@
 					"mealPeriod": {
 						"type": "string",
 						"enum": ["BREAKFAST", "LUNCH", "DINNER"]
+					},
+					"target": {
+						"default": "MEAL",
+						"$ref": "#/components/schemas/RecommendationTarget"
+					},
+					"weatherContext": {
+						"default": { "kind": "NONE" },
+						"$ref": "#/components/schemas/WeatherContextRequest",
+						"description": "仅接受 NONE 或用户主动报告的体感偏好；不接受供应商观测、原始天气、坐标或来源。"
 					},
 					"decisionMode": {
 						"default": "QUICK",
@@ -2331,6 +2612,23 @@
 					"aiFallbackUsed": {
 						"type": "boolean"
 					},
+					"profile": {
+						"default": {
+							"target": "MEAL",
+							"family": "MEAL_LEGACY",
+							"version": "meal-legacy-v1",
+							"providerCapabilityRequired": false
+						},
+						"$ref": "#/components/schemas/RecommendationProfile"
+					},
+					"weatherApplication": {
+						"default": {
+							"kind": "NONE",
+							"version": "weather-none-v1",
+							"queryModifier": null
+						},
+						"$ref": "#/components/schemas/WeatherApplication"
+					},
 					"results": {
 						"maxItems": 3,
 						"type": "array",
@@ -2358,6 +2656,8 @@
 					"promptVersion",
 					"modelVersion",
 					"aiFallbackUsed",
+					"profile",
+					"weatherApplication",
 					"results",
 					"notice"
 				],
@@ -2880,6 +3180,26 @@
 				],
 				"additionalProperties": false
 			},
+			"SpecialtyCapabilities": {
+				"type": "object",
+				"properties": {
+					"breakfastProfileEnabled": { "type": "boolean" },
+					"dinnerProfileEnabled": { "type": "boolean" },
+					"milkTeaEnabled": { "type": "boolean" },
+					"coffeeEnabled": { "type": "boolean" },
+					"dessertEnabled": { "type": "boolean" },
+					"userReportedWeatherEnabled": { "type": "boolean" }
+				},
+				"required": [
+					"breakfastProfileEnabled",
+					"dinnerProfileEnabled",
+					"milkTeaEnabled",
+					"coffeeEnabled",
+					"dessertEnabled",
+					"userReportedWeatherEnabled"
+				],
+				"additionalProperties": false
+			},
 			"FeatureConfig": {
 				"type": "object",
 				"properties": {
@@ -2932,6 +3252,10 @@
 							"placeSearchEnabled": false
 						},
 						"description": "当前配置选中的核心数据适配器能力；不做实时上游探测、不披露供应商身份。旧 v1 响应缺失对象或客户端遇到缺失字段时均按 false 处理。"
+					},
+					"specialtyCapabilities": {
+						"$ref": "#/components/schemas/SpecialtyCapabilities",
+						"description": "可选兼容字段；服务端仅在当前推荐适配器明确接受对应查询计划时启用。对象缺失、字段缺失或解析失败时客户端必须将六项全部视为关闭。"
 					}
 				},
 				"required": [
@@ -3214,7 +3538,13 @@
 								"x-sensitive": "phone-number"
 							}
 						},
-						"required": ["challengeId", "otpCode", "device", "method", "phoneNumber"],
+						"required": [
+							"challengeId",
+							"otpCode",
+							"device",
+							"method",
+							"phoneNumber"
+						],
 						"additionalProperties": false
 					},
 					{
@@ -5518,7 +5848,9 @@
 				},
 				"content": {
 					"application/json": {
-						"schema": { "$ref": "#/components/schemas/AccountExportStatusResponse" }
+						"schema": {
+							"$ref": "#/components/schemas/AccountExportStatusResponse"
+						}
 					}
 				}
 			},
@@ -5531,7 +5863,9 @@
 				},
 				"content": {
 					"application/json": {
-						"schema": { "$ref": "#/components/schemas/LatestAccountExportResponse" }
+						"schema": {
+							"$ref": "#/components/schemas/LatestAccountExportResponse"
+						}
 					}
 				}
 			},
@@ -5591,7 +5925,9 @@
 				},
 				"content": {
 					"application/json": {
-						"schema": { "$ref": "#/components/schemas/AccountExportNotFoundError" }
+						"schema": {
+							"$ref": "#/components/schemas/AccountExportNotFoundError"
+						}
 					}
 				}
 			},
@@ -5604,7 +5940,9 @@
 				},
 				"content": {
 					"application/json": {
-						"schema": { "$ref": "#/components/schemas/AccountExportNotReadyError" }
+						"schema": {
+							"$ref": "#/components/schemas/AccountExportNotReadyError"
+						}
 					}
 				}
 			},
@@ -5617,7 +5955,9 @@
 				},
 				"content": {
 					"application/json": {
-						"schema": { "$ref": "#/components/schemas/AccountExportExpiredError" }
+						"schema": {
+							"$ref": "#/components/schemas/AccountExportExpiredError"
+						}
 					}
 				}
 			},

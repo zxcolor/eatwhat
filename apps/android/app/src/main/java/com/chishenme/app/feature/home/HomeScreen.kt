@@ -93,12 +93,16 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.chishenme.app.data.remote.DecisionMode
 import com.chishenme.app.data.remote.ExplorationMode
 import com.chishenme.app.data.remote.MealPeriod
+import com.chishenme.app.data.remote.RecommendationTarget
+import com.chishenme.app.data.remote.SpecialtyCapabilities
 import com.chishenme.app.data.remote.LocationSearchDataMode
 import com.chishenme.app.data.remote.LocationSearchPlace
 import com.chishenme.app.data.remote.LocationSearchQueryValidation
 import com.chishenme.app.data.remote.LocationSearchQueryValidator
 import com.chishenme.app.data.remote.TravelMode
+import com.chishenme.app.data.remote.UserReportedWeatherPreference
 import com.chishenme.app.data.remote.effectiveServiceCapabilities
+import com.chishenme.app.data.remote.effectiveSpecialtyCapabilities
 import com.chishenme.app.domain.BuiltInQuickLocations
 import com.chishenme.app.domain.DecisionScenario
 import com.chishenme.app.domain.LocationChoice
@@ -144,6 +148,12 @@ fun HomeScreen(
         is RemoteFeatureConfigState.Incompatible,
         -> false
     }
+    val specialtyCapabilities =
+        (state.remoteFeatureConfig as? RemoteFeatureConfigState.Ready)
+            ?.config
+            ?.effectiveSpecialtyCapabilities()
+    val availableSpecialtyTargets = specialtyTargetOptions(specialtyCapabilities)
+    val availableMealPeriods = mealPeriodOptions(specialtyCapabilities)
 
     fun locateOnlyWhileHomeStarted() {
         if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
@@ -390,19 +400,52 @@ fun HomeScreen(
                 )
             }
 
+            if (availableSpecialtyTargets.isNotEmpty()) {
+                item {
+                    OptionSection(
+                        title = "想决定什么",
+                        subtitle = "专项入口只在当前数据源明确支持时开放",
+                        options = listOf(RecommendationTarget.MEAL to "普通用餐") +
+                            availableSpecialtyTargets,
+                        selected = state.input.target,
+                        onSelected = viewModel::setRecommendationTarget,
+                    )
+                }
+            }
+
             item {
                 OptionSection(
                     title = "这一顿",
-                    options = MealPeriod.entries.map { period ->
-                        period to when (period) {
-                            MealPeriod.BREAKFAST -> "早餐"
-                            MealPeriod.LUNCH -> "午餐"
-                            MealPeriod.DINNER -> "晚餐"
-                        }
+                    subtitle = when (state.input.mealPeriod) {
+                        MealPeriod.BREAKFAST -> if (
+                            specialtyCapabilities?.breakfastProfileEnabled == true
+                        ) "已启用早餐专项查询" else null
+                        MealPeriod.LUNCH -> null
+                        MealPeriod.DINNER -> if (
+                            specialtyCapabilities?.dinnerProfileEnabled == true
+                        ) "已启用晚餐专项查询" else null
                     },
+                    options = availableMealPeriods,
                     selected = state.input.mealPeriod,
                     onSelected = viewModel::setMealPeriod,
                 )
+            }
+
+            if (specialtyCapabilities?.userReportedWeatherEnabled == true) {
+                item {
+                    OptionSection(
+                        title = "手动体感（可选）",
+                        subtitle = "只用你本次主动选择的体感；不读取天气、温度或后台位置",
+                        options = listOf<Pair<UserReportedWeatherPreference?, String>>(
+                            null to "不使用",
+                            UserReportedWeatherPreference.MINIMIZE_EXPOSURE to "少在户外停留",
+                            UserReportedWeatherPreference.WARMING to "想吃喝暖一点",
+                            UserReportedWeatherPreference.COOLING to "想吃喝清凉一点",
+                        ),
+                        selected = state.input.weatherContext.preference,
+                        onSelected = viewModel::setUserReportedWeather,
+                    )
+                }
             }
 
             if (state.input.decisionMode == DecisionMode.QUICK) {
@@ -504,7 +547,7 @@ fun HomeScreen(
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            "不做无限信息流，只把最值得选的答案放到你面前。",
+                            "不做无限信息流，把符合这次条件的候选清楚地放到你面前。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -533,7 +576,7 @@ fun HomeScreen(
                         },
                     )
                     Text(
-                        "给出 1 个主推荐和 2 个备选 · 每个答案都有推荐理由",
+                        "最多展示 3 个符合条件的候选 · 每个候选附可核对理由",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.fillMaxWidth(),
@@ -577,6 +620,22 @@ internal fun remoteServiceStatusMessage(state: DecisionUiState): String? =
                 ?.joinToString(prefix = "云端已连接，但以下服务尚未开放：", postfix = "。")
         }
     }
+
+internal fun specialtyTargetOptions(
+    capabilities: SpecialtyCapabilities?,
+): List<Pair<RecommendationTarget, String>> = buildList {
+    if (capabilities?.milkTeaEnabled == true) add(RecommendationTarget.MILK_TEA to "奶茶")
+    if (capabilities?.coffeeEnabled == true) add(RecommendationTarget.COFFEE to "咖啡")
+    if (capabilities?.dessertEnabled == true) add(RecommendationTarget.DESSERT to "甜品")
+}
+
+internal fun mealPeriodOptions(
+    capabilities: SpecialtyCapabilities?,
+): List<Pair<MealPeriod, String>> = buildList {
+    if (capabilities?.breakfastProfileEnabled == true) add(MealPeriod.BREAKFAST to "早餐")
+    add(MealPeriod.LUNCH to "午餐")
+    if (capabilities?.dinnerProfileEnabled == true) add(MealPeriod.DINNER to "晚餐")
+}
 
 @Composable
 private fun RemoteServiceStatusCard(
