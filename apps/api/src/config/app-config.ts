@@ -67,6 +67,7 @@ export interface AppConfig {
 		readonly ruleFallbackModel: string;
 	};
 	readonly features: {
+		readonly groupRecommendationsEnabled: boolean;
 		readonly accountsEnabled: boolean;
 		readonly favoritesEnabled: boolean;
 		readonly historyEnabled: boolean;
@@ -437,6 +438,10 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 			ruleFallbackModel: "rule-fallback-v1",
 		}),
 		features: Object.freeze({
+			groupRecommendationsEnabled: readBoolean(
+				env.GROUP_RECOMMENDATIONS_ENABLED,
+				"GROUP_RECOMMENDATIONS_ENABLED",
+			),
 			accountsEnabled,
 			favoritesEnabled: readBoolean(env.FAVORITES_ENABLED, "FAVORITES_ENABLED"),
 			historyEnabled: readBoolean(env.HISTORY_ENABLED, "HISTORY_ENABLED"),

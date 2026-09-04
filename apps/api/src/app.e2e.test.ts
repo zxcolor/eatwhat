@@ -10,6 +10,7 @@ import { Test } from "@nestjs/testing";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "./app.module.js";
 import { configureHttpRuntime } from "./common/http-runtime-security.js";
+import { RecommendationRequestRegistry } from "./common/recommendation-request.registry.js";
 import { SafeExceptionFilter } from "./common/safe-exception.filter.js";
 import { APP_CONFIG, loadAppConfig } from "./config/app-config.js";
 import {
@@ -101,6 +102,7 @@ describe("public HTTP API", () => {
 		"/v1/location-search",
 		"/v1/place-search",
 		"/v1/recommendations",
+		"/v1/group-recommendations",
 		"/v1/recommendation-events",
 		"/v1/support-feedback",
 	])("rejects unsupported Content-Type on POST %s", async (path) => {
@@ -142,6 +144,7 @@ describe("public HTTP API", () => {
 		"/v1/location-search",
 		"/v1/place-search",
 		"/v1/recommendations",
+		"/v1/group-recommendations",
 		"/v1/recommendation-events",
 		"/v1/support-feedback",
 	])(
@@ -174,6 +177,7 @@ describe("public HTTP API", () => {
 		"/v1/location-search",
 		"/v1/place-search",
 		"/v1/recommendations",
+		"/v1/group-recommendations",
 		"/v1/recommendation-events",
 		"/v1/support-feedback",
 	])(
@@ -231,10 +235,47 @@ describe("public HTTP API", () => {
 			supportFeedbackEnabled: false,
 			serviceCapabilities: {
 				recommendationsEnabled: true,
+				groupRecommendationsEnabled: false,
 				locationSearchEnabled: true,
 				placeSearchEnabled: true,
 			},
 		});
+	});
+
+	it("POST /v1/group-recommendations fails closed while its explicit switch is disabled", async () => {
+		const registry = app.get(RecommendationRequestRegistry);
+		const before = registry.diagnostics();
+		const response = await fetch(`${baseUrl}/v1/group-recommendations`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				location: { latitude: 39.9928, longitude: 116.3109 },
+				travelMode: "WALK",
+				members: [
+					{
+						budgetMaxYuan: null,
+						availableMinutes: 60,
+						radiusMeters: 1_500,
+						preferredCuisines: [],
+						excludedCuisines: [],
+					},
+					{
+						budgetMaxYuan: 50,
+						availableMinutes: 45,
+						radiusMeters: 1_000,
+						preferredCuisines: ["面食"],
+						excludedCuisines: [],
+					},
+				],
+			}),
+		});
+
+		expect(response.status).toBe(503);
+		await expect(response.json()).resolves.toMatchObject({
+			code: "GROUP_RECOMMENDATIONS_UNAVAILABLE",
+			message: "群组推荐服务暂时不可用，请稍后重试",
+		});
+		expect(registry.diagnostics()).toEqual(before);
 	});
 
 	it("POST /v1/recommendations returns a demo Top 3 without fit scores", async () => {

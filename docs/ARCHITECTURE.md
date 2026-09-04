@@ -86,6 +86,32 @@ API Schema 校验 -> 全国坐标、半径和用户约束校验
 1 主推荐 + 2 备选 + 原因 + 置信度 + 版本信息
 ```
 
+## 同设备匿名群组数据流（Android 2.x 候选）
+
+群组路径与普通推荐共享受控 provider 和硬过滤领域规则，但不复用普通公开响应或 token registry：
+
+```text
+2–8 份匿名固定约束 + 一个共同坐标/交通方式
+        |
+        v
+严格 GroupRecommendationRequest -> 服务端重算 group-constraints-v1
+        |
+        v
+固定 MEAL/LUNCH/NONE + GUIDED/BALANCED + 默认向量 + AI 关闭
+        |
+        v
+独立 capability/query-plan 复查 -> provider -> 数据权利门禁 -> 最多 3 个候选
+        |
+        v
+display-only GroupRecommendationResponse
+无 resultToken/actions/坐标/电话/图片/AI/模型字段
+```
+
+Android 在展示前独立重算并逐字段核对聚合摘要。`LIVE_DISPLAY_ONLY` 保持 provider 顺序且
+`fitScore=null`；只有逐来源授权完整时才可使用既有透明规则排序。页面没有详情或出站动作，
+路由不携带成员、位置或结果，状态只存在 Activity 级内存中。完整规范见
+[同设备匿名群组决策架构](./GROUP_DECISION_ARCHITECTURE.md)。
+
 ## 不可信边界
 
 - Android 输入、第三方 API 和 AI 输出均视为不可信，进入领域层前必须校验。
@@ -96,7 +122,7 @@ API Schema 校验 -> 全国坐标、半径和用户约束校验
 - 客户端不保存服务端、高德、千问、短信或社交平台 Secret。
 - `DEMO` 数据只用于 development/test；production 会拒绝启用。未配置合法供应商时推荐接口安全失败。
 - Android 为所有 API 请求发送固定的 v1 契约版本并要求响应恰好确认同一版本；缺失、重复或不匹配会在反序列化前关闭响应。网络层即使包装该异常，也只通过有深度上限和循环检测的 cause 链归类，不读取或展示异常、URL、请求体或响应元数据。远程配置在客户端内部明确区分成功、暂不可用和契约不兼容，后两者都保持 AI 关闭并给出不同提示。
-- `/v1/config.serviceCapabilities` 只声明当前选中推荐、地点搜索和餐厅关键词搜索 adapter 的本地可用性，不执行上游探测，也不暴露供应商身份。服务端与共享契约继续保留三个字段；Android 1.0 只消费推荐与地点搜索字段，对缺失或不是明确 `true` 的值按关闭处理，并无条件忽略 `placeSearchEnabled`。地点搜索能力与签发它的可信配置 generation 绑定，旧 generation 的开放值不能取得新 generation 的远程访问 lease；任何配置值都不能在 Android 1.0 动态恢复直接餐厅关键词搜索。Android 1.2 的 `specialtyCapabilities` 是单独的六字段原子对象，分别声明早餐、晚餐、奶茶、咖啡、甜品和用户主动体感；整个对象缺失时全部关闭，部分字段缺失时配置无效，客户端不能从 provider 名称或其他能力推断开放状态。
+- `/v1/config.serviceCapabilities` 只声明当前推荐、同设备群组、地点搜索和餐厅关键词搜索 adapter 的本地可用性，不执行上游网络探测，也不暴露供应商身份。Android 1.0 只消费推荐与地点搜索字段并无条件忽略 `placeSearchEnabled`；2.x 群组入口还要求新增字段明确为 `true`。旧配置缺少 `groupRecommendationsEnabled` 时按 `false`，群组端点仍在每次 provider I/O 前独立复查开关和 `MEAL/LUNCH/NONE` query plan。能力与可信配置 generation 绑定，旧 generation 的开放值不能取得新 generation 的远程访问 lease。Android 1.2 的 `specialtyCapabilities` 是单独的六字段原子对象，分别声明早餐、晚餐、奶茶、咖啡、甜品和用户主动体感；整个对象缺失时全部关闭，部分字段缺失时配置无效，客户端不能从 provider 名称或其他能力推断开放状态。
 
 ## 版本化专项查询与主动体感
 

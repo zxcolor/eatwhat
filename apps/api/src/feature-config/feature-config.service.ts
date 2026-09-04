@@ -180,6 +180,12 @@ export class FeatureConfigService {
 		const recommendationsEnabled =
 			this.places.kind !== "UNAVAILABLE" &&
 			this.supportsProfile(DEFAULT_RECOMMENDATION_PROBE);
+		const groupRecommendationsEnabled =
+			this.config.features.groupRecommendationsEnabled &&
+			recommendationsEnabled &&
+			// Keep the group capability tied to one concrete, currently supported
+			// MEAL/LUNCH/NONE plan. The endpoint repeats this check before any I/O.
+			this.supportsProfile(DEFAULT_RECOMMENDATION_PROBE);
 		return FeatureConfigSchema.parse({
 			coverageName: "全国范围",
 			dataRightsMode: effectiveDataRightsMode,
@@ -196,6 +202,7 @@ export class FeatureConfigService {
 				: this.config.versions.ruleFallbackModel,
 			serviceCapabilities: {
 				recommendationsEnabled,
+				groupRecommendationsEnabled,
 				locationSearchEnabled: this.locationSearch.dataSource !== "UNAVAILABLE",
 				placeSearchEnabled: this.placeSearch.dataSource !== "UNAVAILABLE",
 			},

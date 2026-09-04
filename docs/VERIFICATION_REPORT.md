@@ -1,10 +1,87 @@
 # 验证报告
 
-验证日期：2026-08-22（模拟器历史验收）；2026-08-23（完整自动化、ECS 正式切换、真实高德与公网 HTTPS 验收）；2026-08-24（云端 Debug 默认与独立 Fixture 构建门禁）；2026-08-26（固定 Alpha signer 历史构建验证）；2026-08-28（PHONE_ONLY 短信认证改造中）
+验证日期：2026-09-04（同设备匿名群组本地候选验证）；2026-08-22（模拟器历史验收）；2026-08-23（完整自动化、ECS 正式切换、真实高德与公网 HTTPS 验收）；2026-08-24（云端 Debug 默认与独立 Fixture 构建门禁）；2026-08-26（固定 Alpha signer 历史构建验证）；2026-08-28（PHONE_ONLY 短信认证改造中）
 
 本报告记录当前仓库快照的本机自动化、Android 模拟器、ECS 回环与公网 HTTPS 验证。它不是公开发布批准，也不能替代供应商商业授权、Release 签名、法务审查、关闭 Wi-Fi 真机矩阵或 Alpha/Beta 指标。
 
-## 本轮结论
+## 2026-09-04：同设备匿名群组本地候选验证
+
+验证对象为本地 `codex/group-constraint-intersection` 分支的同设备匿名群组工程候选。以下结果只证明本轮所列本地检查，不代表 Android 1.0、2.0 及后续路线全部完成，也不代表供应商授权、生产部署或公开发布获批。下方历史结论、计数、APK 哈希及设备记录仍保留，但不能替代本节的当前证据。
+
+### Node 工作区与共享契约消费方
+
+| 实际执行命令 | 本轮结果 |
+|---|---|
+| `pnpm lint` | 249 个文件通过，未自动修改文件 |
+| `pnpm typecheck` | contracts、admin、API 全部通过 |
+| `pnpm test` | contracts：2 个文件、81 个测试通过；API：87 个文件通过、1 个文件跳过，768 个测试通过、3 个测试跳过；随后 runtime smoke 通过 |
+| `pnpm build` | contracts、Next.js admin 生产构建和 API 全部通过；admin 完成 6 个静态页生成 |
+| `pnpm --filter @chi-shen-me/contracts test:openapi` | 1 个文件、23 个测试通过；该数量已包含在 contracts 的 81 个测试内，不重复累计 |
+| 本批变更及新增 TS/OpenAPI 的 `biome check` | 19 个文件通过，未应用修改 |
+| `git diff --check` | 通过 |
+
+以上命令的最终退出码均为 `0`。另行执行的 contracts `test` / `typecheck` 与 API `test:unit` / `typecheck` / `test:runtime` 同样通过。API 的 3 个跳过项来自 `support-feedback.postgres.e2e.test.ts`：当前进程未显式启用 `SUPPORT_FEEDBACK_POSTGRES_E2E`，因此没有运行需要独立测试数据库及 cleanup 连接配置的真实 PostgreSQL 专用 HTTP 集成套件。
+
+runtime smoke 在随机本机回环端口启动编译后的 API，验证 `/health`、`/health/ready`、`/v1/config`、DEMO `/v1/location-search`、全国范围 `/v1/recommendations` 和 `/v1/place-search` 六条路径均为 `200`。它不是群组端点的真实供应商验收，也没有调用真实高德、短信或 OAuth 供应商。
+
+### Android 构建、JVM 与 APK
+
+在临时 ASCII `W:` 工作区路径下，使用项目 JDK 17 执行：
+
+```powershell
+.\apps\android\gradlew.bat -p .\apps\android `
+    :app:testDebugUnitTest :app:compileFixtureAndroidTestKotlin `
+    :app:assembleFixture :app:assembleFixtureAndroidTest `
+    lintDebug assembleDebug --stacktrace --no-daemon --no-build-cache
+```
+
+- 最终结果为 `BUILD SUCCESSFUL`，耗时约 4 分钟；临时 `W:` 映射在结束后清理。
+- App JVM：85 个测试套件、431 个测试，失败 / 错误 / 跳过均为 `0`。
+- `lintDebug`：`0` errors、`16` warnings；没有把警告记作零警告。
+- Debug、Fixture 和 Fixture AndroidTest 三份 APK 构建完成并通过本轮独立 APK 门禁；本节不覆盖 Alpha 构建或 Alpha signer 验证。
+- Fixture AndroidTest 源码编译和 APK 生成成功不等于设备执行成功；本轮群组单台模拟器结果另列于下节，不沿用下方历史模拟器结果作为本轮验收。
+
+测试侧滚动定位、合成截图、支持反馈用例修复及截图前活动窗口 `packageName` 断言完成后的最终 test-only 构建以 `BUILD SUCCESSFUL` 结束，耗时 1 分 50 秒。Debug 与 Fixture APK 哈希未变，Fixture AndroidTest APK 最终哈希已更新如下；三份 APK 的独立门禁再次全部通过。工件校验与单台模拟器的断言、截图复验分别记录，不将其扩称为真机或稳定性矩阵通过：
+
+| 工件 | SHA-256 |
+|---|---|
+| `apps/android/app/build/outputs/apk/debug/app-debug.apk` | `BF9B33BA5AB9C4EDD8D2A8B3E5F643B47B277E83FB0B0500A5FF4505B36503B8` |
+| `apps/android/app/build/outputs/apk/fixture/app-fixture.apk` | `AB58E7F4A0A9495DDBD8016CDA4A2B60A6F6D475A9402DB9EA249D8B0972EC04` |
+| `apps/android/app/build/outputs/apk/androidTest/fixture/app-fixture-androidTest.apk` | `022C97528D993813CE4B728DF6F5CC6001A7A1FB4A49DDC3E90DE6DBF3A1CD97` |
+
+### API 36 单台模拟器：群组设备内合成夹具
+
+设备为独立临时 API 36 / Pixel 6 AVD，序列号 `emulator-5560`。本轮严格执行：
+
+```powershell
+.\scripts\run-android-instrumentation.ps1 `
+    -ClassName 'com.chishenme.app.MainActivityGroupDecisionLocalFixtureTest' `
+    -InstrumentationArguments @{ groupDecisionLocalFixture = 'true' } `
+    -UseDeviceLocalApiFixture `
+    -Serial 'emulator-5560' `
+    -Install
+```
+
+- 首轮 3 个测试均失败：测试试图定位尚未由外层 `LazyColumn` composition 的确认按钮；没有把该轮记录为通过。
+- 修复仅作用于测试滚动定位：先由外层 `LazyColumn.performScrollToNode` 使目标项进入 composition，再使用 `performScrollTo` 和分项滚动。原有请求字段、隐私、只读结果和生命周期断言没有删除或放宽；群组生产代码和默认关闭开关未改变。
+- 该次 test-only 重编译以 `BUILD SUCCESSFUL` 结束，耗时 1 分 44 秒。随后第二轮 3 个 `@Test` 的逐项 instrumentation status 均为 `0`，最终 `OK (3 tests)`，耗时 `33.608s`；严格运行器退出码为 `0`，端口映射完成恢复。
+- 通过范围是同机两位匿名成员完整提交至 LIVE 只读结果、Activity 配置重建保留进度，以及真实后台返回清空且不提交；请求只发送给测试进程内的回环合成 API，不访问真实 provider、账号或生产服务。
+- 支持反馈的 1 个用例首轮同样因懒加载控件定位失败。1 分 41 秒的 test-only 构建后，群组 3 个用例以 `OK (3 tests)` / `33.881s` 通过，支持反馈 1 个用例以 `OK (1 test)` / `15.807s` 通过；两次严格运行器退出码均为 `0` 且映射恢复。该轮随后发现截图被系统对话框遮挡，因此仅保留为断言证据，不能作为最终无阻挡视觉结果。日志为 `artifacts/group-device-2026-09-04/fixture-final-run.log`。
+- 上述被遮挡轮次的截图出现 `System UI isn't responding` 系统对话框；初始截图仍保留为 `group-readonly-result-initial-system-anr.png` 与 `group-live-rights-initial-system-anr.png`，位于同一 artifacts 目录，不能作为无阻挡视觉验收证据。该轮 events 证据只识别到 `com.android.systemui`、`com.android.phone` 与 Google Play services 的首次启动 ANR，没有本 App ANR 的证据，不将系统异常误记为产品 ANR。
+- 已关闭精确的临时 AVD，以 4 GB 内存、4 核和 GPU auto 配置重新启动同一隔离环境，并增加截图前活动窗口 `packageName` 断言：系统或其他 App 窗口遮挡时测试必须失败。最终 test-only 构建后，群组 3 个用例以 `OK (3 tests)` / `58.286s` 通过，支持反馈 1 个用例以 `OK (1 test)` / `26.615s` 通过；逐项 status 均为 `0`，两次严格运行器退出码均为 `0`，端口映射恢复。完整日志为 `artifacts/group-device-2026-09-04/fixture-stable-run.log`；该次 boot 的 events 中 `am_anr` / `am_crash` 计数均为 `0`，该观察仅适用于本轮运行。
+- 支持反馈最终断言覆盖游客合成正文仅进入 JSON body、URL 无 query / Authorization，以及运行时关闭能力后不再提交。群组最终两张 PNG 已逐张查看：没有系统对话框遮挡，中文完整，首个只读候选与实时数据权利说明可见。文件为 `artifacts/group-device-2026-09-04/group-readonly-result.png` 和 `artifacts/group-device-2026-09-04/group-live-rights.png`；同一视口同时覆盖两块内容，所以文件内容及 SHA-256 相同，均为 `99501428B567C1309C79380C2181FFB318388867B31C65F77BE5F03AD28E3970`，不将它们计作两个不同页面的证据。
+- 收尾再次确认本轮 boot 的 events 中 `am_anr` / `am_crash` 计数均为 `0`；已撤销本次 `tcp:3001` 映射，并按 AVD 名称核对后关闭测试模拟器，无 `W:` 映射残留。临时 AVD 与本地 artifacts 保留供后续验收。支持反馈测试修复已单独保留为本地提交 `c83441a`，不表示已推送或合并。
+
+以上只证明该 API 36 / Pixel 6 模拟器合成环境的本轮严格断言与群组截图复验完成，不能替代 API 26–36 目标设备矩阵、真实供应商、无障碍、弱网、不同厂商后台恢复、长期稳定性、真机、生产或公开发布验收。
+
+### 脚本、ECS bundle 与未执行项
+
+- PowerShell 7 与 Windows PowerShell 5.1 下的九个相关脚本 AST / BOM 检查、四种群组开关场景和 ECS bundle 校验均通过；bundle 包含 27 个文件。这里是本地脚本与部署包门禁，不是 ECS 部署或生产动态验收。
+- 当前进程缺少受控的 Alpha 微信与 QQ 公开 AppID，因此本轮未执行完整 `verify.ps1`，未把分项验证拼接宣称为完整发布门禁通过；没有读取签名私钥或要求将 Secret 放入命令。
+- 本轮没有 push、创建 PR 或部署；尚无当前 HEAD 的 GitHub Actions、PR 合并或最终 `main` 全绿证据。
+- 本轮群组与支持反馈的 API 36 单台模拟器合成夹具断言、群组无系统遮挡截图复验已通过，但 API 26–36 目标设备矩阵、长期稳定性、真机、无障碍、弱网、真实供应商链路及授权、Alpha 和公开发布门禁仍待补充。群组功能保持工程候选与默认关闭边界，不宣称已上线或已完成完整设备验收。
+
+## 历史本轮结论（2026-08-22 至 2026-08-28）
 
 - 2026-08-28 PHONE_ONLY 改造正在进行，尚未完成本分支完整 `verify.ps1`、ECS 部署或真实供应商/真机验收。0010→0011 的 `legacy_phone_drain` bridge、共享 `api.env` 原样保留、迁移前备份、0011/角色授权与最终候选回退也尚未在 ECS 动态演练。本报告下方旧计数和 APK 哈希只属于此前提交，不能作为当前改造已通过的证据。
 - 2026-08-26 已将内部 Alpha 身份固定为包名 `com.chishenme.app.alpha`、证书 MD5 `7c64a4f134a3ebe121c1fb055c09a70c`、SHA-256 `31f21374f2f5d40697efb3c50e14d4e8d228991f6acbcde262e37c72ae4c0289`。私钥和密码位于仓库外；Gradle 缺失、部分、错误或过期签名材料时拒绝构建且不回退 Debug signer。该日期生成的 Alpha APK 为历史工件，本轮未执行设备安装验收。

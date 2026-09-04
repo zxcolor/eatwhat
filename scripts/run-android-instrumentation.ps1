@@ -17,7 +17,8 @@ OK 结果、runner 成功终态且不存在失败或跳过标记。
 .PARAMETER InstrumentationArguments
 可选的 instrumentation -e 参数表。最低版本门禁用例需要
 @{ minimumVersionGate = 'true' }；设备内反馈闭环使用
-@{ supportFeedbackLocalFixture = 'true' }。
+@{ supportFeedbackLocalFixture = 'true' }；同设备匿名群组夹具使用
+@{ groupDecisionLocalFixture = 'true' }。
 
 .PARAMETER ExpectedMinimumSupportedVersion
 可选的服务端最低版本精确值。提供后，测试前会读取 /v1/config 并严格比对。
@@ -278,6 +279,8 @@ try {
     $amapLiveFixtureClass = 'com.chishenme.app.MainActivityAmapLiveFixtureTest'
     $supportFeedbackLocalFixtureClass =
         'com.chishenme.app.MainActivitySupportFeedbackLocalFixtureTest'
+    $groupDecisionLocalFixtureClass =
+        'com.chishenme.app.MainActivityGroupDecisionLocalFixtureTest'
     $minimumVersionClass = 'com.chishenme.app.MainActivityMinimumVersionGateTest'
     foreach ($key in $InstrumentationArguments.Keys) {
         $keyText = [string]$key
@@ -295,13 +298,17 @@ try {
         $supportFeedbackLocalFixtureArgumentAllowed =
             $ClassName -ceq $supportFeedbackLocalFixtureClass -and
             $keyText -ceq 'supportFeedbackLocalFixture' -and $valueText -ceq 'true'
+        $groupDecisionLocalFixtureArgumentAllowed =
+            $ClassName -ceq $groupDecisionLocalFixtureClass -and
+            $keyText -ceq 'groupDecisionLocalFixture' -and $valueText -ceq 'true'
         if (-not $minimumVersionArgumentAllowed -and
             -not $configUnavailableArgumentAllowed -and
             -not $runtimeVersionRaiseArgumentAllowed -and
             -not $authLocalFixtureArgumentAllowed -and
             -not $amapLiveFixtureArgumentAllowed -and
-            -not $supportFeedbackLocalFixtureArgumentAllowed) {
-            throw '只允许与专用测试类精确匹配的 minimumVersionGate=true、configUnavailable=true、runtimeVersionRaise=true、authLocalFixture=true、amapLiveFixture=true 或 supportFeedbackLocalFixture=true；任意 shell 值均被拒绝。'
+            -not $supportFeedbackLocalFixtureArgumentAllowed -and
+            -not $groupDecisionLocalFixtureArgumentAllowed) {
+            throw '只允许与专用测试类精确匹配的 minimumVersionGate=true、configUnavailable=true、runtimeVersionRaise=true、authLocalFixture=true、amapLiveFixture=true、supportFeedbackLocalFixture=true 或 groupDecisionLocalFixture=true；任意 shell 值均被拒绝。'
         }
     }
     if ($UseDeviceLocalApiFixture) {
@@ -321,11 +328,16 @@ try {
             $ClassName -ceq $supportFeedbackLocalFixtureClass -and
             $InstrumentationArguments.Count -eq 1 -and
             [string]$InstrumentationArguments['supportFeedbackLocalFixture'] -ceq 'true'
+        $groupDecisionLocalFixtureAllowed =
+            $ClassName -ceq $groupDecisionLocalFixtureClass -and
+            $InstrumentationArguments.Count -eq 1 -and
+            [string]$InstrumentationArguments['groupDecisionLocalFixture'] -ceq 'true'
         if (-not $configUnavailableFixtureAllowed -and
             -not $runtimeVersionRaiseFixtureAllowed -and
             -not $authLocalFixtureAllowed -and
             -not $amapLiveFixtureAllowed -and
-            -not $supportFeedbackLocalFixtureAllowed) {
+            -not $supportFeedbackLocalFixtureAllowed -and
+            -not $groupDecisionLocalFixtureAllowed) {
             throw '-UseDeviceLocalApiFixture 只允许与已登记测试类及其唯一 true 参数精确配套使用。'
         }
         if (-not [string]::IsNullOrWhiteSpace($ExpectedMinimumSupportedVersion)) {
@@ -337,7 +349,8 @@ try {
             $InstrumentationArguments.ContainsKey('runtimeVersionRaise') -or
             $InstrumentationArguments.ContainsKey('authLocalFixture') -or
             $InstrumentationArguments.ContainsKey('amapLiveFixture') -or
-            $InstrumentationArguments.ContainsKey('supportFeedbackLocalFixture')) {
+            $InstrumentationArguments.ContainsKey('supportFeedbackLocalFixture') -or
+            $InstrumentationArguments.ContainsKey('groupDecisionLocalFixture')) {
             throw '设备内 API 专用参数必须同时使用 -UseDeviceLocalApiFixture，以免与 ADB 反向映射争用端口。'
         }
         try {

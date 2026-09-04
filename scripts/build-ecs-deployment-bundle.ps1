@@ -526,10 +526,19 @@ function Assert-EcsOperationalGates {
         -not $compose.Contains('POSTGRES_VOLUME_NAME') -or
         -not $compose.Contains('external: true') -or
         -not $compose.Contains('SMTP_TIMEOUT_MS: "5000"') -or
+        -not $compose.Contains('GROUP_RECOMMENDATIONS_ENABLED: "${GROUP_RECOMMENDATIONS_ENABLED:-false}"') -or
         -not $compose.Contains('WECHAT_OPEN_PLATFORM_REALM_ID: "${WECHAT_OPEN_PLATFORM_REALM_ID:?WECHAT_OPEN_PLATFORM_REALM_ID is required}"') -or
         -not $compose.Contains('QQ_OPEN_PLATFORM_REALM_ID: "${QQ_OPEN_PLATFORM_REALM_ID:?QQ_OPEN_PLATFORM_REALM_ID is required}"') -or
         -not $compose.Contains('cap_drop:')) {
         throw 'ECS Compose is missing offline image, protected volume or capability gates.'
+    }
+    $groupFeatureAssignments = [System.Text.RegularExpressions.Regex]::Matches(
+        $deploymentExample,
+        '(?m)^GROUP_RECOMMENDATIONS_ENABLED=(?<enabled>true|false)$'
+    )
+    if ($groupFeatureAssignments.Count -ne 1 -or
+        $groupFeatureAssignments[0].Groups['enabled'].Value -cne 'false') {
+        throw 'Deployment example must define the group recommendation capability exactly once and keep it disabled by default.'
     }
     $realmAssignments = [System.Text.RegularExpressions.Regex]::Matches(
         $deploymentExample,

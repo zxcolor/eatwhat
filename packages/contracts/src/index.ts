@@ -351,6 +351,118 @@ export type RecommendationResponse = z.infer<
 	typeof RecommendationResponseSchema
 >;
 
+const GroupCuisinePreferencesSchema = z
+	.array(CuisinePreferenceSchema)
+	.max(8)
+	.refine((preferences) => new Set(preferences).size === preferences.length, {
+		message: "群组成员的菜系偏好不得重复",
+	})
+	.meta({ uniqueItems: true });
+
+export const GroupMemberConstraintsSchema = z
+	.object({
+		budgetMaxYuan: z.number().int().min(1).max(2_000).nullable(),
+		availableMinutes: z.number().int().min(15).max(240),
+		radiusMeters: z.number().int().min(200).max(10_000),
+		preferredCuisines: GroupCuisinePreferencesSchema,
+		excludedCuisines: GroupCuisinePreferencesSchema,
+	})
+	.strict()
+	.superRefine((member, context) => {
+		const excluded = new Set(member.excludedCuisines);
+		const overlappingCuisine = member.preferredCuisines.find((cuisine) =>
+			excluded.has(cuisine),
+		);
+		if (overlappingCuisine !== undefined) {
+			context.addIssue({
+				code: "custom",
+				path: ["preferredCuisines"],
+				message: `同一成员不能同时偏好和排除${overlappingCuisine}`,
+			});
+		}
+	});
+export type GroupMemberConstraints = z.infer<
+	typeof GroupMemberConstraintsSchema
+>;
+
+export const GroupRecommendationRequestSchema = z
+	.object({
+		location: CoordinateSchema.strict(),
+		travelMode: TravelModeSchema,
+		members: z.array(GroupMemberConstraintsSchema).min(2).max(8),
+	})
+	.strict();
+export type GroupRecommendationRequest = z.infer<
+	typeof GroupRecommendationRequestSchema
+>;
+
+export const GroupConstraintAggregationSchema = z
+	.object({
+		version: z.literal("group-constraints-v1"),
+		memberCount: z.number().int().min(2).max(8),
+		effectiveBudgetMaxYuan: z.number().int().min(1).max(2_000).nullable(),
+		effectiveAvailableMinutes: z.number().int().min(15).max(240),
+		effectiveRadiusMeters: z.number().int().min(200).max(10_000),
+		preferredCuisines: GroupCuisinePreferencesSchema,
+		excludedCuisines: GroupCuisinePreferencesSchema,
+	})
+	.strict()
+	.superRefine((aggregation, context) => {
+		const excluded = new Set(aggregation.excludedCuisines);
+		const overlappingCuisine = aggregation.preferredCuisines.find((cuisine) =>
+			excluded.has(cuisine),
+		);
+		if (overlappingCuisine !== undefined) {
+			context.addIssue({
+				code: "custom",
+				path: ["preferredCuisines"],
+				message: `聚合结果不能同时偏好和排除${overlappingCuisine}`,
+			});
+		}
+	});
+export type GroupConstraintAggregation = z.infer<
+	typeof GroupConstraintAggregationSchema
+>;
+
+export const GroupRecommendationResultSchema = RecommendationResultSchema.pick({
+	provider: true,
+	dataMode: true,
+	name: true,
+	address: true,
+	rank: true,
+	fitScore: true,
+	sourceRating: true,
+	averageCostYuan: true,
+	distanceMeters: true,
+	estimatedTravelMinutes: true,
+	estimatedMealMinutes: true,
+	openStatus: true,
+	tags: true,
+	reasons: true,
+	warnings: true,
+	confidence: true,
+	sourceAttribution: true,
+}).strict();
+export type GroupRecommendationResult = z.infer<
+	typeof GroupRecommendationResultSchema
+>;
+
+export const GroupRecommendationResponseSchema = z
+	.object({
+		requestId: z.uuid(),
+		generatedAt: z.iso.datetime(),
+		coverage: z.literal("NATIONWIDE"),
+		dataRightsMode: DataRightsModeSchema,
+		ruleVersion: z.string(),
+		aggregation: GroupConstraintAggregationSchema,
+		results: z.array(GroupRecommendationResultSchema).max(3),
+		notice: z.string().nullable(),
+	})
+	.strict();
+export type GroupRecommendationResponse = z.infer<
+	typeof GroupRecommendationResponseSchema
+>;
+
 export const RecommendationEventSchema = z
 	.object({
 		requestId: z.uuid(),
@@ -1179,6 +1291,7 @@ export type AuthCapabilities = z.infer<typeof AuthCapabilitiesSchema>;
 export const ServiceCapabilitiesSchema = z
 	.object({
 		recommendationsEnabled: z.boolean().default(false),
+		groupRecommendationsEnabled: z.boolean().default(false),
 		locationSearchEnabled: z.boolean().default(false),
 		placeSearchEnabled: z.boolean().default(false),
 	})
@@ -1188,6 +1301,7 @@ export type ServiceCapabilities = z.infer<typeof ServiceCapabilitiesSchema>;
 export const DISABLED_SERVICE_CAPABILITIES: Readonly<ServiceCapabilities> =
 	Object.freeze({
 		recommendationsEnabled: false,
+		groupRecommendationsEnabled: false,
 		locationSearchEnabled: false,
 		placeSearchEnabled: false,
 	});

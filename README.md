@@ -13,10 +13,11 @@
 - 当前只实现 AMAP 与 development/test DEMO adapter。公共契约、推荐引擎和 Android 不依赖高德枚举；未来美团、大众点评等来源只通过正式 API 或商务合作新增 adapter，不抓取、不逆向，也不虚构尚不存在的接口。
 - Android 1.2 已落入一批代码候选：早餐、午餐、晚餐分别使用可回显和校验的版本化推荐 profile；奶茶、咖啡、甜品及用户主动选择的体感条件只有在当前 provider 通过原子能力声明明确支持时才显示。当前 AMAP 只支持三餐 profile 与 `NONE` 天气条件，不开放垂类或用户体感；development/test 的 DEMO 可覆盖这些路径，但生产环境禁止启用 DEMO。
 - 用户体感只是一项请求级、主动选择且不持久化的查询条件，不读取实时天气、温度或后台位置，也不构成天气服务接入。早餐、晚餐、垂类和用户体感路径当前均强制使用确定性规则并关闭 AI；响应会回显 profile 与体感应用版本，Android 在展示前校验其与本次请求一致。该批次仍只是代码/JVM 候选，不代表设备、生产、供应商授权或天气服务闭环已经完成。
+- Android 2.x 已落入首个受限代码候选：2–8 人在同一台手机匿名轮流填写预算、时间、距离和菜系约束，由 `POST /v1/group-recommendations` 在服务端重算交集并返回最多 3 个只读候选。它不创建房间、账号、成员身份、投票或稳定地点引用，不调用 AI，也不开放详情、事件、收藏、导航、拨号或分享；2026-09-04 已在独立 API 36 / Pixel 6 模拟器通过 3 条设备内合成 API 用例。生产与 ECS 开关仍默认关闭，API 26–36 目标设备矩阵、真实供应商、无障碍、弱网和发布验收尚未完成。
 - 配置百炼北京地域工作空间地址、API Key 与 `QWEN_ENABLED=true` 后可启用千问；失败时自动回退确定性规则。
 - Android 工程已用 JDK 17、SDK 36、Gradle 8.13 完成 buildSrc/App JVM 测试、Lint、Debug、AndroidTest 与内部 Alpha 构建；模拟器验收结果和当前 APK SHA-256 以验证报告为准。仓库内 `.tools` 仅为本机忽略目录，不会提交到版本库。
 - 登录已在不使用真实供应商凭据的设备内合成 API 夹具中验证手机号登录、邮箱绑定、退出、邮箱登录和再次退出；微信/QQ AppID 缺失时保持 fail closed。高德的 Android 合成展示边界与 ECS 真实 Web Service 技术链路均已验证：云端地点搜索和推荐明确返回 `AMAP/LIVE`、`fitScore=null`、GCJ-02 结果且分享关闭；这不等于商业授权、App 备案或公开发布已经获批。
-- 前后端已按独立部署边界拆分：Android 只持有一个环境对应的 API 基址和公开 v1 契约，不包含数据库或供应商 Secret。普通 Debug 与内部 Alpha 均连接 `https://api.unfinished-era.com/` 的同一 API/PostgreSQL 实例，不复制第二套 Debug 服务、端口、域名或数据库；Debug 仍是独立、可调试且不可公开发布的客户端包。只有不可分发的 `fixture` 自动化测试构建固定使用设备/ADB 可达的 `127.0.0.1:3001` 隔离接口。API 的 `serviceCapabilities` 仍分别声明推荐、地点搜索和服务端独立餐厅关键词搜索是否可用；Android 1.0 只消费推荐与地点搜索能力并逐字段失败关闭，忽略 `placeSearchEnabled`，不会创建对应入口、路由或请求。ECS 当前 release 为 `20260823T071142Z-nationwide`，API 只监听 `127.0.0.1:13001`，数据库只在内部 Docker 网络开放；公网子域已使用独立 DNS、Let's Encrypt 证书和 API vhost 对外提供 v1 API。全国版候选的隔离验收、数据库备份、动态激活和失败自动回退门禁均已通过。
+- 前后端已按独立部署边界拆分：Android 只持有一个环境对应的 API 基址和公开 v1 契约，不包含数据库或供应商 Secret。普通 Debug 与内部 Alpha 均连接 `https://api.unfinished-era.com/` 的同一 API/PostgreSQL 实例，不复制第二套 Debug 服务、端口、域名或数据库；Debug 仍是独立、可调试且不可公开发布的客户端包。只有不可分发的 `fixture` 自动化测试构建固定使用设备/ADB 可达的 `127.0.0.1:3001` 隔离接口。API 的 `serviceCapabilities` 分别声明推荐、同设备群组、地点搜索和服务端独立餐厅关键词搜索是否可用；Android 1.0 只消费推荐与地点搜索能力，2.x 群组入口还要求新增字段在可信配置中明确为 `true`。旧配置缺少该字段时按关闭处理，且 Android 继续忽略 `placeSearchEnabled`。ECS 当前 release 为 `20260823T071142Z-nationwide`，API 只监听 `127.0.0.1:13001`，数据库只在内部 Docker 网络开放；公网子域已使用独立 DNS、Let's Encrypt 证书和 API vhost 对外提供 v1 API。全国版候选的隔离验收、数据库备份、动态激活和失败自动回退门禁均已通过。
 
 ## 本地启动
 
@@ -79,6 +80,7 @@ API 运行进程；管理员、迁移、维护、导出 worker 和其他父终�
 - [OpenAPI v1 规范](./docs/openapi.v1.json)
 - [当前实现边界](./docs/IMPLEMENTATION_STATUS.md)
 - [架构与隐私边界](./docs/ARCHITECTURE.md)
+- [Android 2.x 同设备匿名群组决策架构](./docs/GROUP_DECISION_ARCHITECTURE.md)
 - [数据字典](./docs/DATA_DICTIONARY.md)
 - [测试计划](./docs/TEST_PLAN.md)
 - [当前验证报告](./docs/VERIFICATION_REPORT.md)
@@ -88,7 +90,7 @@ API 运行进程；管理员、迁移、维护、导出 worker 和其他父终�
 ## 安全约束
 
 - 不要提交 `.env`、签名文件、短信/微信/高德/千问密钥。
-- 精确坐标只允许出现在自有 `POST /v1/recommendations` 请求体中；日志与行为事件禁止包含坐标。若经书面授权的供应商官方接口强制使用 HTTPS query，只能按架构文档完成 PIA、最小传输和全链路 URL 禁采集后作为出站例外。
+- 精确坐标只允许出现在自有 `POST /v1/recommendations` 或 `POST /v1/group-recommendations` 请求体中；日志与行为事件禁止包含坐标。若经书面授权的供应商官方接口强制使用 HTTPS query，只能按架构文档完成 PIA、最小传输和全链路 URL 禁采集后作为出站例外。
 - 未获得数据提供方书面许可前，保持 `DATA_RIGHTS_MODE=LIVE_DISPLAY_ONLY`。
 - `LICENSED_ENRICHMENT` 还必须同时提供数据库授权记录 UUID 和未来到期时间；每项能力会按实际供应商查询数据库 operation，环境变量校验不是法律授权本身。
 - 授权缺失、撤销、过期、供应商不匹配或数据库不可用时，服务会在运行中自动降为 `LIVE_DISPLAY_ONLY`；生产 API 还必须配置直接上游的 `TRUSTED_PROXY_CIDRS`，不得无条件信任转发头。

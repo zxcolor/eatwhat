@@ -131,6 +131,8 @@ fun HomeScreen(
     onOpenSettings: () -> Unit,
     onReconnectService: () -> Unit,
     onRecommendationStarted: () -> Unit,
+    groupDecisionEnabled: Boolean,
+    onOpenGroupDecision: () -> Unit,
 ) {
     val context = LocalContext.current
     val activity = context.findActivity()
@@ -364,6 +366,14 @@ fun HomeScreen(
                         )
                     },
                 )
+            }
+            if (groupDecisionEnabled) {
+                item {
+                    GroupDecisionEntryCard(
+                        location = state.input.location,
+                        onOpen = onOpenGroupDecision,
+                    )
+                }
             }
 
             item {
@@ -600,6 +610,53 @@ fun HomeScreen(
                 onQueryChanged = viewModel::updateLocationSearchQuery,
             )
         }
+    }
+}
+
+@Composable
+private fun GroupDecisionEntryCard(
+    location: LocationChoice?,
+    onOpen: () -> Unit,
+) {
+    val colors = currentHomeVisualColors()
+    HomeCard {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            HomeIconTile(colors.blueSoft) {
+                Icon(
+                    AppIcons.Tune,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.size(21.dp),
+                )
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    "多人一起选",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    "2–8 人在同一台手机轮流填写结构化条件；不创建房间、账号或成员档案。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Button(
+            onClick = onOpen,
+            enabled = location != null,
+            modifier = Modifier.fillMaxWidth().heightIn(min = HomeDimens.MinTouchTarget),
+        ) {
+            Text(if (location == null) "先选择共同出发地点" else "开始同机填写")
+        }
+        Text(
+            "成员条件不写入本地存储；提交时只随共同地点与交通方式发送给服务，用于本次求交。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

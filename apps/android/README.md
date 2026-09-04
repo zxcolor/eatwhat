@@ -12,7 +12,7 @@
 - 推荐来源是受约束的通用字符串代码，并显式区分 `LIVE/DEMO`；客户端不按 `AMAP` 等供应商名称分支。
 - 每条推荐只携带不可解释的请求作用域 `resultToken`，不包含高德或其他来源的稳定 POI ID；事件 JSON 仅使用 `requestId/resultToken/type/occurredAt`，token 不展示、不分享，也不进入本地历史。
 - 进程级最低版本门禁只在可信兼容配置到达后开放普通远程功能；首次配置不可用时，游客只能请求关闭 AI 的规则推荐，并以不可进入详情、不可执行动作、不可上报事件的展示态查看或按相同条件重新请求（结果可能相同）。该操作不承诺跨请求反重复，也不上传、暴露或持久化稳定 POI ID。已确认的强制更新保持粘滞，后续配置失败也不会重新开放游客回退；配置代际变化会撤销推荐、地点搜索、账号、收藏和反馈的旧在途结果。锁定态仍保留本机隐私撤回，以及已有会话必要的退出、注销和数据权利路径；同一进程收到新的可信兼容配置后会清除旧更新提示和表单错误，但不会恢复已经失效的旧结果。
-- `/v1/config` 的 `serviceCapabilities` 仍包含推荐、地点搜索和服务端独立餐厅关键词搜索三个 API 能力。Android 1.0 只消费 `recommendationsEnabled` 与 `locationSearchEnabled`，字段缺失时失败关闭；它忽略 `placeSearchEnabled`，即使服务端返回 `true` 也不会创建搜索入口、路由或请求。能力授权与可信配置 generation 绑定，旧配置中的 `true` 不能借用新配置 lease 发起请求；服务关闭或配置失败时首页只报告当前 Android 功能的状态并提供“重新连接服务”。
+- `/v1/config` 的 `serviceCapabilities` 包含推荐、同设备群组、地点搜索和服务端独立餐厅关键词搜索四个 API 能力。Android 1.0 只消费 `recommendationsEnabled` 与 `locationSearchEnabled`；2.x 群组入口还要求 `groupRecommendationsEnabled` 在可信配置中明确为 `true`，旧配置缺失该字段时保持关闭。客户端继续忽略 `placeSearchEnabled`，即使服务端返回 `true` 也不会创建餐厅搜索入口、路由或请求。所有远程授权都与可信配置 generation 绑定，旧配置中的 `true` 不能借用新 generation lease 发起请求。
 - 会话内餐厅详情只按每条结果的 `actions` 能力提供地图查询、复制地址和安全拨号；UI 先做 capability 检查，`AndroidRestaurantActions` 在实际出站前再次检查当前结果会话，动作关闭或配置刷新后不会启动旧 Intent。API v1 为兼容旧客户端继续携带 `share`，但 AMAP/DEMO provider 统一返回 `false`，Android 1.0 也不会展示或执行该动作。不会把 POI 塞进导航参数或持久化。
 - Android 1.0 的分享入口由 `BuildConfig.SHARE_FEATURE_ENABLED=false` 在编译期唯一固定关闭，没有 Gradle 属性、服务端配置或其他远程开关。渲染器、只读 FileProvider、临时文件租约与清理测试仅作为不可达的封存实现保留，不构成 1.0 已开放能力、待验收缺口或发布门禁；2.0 如需重新启用，必须重新评审产品范围、数据权利、隐私、安全和设备兼容性。
 - 本机最近决策只保存餐段、模式、预算、时间、交通和结果数量等白名单摘要，最多 30 条、90 天；不保存位置或餐厅信息，可在设置中清空。
@@ -22,6 +22,7 @@
 - 账号数据导出支持显式选择是否包含近 90 天推荐行为、恢复最近任务、刷新状态及 7 天内下载。下载前由用户通过系统 `ACTION_CREATE_DOCUMENT` 选择位置，随后 App 通过固定的 Bearer 鉴权 API 流式写入；不申请存储权限、不生成签名 URL、不持久化保存 URI/令牌，并在长度或 SHA-256 校验失败时尽力删除或截断未完成文件。
 - “问题反馈与餐厅纠错”已有共享契约、Android 入口和服务端加密持久化/幂等/限流代码，但生产配置默认关闭。只有数据库、独立加密与 HMAC 密钥环及历史密钥覆盖检查全部就绪时，服务端才会公开 `supportFeedbackEnabled=true`；否则设置入口与提交链路均失败关闭，代码存在不代表生产已经启用。
 - Android 1.2 候选为早餐、午餐、晚餐使用独立版本化 profile，并为奶茶、咖啡、甜品及用户主动体感提供能力门控入口。客户端只根据可信配置中完整的六字段 `specialtyCapabilities` 显示和提交这些选项；整个对象缺失时全部关闭，部分字段缺失属于无效配置，不能把遗漏字段推断为开放。
+- Android 2.x 同设备群组候选允许 2–8 人匿名轮流选择固定约束，再由服务端重算共同预算、时间、距离和菜系交集。该流程不接收姓名、成员 ID、自由文本或每人位置，不使用账号、AI、历史、收藏或 `SavedStateHandle`；真正进入后台、隐私撤回、版本/配置代际变化或显式退出都会取消请求并清空内存状态。响应是独立的 display-only 类型，没有 token、坐标、电话、图片或 actions，界面也不注册详情和出站动作。
 
 ## 环境
 
@@ -85,8 +86,8 @@ pnpm dev:api
 
 ### 模拟器语义验收
 
-Fixture APK、本机 development API 和上述反向映射就绪后，可运行真实启动页 UI 验收。当前列出七个
-基于 Compose semantics、不会依赖屏幕坐标的 Activity 用例：
+Fixture APK、本机 development API 和上述反向映射就绪后，可运行真实启动页 UI 验收。当前按下列
+八类场景组织共十个基于 Compose semantics、不会依赖屏幕坐标的 Activity `@Test`：
 
 1. 从首次隐私同意开始，手动选择内置“北京大学东门”，使用默认极速条件请求本地
    DEMO 后端；断言主推荐和虚构数据标识，选择“仅营业中”和“附近方位图”后重建
@@ -112,15 +113,22 @@ Fixture APK、本机 development API 和上述反向映射就绪后，可运行�
 7. 设备内隔离 API 明确开启支持反馈后，从设置进入“问题反馈”，以游客身份提交一条合成
    餐厅纠错；断言正文只在 JSON body、URL 无 query、没有 Authorization。随后运行时关闭能力，
    断言提交控件与设置入口同步失效且不会产生第二个 POST。
+8. 设备内隔离 API 明确开启同设备群组能力后，选择共同出发地点，让两位匿名成员依次确认固定
+   条件并提交；断言请求只有共同坐标、交通方式和严格成员数组，无 Authorization、姓名、ID、
+   自由文本、成员位置、AI 或天气字段。`LIVE_DISPLAY_ONLY` 结果只称首个/其他候选，保持来源顺序、
+   `fitScore=null`，并且没有详情、事件、收藏、导航、拨号、复制、反馈或分享入口。该类包含 3 个
+   `@Test`：完整提交、Activity 配置重建后继续，以及真实后台返回后清空且不提交。
 
-七项用例都使用真实 `MainActivity` 和生产 Hilt 图，不请求系统定位、不创建账号。前六项不
-发送反馈；第七项只向测试进程内的设备回环夹具发送合成纠错，不访问生产或第三方服务。前三项位于 `MainActivityDecisionFlowTest`，需要最低版本兼容的本地 DEMO API；
+十个 `@Test` 都使用真实 `MainActivity` 和生产 Hilt 图，不请求系统定位、不创建账号。前六类不
+发送反馈；第七类只向测试进程内的设备回环夹具发送合成纠错，第八类的 3 个 `@Test` 至多发送
+一次合成群组约束，均不访问生产或第三方服务。前三类位于 `MainActivityDecisionFlowTest`，需要最低版本兼容的本地 DEMO API；
 若后端未返回预期地点或推荐，测试会失败并带出界面上的诊断。第四、五项分别位于
 `MainActivityConfigUnavailableTest` 和 `MainActivityRuntimeVersionRaiseTest`，只允许配合
 精确的 `configUnavailable=true` / `runtimeVersionRaise=true` instrumentation 参数和
 `-UseDeviceLocalApiFixture` 执行。第六项位于 `MainActivityMinimumVersionGateTest`，只有
 `minimumVersionGate=true` 时才执行；第七项位于 `MainActivitySupportFeedbackLocalFixtureTest`，
-只允许 `supportFeedbackLocalFixture=true` 与设备内夹具精确配对，防止在普通 API 配置下误跑。普通兼容配置下的
+只允许 `supportFeedbackLocalFixture=true`；第八项位于 `MainActivityGroupDecisionLocalFixtureTest`，
+只允许 `groupDecisionLocalFixture=true`。两者都必须与设备内夹具精确配对，防止在普通 API 配置下误跑。普通兼容配置下的
 Gradle/UTP 入口是：
 
 ```powershell
@@ -130,8 +138,14 @@ Gradle/UTP 入口是：
 这个无过滤入口会让带显式 opt-in 的专用类安全跳过，不能同时证明各套服务端配置序列。
 专用验收必须按下方严格运行器分环境、分测试类执行。
 
-截至 2026-09-03 的本批次验证未连接 Android 设备，因此新增的第七项目前只纳入源码与
-Fixture AndroidTest 编译门禁，尚未在真机或模拟器执行；不得把它记录为设备验收通过。
+2026-09-04，群组决策 3 个 `@Test` 与支持反馈 1 个 `@Test` 已在独立临时 API 36 / Pixel 6
+模拟器 `emulator-5560` 最终通过严格运行器，分别为 `OK (3 tests)` / `58.286s` 与 `OK (1 test)` /
+`26.615s`，退出码均为 `0` 且端口映射恢复。两类首轮的懒加载控件定位失败已仅在测试侧修复，
+原请求与隐私断言未减少。此前截图被 System UI 对话框遮挡的失败证据已保留；提高临时 AVD
+资源并增加截图前活动窗口 `packageName` 断言后，最终群组截图已逐张确认无遮挡、中文与只读
+候选 / 实时权利说明完整，本次 boot 的 `am_anr` / `am_crash` 为 `0`。这只证明本轮合成环境
+断言及群组截图复验完成，不替代 API 26–36 目标设备矩阵、长期稳定性、真机、无障碍、弱网
+和真实供应商验收；详见验证报告的失败与复验记录。
 
 若宿主机只能构建 APK，但 Gradle 的 UTP 控制台进程无法启动，可在确认这是测试基础设施
 故障、而不是断言失败后，使用 ADB 安装已经构建的 App/Test APK，再调用设备实际登记的
@@ -178,6 +192,14 @@ APK；首次运行或重新构建后显式加 `-Install`：
 .\scripts\run-android-instrumentation.ps1 `
     -ClassName 'com.chishenme.app.MainActivitySupportFeedbackLocalFixtureTest' `
     -InstrumentationArguments @{ supportFeedbackLocalFixture = 'true' } `
+    -UseDeviceLocalApiFixture `
+    -Serial 'emulator-5554' `
+    -Install
+
+# 同机匿名群组：完整提交、配置重建保留、真实后台清空，当前 3 个用例。
+.\scripts\run-android-instrumentation.ps1 `
+    -ClassName 'com.chishenme.app.MainActivityGroupDecisionLocalFixtureTest' `
+    -InstrumentationArguments @{ groupDecisionLocalFixture = 'true' } `
     -UseDeviceLocalApiFixture `
     -Serial 'emulator-5554' `
     -Install
@@ -281,4 +303,14 @@ QQ OpenSDK 不是从 JCenter 或第三方镜像获取。仓库固定保存腾讯
 - 早餐、晚餐、奶茶、咖啡、甜品和任何用户体感请求均在客户端与服务端强制关闭 AI，走确定性规则。服务端响应必须回显本次 profile 和体感应用版本，Android 会在进入结果页前校验目标、餐段、版本、能力要求和体感映射；不匹配响应失败关闭。
 - `LIVE_DISPLAY_ONLY` 的边界没有因专项能力改变：只做本次请求必要过滤，保持 provider 返回顺序，不做自有重排，全部 `fitScore=null`，不持久化或跨请求关联第三方 POI。
 
-当前代码候选只以共享契约、API query-plan/provider/config 定向测试和 Android JVM/静态编译门禁作为工程证据；最终命令与通过数以本批次验证报告为准。尚未连接设备执行新增流程，也未完成生产部署、真实供应商专项分类授权或天气服务验收，不能把 Android 1.2 或 2.x 记为已全部完成。
+本节 Android 1.2 专项候选仍以共享契约、API query-plan/provider/config 定向测试和 Android JVM/静态编译门禁作为工程证据；最终命令与通过数以本批次验证报告为准。其新增专项设备流程、生产部署、真实供应商专项分类授权或天气服务验收尚未完成；下节群组的单台模拟器合成夹具结果不补足这些门禁，也不能把 Android 1.2 或 2.x 记为已全部完成。
+
+## Android 2.x 同设备群组候选（非完整交付）
+
+- 首页只有在可信兼容配置明确返回 `groupRecommendationsEnabled=true` 且已经选择共同地点时才开放入口；环境变量、ECS Compose 与部署示例默认均为 `false`。
+- 2–8 位匿名成员在同一台手机上依次选择预算上限、可用时间、最远距离、偏好和排除菜系。客户端与服务端分别按 `group-constraints-v1` 重算，服务端回显必须逐字段一致，否则 Android 拒绝展示。
+- 请求固定为普通午餐、`GUIDED/BALANCED`、无体感、默认偏好向量且 AI 关闭。群组服务不注入 Qwen、普通推荐 token registry、账号或持久化仓库。
+- `LIVE_DISPLAY_ONLY` 只做本次共同约束收窄并保持 provider 顺序，所有 `fitScore=null`；完整逐来源授权时才可使用现有透明规则排序，但仍不称成员满意度或公平度。
+- Android 使用 Activity 级纯内存 ViewModel 跨旋转保留当前填写；真实后台、隐私撤回、强制更新、配置代际变化、显式退出或进程死亡会取消在途请求并清空。内部路由无参数，结果只读且不含详情或出站动作。
+
+完整边界和验证矩阵见 [`docs/GROUP_DECISION_ARCHITECTURE.md`](../../docs/GROUP_DECISION_ARCHITECTURE.md)。2026-09-04 已在独立 API 36 / Pixel 6 模拟器通过群组的 3 条设备内合成 API 用例，覆盖完整提交、配置重建保留和真实后台清空；生产开关仍默认关闭。真实供应商、数据权利、无障碍、弱网、API 26–36 目标设备矩阵和完整发布门禁仍未完成，因此不能标记 Android 2.x 完成。

@@ -321,6 +321,8 @@ data class ServiceCapabilities(
     val recommendationsEnabled: Boolean = false,
     val locationSearchEnabled: Boolean = false,
     val placeSearchEnabled: Boolean = false,
+    /** Missing on older v1 config responses keeps the 2.x group path closed. */
+    val groupRecommendationsEnabled: Boolean = false,
 ) {
     companion object {
         val Disabled = ServiceCapabilities()

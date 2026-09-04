@@ -24,6 +24,7 @@ const placeSearchProvider = {
 } as PlaceKeywordSearchProvider;
 
 function config(input?: {
+	groupRecommendations?: boolean;
 	accounts?: boolean;
 	favorites?: boolean;
 	history?: boolean;
@@ -60,6 +61,7 @@ function config(input?: {
 		}),
 		features: Object.freeze({
 			...base.features,
+			groupRecommendationsEnabled: input?.groupRecommendations ?? false,
 			accountsEnabled,
 			favoritesEnabled: input?.favorites ?? false,
 			historyEnabled: input?.history ?? false,
@@ -115,6 +117,9 @@ describe("FeatureConfigService persistence capabilities", () => {
 
 		await expect(service.getPublicConfig()).resolves.toMatchObject({
 			favoritesEnabled: false,
+			serviceCapabilities: {
+				groupRecommendationsEnabled: false,
+			},
 			persistenceCapabilities: {
 				favoritesEnabled: false,
 				historyEnabled: false,
@@ -158,6 +163,83 @@ describe("FeatureConfigService persistence capabilities", () => {
 			},
 		});
 		expect(fullyCapableProvider.supportsQueryPlan).toHaveBeenCalled();
+	});
+
+	it("advertises group recommendations only behind both the switch and concrete core plan support", async () => {
+		const disabledByDefault = new FeatureConfigService(
+			config(),
+			placeProvider,
+			locationSearchProvider,
+			placeSearchProvider,
+			policy(),
+			supportFeedback(),
+		);
+		await expect(disabledByDefault.getPublicConfig()).resolves.toMatchObject({
+			serviceCapabilities: { groupRecommendationsEnabled: false },
+		});
+
+		const enabled = new FeatureConfigService(
+			config({ groupRecommendations: true }),
+			placeProvider,
+			locationSearchProvider,
+			placeSearchProvider,
+			policy(),
+			supportFeedback(),
+		);
+		await expect(enabled.getPublicConfig()).resolves.toMatchObject({
+			serviceCapabilities: {
+				recommendationsEnabled: true,
+				groupRecommendationsEnabled: true,
+			},
+		});
+
+		const unsupportedProvider = {
+			kind: "AUTHORIZED_VENDOR",
+			dataMode: "LIVE",
+			supportsQueryPlan: vi.fn(() => false),
+		} as unknown as PlaceProvider;
+		const unsupported = new FeatureConfigService(
+			config({ groupRecommendations: true }),
+			unsupportedProvider,
+			locationSearchProvider,
+			placeSearchProvider,
+			policy(),
+			supportFeedback(),
+		);
+		await expect(unsupported.getPublicConfig()).resolves.toMatchObject({
+			serviceCapabilities: {
+				recommendationsEnabled: false,
+				groupRecommendationsEnabled: false,
+			},
+		});
+
+		let capabilityProbeCount = 0;
+		const independentlyFailingProvider = {
+			kind: "AUTHORIZED_VENDOR",
+			dataMode: "LIVE",
+			supportsQueryPlan: vi.fn(() => {
+				capabilityProbeCount += 1;
+				if (capabilityProbeCount === 1) return true;
+				throw new Error("private second probe failure");
+			}),
+		} as unknown as PlaceProvider;
+		const independentlyFailed = new FeatureConfigService(
+			config({ groupRecommendations: true }),
+			independentlyFailingProvider,
+			locationSearchProvider,
+			placeSearchProvider,
+			policy(),
+			supportFeedback(),
+		);
+		const independentlyFailedResult =
+			await independentlyFailed.getPublicConfig();
+		expect(independentlyFailedResult.serviceCapabilities).toMatchObject({
+			recommendationsEnabled: true,
+			groupRecommendationsEnabled: false,
+		});
+		expect(JSON.stringify(independentlyFailedResult)).not.toContain(
+			"private second probe failure",
+		);
 	});
 
 	it("fails adapter capability errors closed without exposing the failure", async () => {

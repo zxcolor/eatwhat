@@ -150,6 +150,7 @@ try {
         NODE_ENV = 'development'
         AMAP_ENABLED = 'true'
         AMAP_WEB_SERVICE_KEY = ''
+        GROUP_RECOMMENDATIONS_ENABLED = 'true'
     }
     $runtimeFixture = New-RuntimeChildEnvironment -Entries $isolationFixture
     $buildFixture = New-MinimalChildEnvironment
@@ -162,6 +163,10 @@ try {
     }
     if ($buildFixture.Contains('AMAP_WEB_SERVICE_KEY')) {
         throw '本机启动器把运行时高德密钥泄漏给了构建进程。'
+    }
+    if ($runtimeFixture['GROUP_RECOMMENDATIONS_ENABLED'] -cne 'true' -or
+        $buildFixture.Contains('GROUP_RECOMMENDATIONS_ENABLED')) {
+        throw '本机启动器没有把群组能力开关只注入运行进程。'
     }
 } finally {
     $env:CHISHENME_PARENT_SECRET_DECOY = $previousDecoySecret
@@ -1359,7 +1364,8 @@ try {
         'com.chishenme.app.MainActivityRuntimeVersionRaiseTest',
         'com.chishenme.app.MainActivityAuthLocalFixtureTest',
         'com.chishenme.app.MainActivityAmapLiveFixtureTest',
-        'com.chishenme.app.MainActivitySupportFeedbackLocalFixtureTest'
+        'com.chishenme.app.MainActivitySupportFeedbackLocalFixtureTest',
+        'com.chishenme.app.MainActivityGroupDecisionLocalFixtureTest'
     )
     Assert-ApkDexClasses -Label 'Alpha' -Path $alphaApkPath -RequiredClasses @(
         'com.chishenme.app.ChiShenMeApplication',
