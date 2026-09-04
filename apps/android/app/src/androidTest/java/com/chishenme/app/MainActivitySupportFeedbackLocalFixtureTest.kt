@@ -3,7 +3,9 @@ package com.chishenme.app
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -12,7 +14,12 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.datastore.preferences.preferencesDataStoreFile
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
@@ -111,31 +118,33 @@ class MainActivitySupportFeedbackLocalFixtureTest {
             }
             composeRule.onNodeWithContentDescription("设置").assertIsDisplayed().performClick()
             awaitText("设置与透明度")
-            composeRule.onNodeWithText("问题反馈与餐厅纠错")
-                .performScrollTo()
+            scrollToContent(hasText("问题反馈与餐厅纠错"))
                 .assertIsDisplayed()
-            composeRule.onNode(hasText("提交") and hasClickAction())
-                .performScrollTo()
+            scrollToContent(hasText("提交") and hasClickAction())
                 .assertIsDisplayed()
                 .assertIsEnabled()
                 .performClick()
 
             awaitText("问题反馈")
-            composeRule.onNodeWithText("餐厅纠错")
-                .performScrollTo()
+            scrollToContent(hasText("餐厅纠错"))
                 .assertIsDisplayed()
                 .performClick()
-            composeRule.onNode(hasSetTextAction() and hasText("请描述问题"))
-                .performScrollTo()
+            scrollToContent(hasSetTextAction() and hasText("请描述问题"))
                 .assertIsDisplayed()
                 .performTextInput(PLACE_CORRECTION_MESSAGE)
-            composeRule.onNode(hasText("提交反馈") and hasClickAction())
-                .performScrollTo()
+            // Hide only the IME; pressing system Back could instead exit this
+            // screen and clear the draft through its production BackHandler.
+            scenario.onActivity { activity ->
+                WindowCompat.getInsetsController(activity.window, activity.window.decorView)
+                    .hide(WindowInsetsCompat.Type.ime())
+            }
+            composeRule.waitForIdle()
+            scrollToContent(hasText("提交反馈") and hasClickAction())
                 .assertIsDisplayed()
                 .assertIsEnabled()
                 .performClick()
 
-            awaitText("反馈已受理", substring = true)
+            awaitScrollableText("反馈已受理", substring = true)
             composeRule.waitUntil(UI_TIMEOUT_MS) { feedbackCallCount.get() == 1 }
             assertSubmittedRequest()
 
@@ -153,11 +162,9 @@ class MainActivitySupportFeedbackLocalFixtureTest {
                 .assertIsDisplayed()
                 .performClick()
             awaitText("设置与透明度")
-            composeRule.onNodeWithText("问题反馈与餐厅纠错")
-                .performScrollTo()
+            scrollToContent(hasText("问题反馈与餐厅纠错"))
                 .assertIsDisplayed()
-            composeRule.onNodeWithText("当前未开放")
-                .performScrollTo()
+            scrollToContent(hasText("当前未开放"))
                 .assertIsDisplayed()
             composeRule.onAllNodes(hasText("提交") and hasClickAction()).assertCountEquals(0)
         }
@@ -208,6 +215,29 @@ class MainActivitySupportFeedbackLocalFixtureTest {
 
     private fun awaitText(text: String, substring: Boolean = false) {
         composeRule.waitUntil(UI_TIMEOUT_MS) { hasUiText(text, substring) }
+        composeRule.onNodeWithText(text, substring = substring).assertIsDisplayed()
+    }
+
+    private fun scrollToContent(matcher: SemanticsMatcher): SemanticsNodeInteraction {
+        // A short viewport or visible IME can leave later LazyColumn items
+        // uncomposed. Materialize the item before targeting its child node.
+        composeRule.onNode(
+            hasScrollToIndexAction() and !hasAnyAncestor(hasScrollToIndexAction()),
+        ).performScrollToNode(matcher)
+        return composeRule.onNode(matcher).performScrollTo()
+    }
+
+    private fun awaitScrollableText(text: String, substring: Boolean = false) {
+        composeRule.waitUntil(UI_TIMEOUT_MS) {
+            try {
+                scrollToContent(hasText(text, substring = substring)).assertIsDisplayed()
+                true
+            } catch (_: AssertionError) {
+                // The asynchronous receipt may not yet be a list item. Retain
+                // the original bounded wait and fail if it never becomes visible.
+                false
+            }
+        }
         composeRule.onNodeWithText(text, substring = substring).assertIsDisplayed()
     }
 
