@@ -19,12 +19,31 @@ import com.chishenme.app.data.remote.TravelMode
 import java.net.UnknownHostException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import retrofit2.HttpException
+import retrofit2.Response
 
 class GroupRecommendationRepositoryTest {
+    @Test
+    fun `range changed during submission returns fixed group reconnection guidance`() = runTest {
+        val repository = GroupRecommendationRepository(api {
+            throw HttpException(Response.error<Any>(
+                400,
+                """{"requestId":"11111111-1111-4111-8111-111111111111","code":"RADIUS_EXCEEDS_ACTIVE_COVERAGE","message":"untrusted upstream text"}"""
+                    .toResponseBody("application/json; charset=utf-8".toMediaType()),
+            ))
+        })
+        val failure = repository.recommend(request, aggregation, DataRightsMode.LIVE_DISPLAY_ONLY, "rule-v2")
+            as GroupRecommendationOutcome.Failure
+        assertEquals(GroupRecommendationFailureKind.SERVER, failure.kind)
+        assertEquals("服务范围已更新，请重新连接服务，再进入群组复核共同距离。", failure.message)
+    }
+
     private val request = GroupRecommendationRequest(
         location = Coordinate(39.9, 116.4, 50.0, CoordinateReferenceSystem.WGS84),
         travelMode = TravelMode.WALK,

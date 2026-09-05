@@ -12,6 +12,10 @@ import {
 	type RecommendationContext,
 	type RecommendationReason,
 } from "@chi-shen-me/contracts";
+import {
+	DEFAULT_RECOMMENDATION_RULES,
+	type RecommendationRules,
+} from "../../operational-config/operational-config.types.js";
 import type { PlaceCandidate } from "./place-candidate.js";
 
 export interface RankCandidatesInput {
@@ -20,6 +24,7 @@ export interface RankCandidatesInput {
 	readonly candidates: readonly PlaceCandidate[];
 	readonly dataRightsMode: DataRightsMode;
 	readonly recentPlaceIds?: ReadonlySet<string>;
+	readonly rules?: RecommendationRules;
 }
 
 /**
@@ -288,6 +293,7 @@ function candidateReasons(
 	context: RecommendationContext,
 	intent: IntentProfile,
 	dataRightsMode: DataRightsMode,
+	rules: RecommendationRules = DEFAULT_RECOMMENDATION_RULES,
 ): RecommendationReason[] {
 	const describesProviderResult = dataRightsMode === "LIVE_DISPLAY_ONLY";
 	const reasons: RecommendationReason[] = [
@@ -299,7 +305,9 @@ function candidateReasons(
 	if (
 		context.budgetMaxYuan !== null &&
 		candidate.averageCostYuan !== null &&
-		candidate.averageCostYuan <= context.budgetMaxYuan
+		candidate.averageCostYuan <= context.budgetMaxYuan &&
+		(describesProviderResult ||
+			(context.preferenceVector.budget > 0 && rules.budgetWeight > 0))
 	) {
 		reasons.push({
 			code: "BUDGET_FIT",
@@ -310,7 +318,8 @@ function candidateReasons(
 		candidate.estimatedTravelMinutes * 2 + candidate.estimatedMealMinutes;
 	if (
 		totalMinutes <= context.availableMinutes &&
-		(describesProviderResult || context.preferenceVector.time > 0)
+		(describesProviderResult ||
+			(context.preferenceVector.time > 0 && rules.timeWeight > 0))
 	) {
 		reasons.push({
 			code: "TIME_FIT",
@@ -323,7 +332,8 @@ function candidateReasons(
 	if (
 		intentMatch !== undefined &&
 		reasons.length < 3 &&
-		(describesProviderResult || context.preferenceVector.mealMatch > 0)
+		(describesProviderResult ||
+			(context.preferenceVector.mealMatch > 0 && rules.intentWeight > 0))
 	) {
 		reasons.push({
 			code: "MEAL_FIT",
@@ -333,7 +343,8 @@ function candidateReasons(
 	if (
 		candidate.sourceRating !== null &&
 		reasons.length < 3 &&
-		(describesProviderResult || context.preferenceVector.quality > 0)
+		(describesProviderResult ||
+			(context.preferenceVector.quality > 0 && rules.qualityWeight > 0))
 	) {
 		reasons.push({
 			code: "QUALITY_SIGNAL",
@@ -347,20 +358,34 @@ function scoreCandidate(
 	candidate: PlaceCandidate,
 	input: RankCandidatesInput,
 ): ScoredCandidate {
+	const rules = input.rules ?? DEFAULT_RECOMMENDATION_RULES;
 	const isRecent =
 		input.recentPlaceIds?.has(candidate.providerPlaceId) ?? false;
-	const diversity = isRecent ? 2 : 10;
+	const diversity = ((isRecent ? 2 : 10) / 10) * rules.diversityWeight;
 	const preferences = input.context.preferenceVector;
 	const rawScore =
-		applyPreference(qualityScore(candidate), preferences.quality) +
-		applyPreference(timeScore(candidate, input.context), preferences.time) +
-		applyPreference(budgetScore(candidate, input.context), preferences.budget) +
 		applyPreference(
-			mealMatchScore(candidate, input.intent),
+			(qualityScore(candidate) / 25) * rules.qualityWeight,
+			preferences.quality,
+		) +
+		applyPreference(
+			(timeScore(candidate, input.context) / 25) * rules.timeWeight,
+			preferences.time,
+		) +
+		applyPreference(
+			(budgetScore(candidate, input.context) / 20) * rules.budgetWeight,
+			preferences.budget,
+		) +
+		applyPreference(
+			(mealMatchScore(candidate, input.intent) / 15) * rules.intentWeight,
 			preferences.mealMatch,
 		) +
 		applyPreference(diversity, preferences.diversity) +
-		candidate.editorialAdjustment;
+		clamp(
+			candidate.editorialAdjustment,
+			-rules.operationsAdjustmentMaximum,
+			rules.operationsAdjustmentMaximum,
+		);
 	return {
 		candidate,
 		fitScore: Math.round(clamp(rawScore, 0, 100)),
@@ -371,6 +396,7 @@ function scoreCandidate(
 			input.context,
 			input.intent,
 			input.dataRightsMode,
+			rules,
 		),
 	};
 }
@@ -382,6 +408,7 @@ function primaryTag(candidate: PlaceCandidate): string {
 function selectLicensedResults(
 	scored: readonly ScoredCandidate[],
 	context: RecommendationContext,
+	rules: RecommendationRules,
 ): ScoredCandidate[] {
 	const remaining = [...scored];
 	const selected: ScoredCandidate[] = [];
@@ -393,7 +420,8 @@ function selectLicensedResults(
 				? 7
 				: 12;
 	const duplicateTagPenalty = applyPreference(
-		baseDuplicateTagPenalty,
+		baseDuplicateTagPenalty *
+			(rules.diversityWeight / DEFAULT_RECOMMENDATION_RULES.diversityWeight),
 		context.preferenceVector.diversity,
 	);
 
@@ -427,6 +455,7 @@ export function rankCandidates(
 			? selectLicensedResults(
 					filtered.map((candidate) => scoreCandidate(candidate, input)),
 					input.context,
+					input.rules ?? DEFAULT_RECOMMENDATION_RULES,
 				)
 			: filtered
 					.sort((a, b) => a.providerRank - b.providerRank)

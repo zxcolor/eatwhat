@@ -8,13 +8,15 @@ import {
 	type SpecialtyCapabilities,
 	type WeatherContextRequest,
 } from "@chi-shen-me/contracts";
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import { APP_CONFIG, type AppConfig } from "../config/app-config.js";
 import { DataRightsPolicy } from "../config/data-rights-policy.js";
 import {
 	LOCATION_SEARCH_PROVIDER,
 	type LocationSearchProvider,
 } from "../location-search/location-search.provider.js";
+import { OperationalConfigService, OPERATIONAL_CONFIG_CACHE_TTL_MS } from "../operational-config/operational-config.service.js";
+import { isOperationalConfigAvailable, startupOperationalConfig } from "../operational-config/operational-config.types.js";
 import {
 	PLACE_KEYWORD_SEARCH_PROVIDER,
 	type PlaceKeywordSearchProvider,
@@ -95,6 +97,8 @@ export class FeatureConfigService {
 		private readonly placeSearch: PlaceKeywordSearchProvider,
 		private readonly dataRightsPolicy: DataRightsPolicy,
 		private readonly supportFeedback: SupportFeedbackService,
+		@Optional()
+		private readonly operationalConfig?: OperationalConfigService,
 	) {}
 
 	private supportsProfile(
@@ -139,6 +143,9 @@ export class FeatureConfigService {
 	}
 
 	async getPublicConfig(): Promise<FeatureConfig> {
+		const operational =
+			(await this.operationalConfig?.current()) ??
+			startupOperationalConfig(this.config);
 		let effectiveDataRightsMode: DataRightsMode = "LIVE_DISPLAY_ONLY";
 		let canPersistPlaceReference = false;
 		try {
@@ -178,8 +185,19 @@ export class FeatureConfigService {
 			supportFeedbackEnabled = false;
 		}
 		const recommendationsEnabled =
+			isOperationalConfigAvailable(operational) &&
 			this.places.kind !== "UNAVAILABLE" &&
 			this.supportsProfile(DEFAULT_RECOMMENDATION_PROBE);
+		const aiStatus = !isOperationalConfigAvailable(operational)
+			? "CONFIG_UNAVAILABLE"
+			: !this.config.qwen.enabled
+				? "SERVER_DISABLED"
+				: !operational.aiAssistanceEnabled
+					? "OPERATOR_DISABLED"
+					: !operational.prompt.enabled
+						? "PROMPT_DISABLED"
+						: "ENABLED";
+		const aiEnabled = aiStatus === "ENABLED";
 		const groupRecommendationsEnabled =
 			this.config.features.groupRecommendationsEnabled &&
 			recommendationsEnabled &&
@@ -187,19 +205,30 @@ export class FeatureConfigService {
 			// MEAL/LUNCH/NONE plan. The endpoint repeats this check before any I/O.
 			this.supportsProfile(DEFAULT_RECOMMENDATION_PROBE);
 		return FeatureConfigSchema.parse({
-			coverageName: "全国范围",
+			coverageName:
+				operational.coverage.areaCode === "NATIONWIDE"
+					? "全国范围"
+					: operational.coverage.areaCode,
 			dataRightsMode: effectiveDataRightsMode,
-			aiEnabled: this.config.qwen.enabled,
+			aiEnabled,
 			accountsEnabled: this.config.features.accountsEnabled,
 			favoritesEnabled,
 			supportFeedbackEnabled,
 			persistenceCapabilities,
-			minimumSupportedVersion: this.config.features.minimumSupportedVersion,
+			minimumSupportedVersion: operational.minimumAppVersions.android,
+			recommendationDefaults: {
+				areaCode: operational.coverage.areaCode,
+				defaultRadiusMeters: operational.coverage.defaultRadiusMeters,
+				maximumRadiusMeters: operational.coverage.maximumRadiusMeters,
+			},
+			minimumSupportedVersions: operational.minimumAppVersions,
 			ruleVersion: this.config.versions.rule,
-			promptVersion: this.config.versions.prompt,
-			modelVersion: this.config.qwen.enabled
-				? this.config.qwen.model
-				: this.config.versions.ruleFallbackModel,
+			rulesConfigVersion: operational.versions["recommendations.rules"],
+			promptVersion: operational.prompt.promptVersion,
+			modelVersion:
+				aiEnabled
+					? operational.prompt.modelVersion
+					: this.config.versions.ruleFallbackModel,
 			serviceCapabilities: {
 				recommendationsEnabled,
 				groupRecommendationsEnabled,
@@ -207,6 +236,13 @@ export class FeatureConfigService {
 				placeSearchEnabled: this.placeSearch.dataSource !== "UNAVAILABLE",
 			},
 			specialtyCapabilities: this.specialtyCapabilities(recommendationsEnabled),
+			operationalConfig: {
+				source: operational.source,
+				lastSuccessfulReadAt: operational.lastSuccessfulReadAt,
+				cacheTtlMs: OPERATIONAL_CONFIG_CACHE_TTL_MS,
+				versions: operational.versions,
+				aiStatus,
+			},
 			authCapabilities: {
 				accountsEnabled: this.config.auth.enabled,
 				registrationEnabled: this.config.auth.registrationEnabled,

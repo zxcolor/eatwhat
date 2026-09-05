@@ -2,6 +2,9 @@ package com.chishenme.app
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasText
@@ -12,6 +15,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.datastore.preferences.preferencesDataStoreFile
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
@@ -23,6 +28,7 @@ import com.chishenme.app.data.remote.API_CONTRACT_VERSION_HEADER
 import java.io.IOException
 import java.net.InetAddress
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonObject
@@ -57,6 +63,8 @@ class MainActivityAmapLiveFixtureTest {
     private lateinit var server: MockWebServer
     private var serverStarted = false
     private val requests = CopyOnWriteArrayList<CapturedRequest>()
+    @Volatile
+    private var radiusDefaultsEnabled = false
 
     @Before
     fun startDeviceServerAndResetState() {
@@ -65,11 +73,13 @@ class MainActivityAmapLiveFixtureTest {
             InstrumentationRegistry.getArguments().getString(OPT_IN_ARGUMENT) == "true",
         )
         val application = ApplicationProvider.getApplicationContext<ChiShenMeApplication>()
-        val preferencesFile = application.preferencesDataStoreFile(PREFERENCES_FILE)
-        assertTrue(
-            "无法重置高德展示夹具状态：${preferencesFile.absolutePath}",
-            !preferencesFile.exists() || preferencesFile.delete(),
-        )
+        if (preferencesReset.compareAndSet(false, true)) {
+            val preferencesFile = application.preferencesDataStoreFile(PREFERENCES_FILE)
+            assertTrue(
+                "无法重置高德展示夹具状态：${preferencesFile.absolutePath}",
+                !preferencesFile.exists() || preferencesFile.delete(),
+            )
+        }
 
         server = MockWebServer().apply { dispatcher = amapDispatcher() }
         try {
@@ -95,18 +105,8 @@ class MainActivityAmapLiveFixtureTest {
     @Test
     fun liveAmapResponse_isAttributedUnscoredAndCannotLaunchOutboundActions() {
         ActivityScenario.launch(MainActivity::class.java).use {
-            awaitText("同意并继续")
-            assertEquals("隐私同意前不得访问配置或地点服务", 0, server.requestCount)
-            composeRule.onNodeWithText("同意并继续").performClick()
-            awaitText("手动选择")
-            composeRule.onNodeWithText("手动选择").performClick()
-            composeRule.onNodeWithText("快捷地点（始终可用）").performScrollTo()
-            composeRule.onNodeWithText(MANUAL_LOCATION)
-                .performScrollTo()
-                .assertIsDisplayed()
-                .performClick()
-            composeRule.onNode(hasClickAction() and hasText("帮我决定"))
-                .performScrollTo()
+            enterManualLocation()
+            scrollHomeTo(hasClickAction() and hasText("帮我决定"))
                 .assertIsDisplayed()
                 .performClick()
 
@@ -164,6 +164,125 @@ class MainActivityAmapLiveFixtureTest {
         assertTransportContract()
     }
 
+    @Test
+    fun publicRadiusDefaults_showExactOptionsAndRequireExplicitCorrectionBeforeSubmission() {
+        radiusDefaultsEnabled = true
+        ActivityScenario.launch(MainActivity::class.java).use {
+            enterManualLocation()
+            scrollHomeTo(hasText("精细匹配") and hasClickAction()).performClick()
+            radiusOption("750 m").assertIsSelected()
+            radiusOption("1.25 km").assertIsDisplayed()
+            captureSyntheticScreenshot("single-radius-750-default.png")
+
+            // The initial configuration notice can cover the bottom of the
+            // scrolled scenario row. Wait for its real dismissal before tapping.
+            composeRule.waitUntil(UI_TIMEOUT_MS) {
+                !hasUiText("已按当前服务建议将最远距离调整为 750 米。")
+            }
+            // Fixed options respect the live upper bound. A user's scenario is
+            // still preserved and must be corrected explicitly when it exceeds it.
+            scrollHomeTo(hasText("工作日午餐") and hasClickAction()).performClick()
+            composeRule.onNode(hasText("工作日午餐") and hasClickAction()).assertIsSelected()
+            val error = "当前服务最远支持 1250 米，你选择了 1500 米。请调整最远距离后重试。"
+            scrollHomeTo(hasText("帮我决定") and hasClickAction()).performClick()
+            val submittedRadii = requests.filter { it.path == "/v1/recommendations" }.map {
+                Json.parseToJsonElement(it.body).jsonObject.getValue("radiusMeters").jsonPrimitive.content
+            }
+            assertEquals(
+                "距离超限不得发送推荐请求，已发送的半径：$submittedRadii",
+                0,
+                submittedRadii.size,
+            )
+            scrollHomeTo(hasText(error)).assertIsDisplayed()
+            captureSyntheticScreenshot("single-radius-over-limit.png")
+            scrollHomeTo(hasText("精细匹配") and hasClickAction()).performClick()
+            radiusOption("1.5 km").assertIsSelected()
+            scrollHomeTo(hasText("将最远距离改为 750 米") and hasClickAction()).performClick()
+            radiusOption("750 m").assertIsSelected()
+            captureSyntheticScreenshot("single-radius-explicit-correction.png")
+            scrollHomeTo(hasText("帮我决定") and hasClickAction()).performClick()
+
+            awaitText(RESTAURANT_NAME)
+            scrollResultsTo(RESTAURANT_NAME)
+            composeRule.onNode(hasClickAction() and hasText(RESTAURANT_NAME, substring = true))
+                .assertIsDisplayed()
+                .performClick()
+            awaitText("餐厅详情")
+            composeRule.waitUntil(timeoutMillis = UI_TIMEOUT_MS) {
+                requests.count { it.path == "/v1/recommendation-events" } >= 2
+            }
+        }
+        assertTransportContract(expectedRadiusMeters = 750)
+    }
+
+    private fun enterManualLocation() {
+        composeRule.waitUntil(UI_TIMEOUT_MS) {
+            hasUiText("同意并继续") || hasUiText("手动选择")
+        }
+        if (hasUiText("同意并继续")) {
+            assertEquals("隐私同意前不得访问配置或地点服务", 0, server.requestCount)
+            composeRule.onNodeWithText("同意并继续").performClick()
+        }
+        composeRule.waitUntil(UI_TIMEOUT_MS) {
+            requests.any { it.path == "/v1/config" } && hasUiText("手动选择")
+        }
+        composeRule.onNodeWithText("手动选择").performClick()
+        composeRule.onNodeWithText("快捷地点（始终可用）").performScrollTo()
+        composeRule.onNodeWithText(MANUAL_LOCATION)
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
+    }
+
+    private fun scrollHomeTo(matcher: SemanticsMatcher): SemanticsNodeInteraction {
+        composeRule.onNode(
+            hasScrollToIndexAction() and !hasAnyAncestor(hasScrollToIndexAction()),
+        ).performScrollToNode(matcher)
+        return composeRule.onNode(matcher).performScrollTo().assertIsDisplayed()
+    }
+
+    private fun radiusOption(text: String): SemanticsNodeInteraction {
+        scrollHomeTo(hasText("最远距离"))
+        val radiusLabels = listOf("500 m", "750 m", "1 km", "1.25 km", "1.5 km", "3 km", "5 km")
+            .map { hasText(it) }.reduce { result, next -> result or next }
+        composeRule.onNode(
+            hasScrollToIndexAction() and hasAnyAncestor(hasScrollToIndexAction()) and
+                hasAnyDescendant(radiusLabels),
+        ).performScrollToNode(hasText(text))
+        return composeRule.onNode(hasClickAction() and hasText(text))
+            .performScrollTo()
+            .assertIsDisplayed()
+    }
+
+    private fun captureSyntheticScreenshot(fileName: String) {
+        composeRule.waitForIdle()
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        composeRule.waitUntil(UI_TIMEOUT_MS) {
+            val activeWindow = instrumentation.uiAutomation.rootInActiveWindow
+                ?: return@waitUntil false
+            assertEquals(
+                "A system dialog or another app must not obscure the fixture screenshot",
+                instrumentation.targetContext.packageName,
+                activeWindow.packageName?.toString(),
+            )
+            true
+        }
+        assertEquals(
+            "The fixture must remain the active window immediately before capture",
+            instrumentation.targetContext.packageName,
+            checkNotNull(instrumentation.uiAutomation.rootInActiveWindow).packageName?.toString(),
+        )
+        val bitmap = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
+        try {
+            java.io.File(instrumentation.targetContext.cacheDir, fileName)
+                .outputStream().use { output ->
+                    assertTrue(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output))
+                }
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
     private fun scrollResultsTo(text: String, substring: Boolean = false) {
         composeRule.onNode(hasScrollToIndexAction())
             .performScrollToNode(hasText(text, substring = substring))
@@ -178,7 +297,7 @@ class MainActivityAmapLiveFixtureTest {
         useUnmergedTree = true,
     ).fetchSemanticsNodes(atLeastOneRootRequired = false).isNotEmpty()
 
-    private fun assertTransportContract() {
+    private fun assertTransportContract(expectedRadiusMeters: Int = 1_500) {
         requests.forEach { request ->
             assertEquals(API_CONTRACT_VERSION, request.contractVersion)
             assertNull("高德访客展示不得携带账号凭据", request.authorization)
@@ -188,7 +307,7 @@ class MainActivityAmapLiveFixtureTest {
         assertEquals("WGS84", requestBody.getValue("location").jsonObject
             .getValue("crs").jsonPrimitive.content)
         assertEquals(25, requestBody.getValue("budgetMaxYuan").jsonPrimitive.content.toInt())
-        assertEquals(1_500, requestBody.getValue("radiusMeters").jsonPrimitive.content.toInt())
+        assertEquals(expectedRadiusMeters, requestBody.getValue("radiusMeters").jsonPrimitive.content.toInt())
         assertFalse(requestBody.getValue("aiAssistanceEnabled").jsonPrimitive.boolean)
 
         val events = requests.filter { it.path == "/v1/recommendation-events" }
@@ -220,6 +339,11 @@ class MainActivityAmapLiveFixtureTest {
     private fun configurationBody(): String = """
         {
           "coverageName":"全国服务",
+          ${if (radiusDefaultsEnabled) """
+          "recommendationDefaults":{
+            "areaCode":"NATIONWIDE","defaultRadiusMeters":750,"maximumRadiusMeters":1250
+          },
+          """.trimIndent() else ""}
           "dataRightsMode":"LIVE_DISPLAY_ONLY",
           "aiEnabled":false,
           "accountsEnabled":false,
@@ -297,5 +421,6 @@ class MainActivityAmapLiveFixtureTest {
         const val UI_TIMEOUT_MS = 20_000L
         const val MANUAL_LOCATION = "北京大学东门"
         const val RESTAURANT_NAME = "设备内高德契约餐厅（合成）"
+        val preferencesReset = AtomicBoolean(false)
     }
 }

@@ -221,10 +221,10 @@ EMAIL=false，而不是用 `--disable` 关闭全部账号。更新器必须清�
 `ACCOUNTS_ENABLED=true` 或任何认证通道同时使用，也不得为缩短窗口而复用旧验证码、旧
 证明或旧供应商权限。
 
-### schema 0011→0012：现在记录微信 UnionID alias
+### schema 0011→0012：现在记录微信 UnionID alias（当前 head 0013）
 
 UnionID alias 迁移不替换现有 AppID+OpenID binding，但仍必须使用两个不可变候选 release，
-避免 plan11 镜像遇到未知 schema12，也避免 schema11 上提前运行 plan12 final API：
+避免 plan11 镜像遇到未知 schema12，也避免 schema11 上提前运行当前 plan13 final API：
 
 1. 第一个候选使用 `AUTH_SCHEMA_TRANSITION_MODE=wechat_union_aliases_pending`，强制
    `WECHAT_AUTH_ENABLED=false`；账号和手机号可继续开放。`WECHAT_OPEN_PLATFORM_REALM_ID`
@@ -238,22 +238,24 @@ UnionID alias 迁移不替换现有 AppID+OpenID binding，但仍必须使用两
    ```
 
    脚本只接受 exact schema11，并在同一 mutation lock 内创建、验证 exact-schema11 备份，
-   执行 0012、重新应用角色授权，再核对 exact schema12、空 alias 表、三项 state-bound
-   SECURITY DEFINER 函数和最小 ACL。微信在整个 cutover 中保持关闭；
+   连续执行 0012 与 0013、重新应用角色授权，再核对 exact schema13、0012 UnionID ledger、
+   空 alias 表、三项 state-bound SECURITY DEFINER 函数和最小 ACL。微信在整个 cutover 中保持关闭；
 3. 第二个候选必须使用 `AUTH_SCHEMA_TRANSITION_MODE=none` 且仍保持
-   `WECHAT_AUTH_ENABLED=false`。先激活并证明 plan12 final API healthy；不得让认证更新器直接把
+   `WECHAT_AUTH_ENABLED=false`。先激活并证明 plan13 final API healthy；不得让认证更新器直接把
    pending bridge 变成 final；
 4. 最后另建一个非 `current` 的认证候选并从其中使用 `update-auth-secrets.sh --apply` 恢复微信
-   通道；更新器只读活动 final 的 exact schema12、realm 和别名 ACL 证明，再由候选激活流程
+   通道；更新器只读活动 final 的 exact schema13、0012 UnionID ledger、realm 和别名 ACL 证明，
+   再由候选激活流程
    重建 API；
 5. 已有微信用户下一次成功登录或绑定时，服务端会把微信返回的 UnionID 作为
    `realm + HMAC-SHA256` alias 懒写入；不输出原值。当前存量用户需要主动完成一次微信授权，
    才能证明 alias 已补齐。
 
-在 alias 表仍为空的迁移窗口，显式
+保留的专用 0012→0011 回滚只适用于数据库仍精确停在 schema12 的旧过渡部署。在 alias 表仍为空时，显式
 `rollback-database.sh --wechat-union-aliases <schema11备份> --execute <确认值>` 可从活动 pending
-bridge 回退数据库。只要写入过一条 alias，普通降级必须失败；此时关闭微信、保留 schema12
-及安全备份并向前修复，不能用数据丢失回滚删除跨端身份。
+bridge 回退数据库；当前已到 schema13 的部署不得借该入口跨越 0013 降级。只要写入过一条
+alias，普通降级必须失败；此时关闭微信、保留当前数据库及安全备份并向前修复，不能用数据丢失
+回滚删除跨端身份。
 
 首次开启前必须：
 
@@ -334,13 +336,16 @@ CANDIDATE_RELEASE_ACTIVATION=OK
 POSTGRES_CONTAINER_UNCHANGED=true
 ```
 
-候选启动、readiness 或切链后复核任一失败时，脚本会从旧 release 强制重建旧 API，要求
-旧容器恢复为 healthy 且 `/health` 精确返回 HTTP 200，并保证 `current` 仍指向旧 release。
+候选重建前必须校验回退 release 的不可变镜像迁移计划与数据库当前完整 ledger 一致。
+默认回退目标为旧 release，也可通过 `--rollback-release /opt/chi-shen-me/releases/<id>`
+指定已验证的兼容恢复 release；不兼容时保留活动 API，拒绝启动切换。
+候选启动、readiness 或切链后复核任一失败时，脚本会从该回退 release 强制重建 API，要求
+回退容器恢复为 healthy 且 `/health` 精确返回 HTTP 200，并保证 `current` 指向该回退 release。
 `ACTIVATION_ROLLBACK=OK` 表示自动回退完成；`ACTIVATION_ROLLBACK=FAILED` 必须立即停止后续
 操作并人工检查，绝不能继续配置 DNS、证书或 vhost。`AMAP_ENABLED=false` 导致候选
 readiness 失败属于预期的失败关闭，也会走同一自动回退，不存在特殊绕过。
 
-`ACTIVATION_ROLLBACK=OK` 只证明 release、软链和 API 运行态已经回到旧版本。认证更新器若在
+`ACTIVATION_ROLLBACK=OK` 只证明 release、软链和 API 运行态已经回到已验证回退版本。认证更新器若在
 激活前已经成功提交共享 `api.env`，激活器不会自动恢复该文件；QQ 开关仍为 `false` 的旧运行态
 会忽略暂存的 QQ 字段并保持 fail-closed，但旧 release 的严格 preflight 会因多余字段失败，不能
 称为规范态完整回滚。认证上线前必须准备 root:root、`0600` 的完整关闭目标通道回滚输入，并
@@ -356,6 +361,26 @@ Secret 与旧 API 容器环境都恢复后，才能记录完整回滚。
 和 vhost 配置。成功激活 release 本身不会触碰宝塔或主站。
 
 ## 6. 非破坏恢复演练
+
+### 配置中心 schema 12 → 13 切换
+
+当前配置中心升级从完整 schema 12 开始；不要借用历史 PHONE_ONLY 或微信 bridge 入口。
+先准备不同于候选的不可变恢复 release，要求其镜像带完整 schema13 迁移计划，并在隔离
+恢复库实际验证启动、readiness、既有账号通道与普通推荐。迁移计划校验只证明 ledger
+兼容，不替代这一业务演练。恢复 release 必须保持同一数据库卷、公开端口、身份 realm
+和部署最低版本安全下限；不得把 schema12 旧镜像声明为 schema13 可用的回退。
+
+从候选 bundle 执行以下命令，由脚本持全局锁、校验恢复镜像与目标迁移计划、生成并校验
+备份，然后迁移和执行只读 schema13/ACL 核验：
+
+```bash
+scripts/provision-database.sh --admin-config-cutover /opt/chi-shen-me/releases/<recovery-id>
+scripts/activate-candidate-release.sh --rollback-release /opt/chi-shen-me/releases/<recovery-id>
+```
+
+两条命令必须顺序执行，第一条失败后停止，不得自行删除迁移或回滚数据库以迎合旧镜像。
+备份验证、回退 artifact 和真实管理员 RP/origin/bootstrap/step-up 验收需在受控环境记录；
+仓库测试或页面存在不表示这些生产条件已经完成。
 
 恢复脚本只允许写入新的隔离数据库名，不会覆盖生产数据库：
 

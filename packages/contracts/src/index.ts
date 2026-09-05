@@ -335,6 +335,7 @@ export const RecommendationResponseSchema = z.object({
 	coverage: z.literal("NATIONWIDE"),
 	dataRightsMode: DataRightsModeSchema,
 	ruleVersion: z.string(),
+	rulesConfigVersion: z.number().int().positive().nullable().optional(),
 	promptVersion: z.string(),
 	modelVersion: z.string(),
 	aiFallbackUsed: z.boolean(),
@@ -454,6 +455,7 @@ export const GroupRecommendationResponseSchema = z
 		coverage: z.literal("NATIONWIDE"),
 		dataRightsMode: DataRightsModeSchema,
 		ruleVersion: z.string(),
+		rulesConfigVersion: z.number().int().positive().nullable().optional(),
 		aggregation: GroupConstraintAggregationSchema,
 		results: z.array(GroupRecommendationResultSchema).max(3),
 		notice: z.string().nullable(),
@@ -1328,6 +1330,75 @@ export const DISABLED_SPECIALTY_CAPABILITIES: Readonly<SpecialtyCapabilities> =
 		userReportedWeatherEnabled: false,
 	});
 
+const PublicSemanticVersionSchema = z
+	.string()
+	.regex(
+		/^(?:0|[1-9][0-9]{0,3})\.(?:0|[1-9][0-9]{0,3})\.(?:0|[1-9][0-9]{0,3})$/u,
+	);
+
+export const PublicRecommendationDefaultsSchema = z
+	.object({
+		areaCode: z.literal("NATIONWIDE"),
+		defaultRadiusMeters: z.number().int().min(200).max(10_000),
+		maximumRadiusMeters: z.number().int().min(200).max(10_000),
+	})
+	.strict()
+	.superRefine((value, context) => {
+		if (value.defaultRadiusMeters > value.maximumRadiusMeters) {
+			context.addIssue({
+				code: "custom",
+				path: ["defaultRadiusMeters"],
+				message: "默认半径不能大于最大半径",
+			});
+		}
+	});
+export type PublicRecommendationDefaults = z.infer<
+	typeof PublicRecommendationDefaultsSchema
+>;
+
+export const PublicMinimumSupportedVersionsSchema = z
+	.object({
+		android: PublicSemanticVersionSchema,
+		ios: PublicSemanticVersionSchema.optional(),
+		miniprogram: PublicSemanticVersionSchema.optional(),
+	})
+	.strict();
+export type PublicMinimumSupportedVersions = z.infer<
+	typeof PublicMinimumSupportedVersionsSchema
+>;
+
+export const PublicOperationalConfigSchema = z
+	.object({
+		source: z.enum([
+			"STARTUP_DEFAULT",
+			"DATABASE",
+			"STALE_CACHE",
+			"SAFE_FALLBACK",
+		]),
+		lastSuccessfulReadAt: z.iso.datetime().nullable(),
+		cacheTtlMs: z.literal(5_000),
+		versions: z
+			.object({
+				"features.ai-assistance": z.number().int().positive().nullable(),
+				"recommendations.rules": z.number().int().positive().nullable(),
+				"recommendations.prompt": z.number().int().positive().nullable(),
+				"coverage.default": z.number().int().positive().nullable(),
+				"clients.minimum-version": z.number().int().positive().nullable(),
+			})
+			.strict(),
+		aiStatus: z.enum([
+			"ENABLED",
+			"SERVER_DISABLED",
+			"OPERATOR_DISABLED",
+			"PROMPT_DISABLED",
+			"CONFIG_UNAVAILABLE",
+		]),
+	})
+	.strict();
+export type PublicOperationalConfig = z.infer<
+	typeof PublicOperationalConfigSchema
+>;
+
 export const FeatureConfigSchema = z
 	.object({
 		coverageName: z.string(),
@@ -1338,8 +1409,14 @@ export const FeatureConfigSchema = z
 		// Older v1 config responses did not include this capability. Parsing such
 		// responses must fail closed while current services always emit the field.
 		supportFeedbackEnabled: z.boolean().default(false),
-		minimumSupportedVersion: z.string(),
+		minimumSupportedVersion: PublicSemanticVersionSchema,
+		// Optional for older v1 response compatibility. Current services emit both
+		// projections so Android, iOS and mini-program clients can share one source.
+		recommendationDefaults: PublicRecommendationDefaultsSchema.optional(),
+		minimumSupportedVersions: PublicMinimumSupportedVersionsSchema.optional(),
+		operationalConfig: PublicOperationalConfigSchema.optional(),
 		ruleVersion: z.string(),
+		rulesConfigVersion: z.number().int().positive().nullable().optional(),
 		promptVersion: z.string(),
 		modelVersion: z.string(),
 		// Absent means every persistence capability is disabled for older v1
@@ -1359,6 +1436,16 @@ export const FeatureConfigSchema = z
 	})
 	.strict()
 	.superRefine((config, context) => {
+		if (
+			config.minimumSupportedVersions !== undefined &&
+			config.minimumSupportedVersions.android !== config.minimumSupportedVersion
+		) {
+			context.addIssue({
+				code: "custom",
+				path: ["minimumSupportedVersions", "android"],
+				message: "Android 最低版本必须与兼容字段一致",
+			});
+		}
 		const capabilities = config.persistenceCapabilities;
 		if (
 			capabilities !== undefined &&
@@ -1836,6 +1923,340 @@ export const AdminCredentialPathSchema = z
 	.strict();
 export type AdminCredentialPath = z.infer<typeof AdminCredentialPathSchema>;
 
+export const AdminConfigKeySchema = z.enum([
+	"features.ai-assistance",
+	"recommendations.rules",
+	"recommendations.prompt",
+	"coverage.default",
+	"clients.minimum-version",
+]);
+export type AdminConfigKey = z.infer<typeof AdminConfigKeySchema>;
+
+export const AdminConfigSchemaNameSchema = z.enum([
+	"FEATURE_FLAGS_V1",
+	"RECOMMENDATION_RULES_V1",
+	"PROMPT_SETTINGS_V1",
+	"COVERAGE_SETTINGS_V1",
+	"MINIMUM_APP_VERSION_V1",
+]);
+export type AdminConfigSchemaName = z.infer<typeof AdminConfigSchemaNameSchema>;
+
+export const AdminConfigClassificationSchema = z.enum(["PUBLIC", "INTERNAL"]);
+export type AdminConfigClassification = z.infer<
+	typeof AdminConfigClassificationSchema
+>;
+
+export const AdminConfigPublishChangeReasonSchema = z.enum([
+	"ROUTINE_TUNING",
+	"INCIDENT_RESPONSE",
+	"RELEASE_COMPATIBILITY",
+]);
+export type AdminConfigPublishChangeReason = z.infer<
+	typeof AdminConfigPublishChangeReasonSchema
+>;
+
+export const AdminConfigChangeReasonSchema = z.enum([
+	...AdminConfigPublishChangeReasonSchema.options,
+	"ROLLBACK",
+]);
+export type AdminConfigChangeReason = z.infer<
+	typeof AdminConfigChangeReasonSchema
+>;
+
+export const AdminFeatureFlagsValueSchema = z
+	.object({
+		enabled: z.boolean(),
+	})
+	.strict();
+export type AdminFeatureFlagsValue = z.infer<
+	typeof AdminFeatureFlagsValueSchema
+>;
+
+const AdminRuleWeightSchema = z.number().min(0).max(95).multipleOf(0.0001);
+
+export const DEFAULT_ADMIN_RECOMMENDATION_RULES_VALUE = Object.freeze({
+	qualityWeight: 25,
+	timeWeight: 25,
+	budgetWeight: 20,
+	intentWeight: 15,
+	diversityWeight: 10,
+	operationsAdjustmentMaximum: 5,
+});
+
+export const AdminRecommendationRulesValueSchema = z
+	.object({
+		qualityWeight: AdminRuleWeightSchema,
+		timeWeight: AdminRuleWeightSchema,
+		budgetWeight: AdminRuleWeightSchema,
+		intentWeight: AdminRuleWeightSchema,
+		diversityWeight: AdminRuleWeightSchema,
+		operationsAdjustmentMaximum: z.number().min(0).max(5).multipleOf(0.0001),
+	})
+	.strict()
+	.superRefine((value, context) => {
+		const total =
+			value.qualityWeight +
+			value.timeWeight +
+			value.budgetWeight +
+			value.intentWeight +
+			value.diversityWeight;
+		if (Math.abs(total - 95) > 0.000001) {
+			context.addIssue({
+				code: "custom",
+				path: ["diversityWeight"],
+				message: "推荐规则前五项权重之和必须为 95",
+			});
+		}
+	});
+export type AdminRecommendationRulesValue = z.infer<
+	typeof AdminRecommendationRulesValueSchema
+>;
+
+export const REGISTERED_INTENT_PROMPT_VERSIONS = Object.freeze([
+	"intent-prompt-v1",
+] as const);
+export const REGISTERED_QWEN_MODEL_VERSIONS = Object.freeze([
+	"qwen3.7-flash-2026-07-15",
+] as const);
+
+export const RegisteredIntentPromptVersionSchema = z.enum(
+	REGISTERED_INTENT_PROMPT_VERSIONS,
+);
+export const RegisteredQwenModelVersionSchema = z.enum(
+	REGISTERED_QWEN_MODEL_VERSIONS,
+);
+
+export const AdminPromptSettingsValueSchema = z
+	.object({
+		enabled: z.boolean(),
+		promptVersion: RegisteredIntentPromptVersionSchema,
+		modelVersion: RegisteredQwenModelVersionSchema,
+		timeoutMs: z.number().int().min(500).max(2_500),
+	})
+	.strict();
+export type AdminPromptSettingsValue = z.infer<
+	typeof AdminPromptSettingsValueSchema
+>;
+
+export const AdminCoverageSettingsValueSchema = z
+	.object({
+		defaultRadiusMeters: z.number().int().min(200).max(10_000),
+		maximumRadiusMeters: z.number().int().min(200).max(10_000),
+		areaCode: z.literal("NATIONWIDE"),
+	})
+	.strict()
+	.superRefine((value, context) => {
+		if (value.defaultRadiusMeters > value.maximumRadiusMeters) {
+			context.addIssue({
+				code: "custom",
+				path: ["defaultRadiusMeters"],
+				message: "默认半径不能大于最大半径",
+			});
+		}
+	});
+export type AdminCoverageSettingsValue = z.infer<
+	typeof AdminCoverageSettingsValueSchema
+>;
+
+const AdminMinimumVersionSchema = z
+	.string()
+	.max(64)
+	.regex(
+		/^(?:0|[1-9][0-9]{0,3})\.(?:0|[1-9][0-9]{0,3})\.(?:0|[1-9][0-9]{0,3})$/u,
+	);
+
+export const AdminMinimumAppVersionValueSchema = z
+	.object({
+		android: AdminMinimumVersionSchema,
+		ios: AdminMinimumVersionSchema.optional(),
+		miniprogram: AdminMinimumVersionSchema.optional(),
+	})
+	.strict();
+export type AdminMinimumAppVersionValue = z.infer<
+	typeof AdminMinimumAppVersionValueSchema
+>;
+
+export const AdminConfigValueSchema = z.union([
+	AdminFeatureFlagsValueSchema,
+	AdminRecommendationRulesValueSchema,
+	AdminPromptSettingsValueSchema,
+	AdminCoverageSettingsValueSchema,
+	AdminMinimumAppVersionValueSchema,
+]);
+export type AdminConfigValue = z.infer<typeof AdminConfigValueSchema>;
+
+const AdminConfigVersionMetadataShape = {
+	version: z.number().int().positive().max(2_147_483_647),
+	changeReason: AdminConfigChangeReasonSchema,
+	createdAt: z.iso.datetime(),
+	activatedAt: z.iso.datetime(),
+} as const;
+
+export const AdminFeatureFlagsConfigVersionSchema = z
+	.object({
+		configKey: z.literal("features.ai-assistance"),
+		configSchema: z.literal("FEATURE_FLAGS_V1"),
+		classification: z.literal("PUBLIC"),
+		value: AdminFeatureFlagsValueSchema,
+		...AdminConfigVersionMetadataShape,
+	})
+	.strict();
+
+export const AdminRecommendationRulesConfigVersionSchema = z
+	.object({
+		configKey: z.literal("recommendations.rules"),
+		configSchema: z.literal("RECOMMENDATION_RULES_V1"),
+		classification: z.literal("INTERNAL"),
+		value: AdminRecommendationRulesValueSchema,
+		...AdminConfigVersionMetadataShape,
+	})
+	.strict();
+
+export const AdminPromptSettingsConfigVersionSchema = z
+	.object({
+		configKey: z.literal("recommendations.prompt"),
+		configSchema: z.literal("PROMPT_SETTINGS_V1"),
+		classification: z.literal("INTERNAL"),
+		value: AdminPromptSettingsValueSchema,
+		...AdminConfigVersionMetadataShape,
+	})
+	.strict();
+
+export const AdminCoverageSettingsConfigVersionSchema = z
+	.object({
+		configKey: z.literal("coverage.default"),
+		configSchema: z.literal("COVERAGE_SETTINGS_V1"),
+		classification: z.literal("PUBLIC"),
+		value: AdminCoverageSettingsValueSchema,
+		...AdminConfigVersionMetadataShape,
+	})
+	.strict();
+
+export const AdminMinimumAppVersionConfigVersionSchema = z
+	.object({
+		configKey: z.literal("clients.minimum-version"),
+		configSchema: z.literal("MINIMUM_APP_VERSION_V1"),
+		classification: z.literal("PUBLIC"),
+		value: AdminMinimumAppVersionValueSchema,
+		...AdminConfigVersionMetadataShape,
+	})
+	.strict();
+
+export const AdminConfigVersionSchema = z.discriminatedUnion("configKey", [
+	AdminFeatureFlagsConfigVersionSchema,
+	AdminRecommendationRulesConfigVersionSchema,
+	AdminPromptSettingsConfigVersionSchema,
+	AdminCoverageSettingsConfigVersionSchema,
+	AdminMinimumAppVersionConfigVersionSchema,
+]);
+export type AdminConfigVersion = z.infer<typeof AdminConfigVersionSchema>;
+
+export const AdminConfigListResponseSchema = z
+	.object({ items: z.array(AdminConfigVersionSchema).max(5) })
+	.strict();
+export type AdminConfigListResponse = z.infer<
+	typeof AdminConfigListResponseSchema
+>;
+
+export const AdminConfigHistoryResponseSchema = z
+	.object({ items: z.array(AdminConfigVersionSchema).max(100) })
+	.strict();
+export type AdminConfigHistoryResponse = z.infer<
+	typeof AdminConfigHistoryResponseSchema
+>;
+
+export const AdminConfigPathSchema = z
+	.object({ configKey: AdminConfigKeySchema })
+	.strict();
+export type AdminConfigPath = z.infer<typeof AdminConfigPathSchema>;
+
+export const AdminConfigHistoryLimitSchema = z
+	.string()
+	.regex(/^(?:[1-9]|[1-9][0-9]|100)$/u)
+	.default("20")
+	.transform(Number);
+export const AdminConfigHistoryQuerySchema = z
+	.object({ limit: AdminConfigHistoryLimitSchema })
+	.strict();
+export type AdminConfigHistoryQuery = z.infer<
+	typeof AdminConfigHistoryQuerySchema
+>;
+
+const AdminConfigPublishBodyBaseShape = {
+	expectedActiveVersion: z
+		.number()
+		.int()
+		.positive()
+		.max(2_147_483_647)
+		.nullable(),
+	changeReason: AdminConfigPublishChangeReasonSchema,
+} as const;
+
+export const AdminConfigPublishRequestSchema = z
+	.object({
+		...AdminConfigPublishBodyBaseShape,
+		value: AdminConfigValueSchema,
+	})
+	.strict();
+export type AdminConfigPublishRequest = z.infer<
+	typeof AdminConfigPublishRequestSchema
+>;
+
+export const AdminConfigPublishCommandSchema = z.discriminatedUnion(
+	"configKey",
+	[
+		z
+			.object({
+				configKey: z.literal("features.ai-assistance"),
+				value: AdminFeatureFlagsValueSchema,
+				...AdminConfigPublishBodyBaseShape,
+			})
+			.strict(),
+		z
+			.object({
+				configKey: z.literal("recommendations.rules"),
+				value: AdminRecommendationRulesValueSchema,
+				...AdminConfigPublishBodyBaseShape,
+			})
+			.strict(),
+		z
+			.object({
+				configKey: z.literal("recommendations.prompt"),
+				value: AdminPromptSettingsValueSchema,
+				...AdminConfigPublishBodyBaseShape,
+			})
+			.strict(),
+		z
+			.object({
+				configKey: z.literal("coverage.default"),
+				value: AdminCoverageSettingsValueSchema,
+				...AdminConfigPublishBodyBaseShape,
+			})
+			.strict(),
+		z
+			.object({
+				configKey: z.literal("clients.minimum-version"),
+				value: AdminMinimumAppVersionValueSchema,
+				...AdminConfigPublishBodyBaseShape,
+			})
+			.strict(),
+	],
+);
+export type AdminConfigPublishCommand = z.infer<
+	typeof AdminConfigPublishCommandSchema
+>;
+
+export const AdminConfigRollbackRequestSchema = z
+	.object({
+		expectedActiveVersion: z.number().int().positive().max(2_147_483_647),
+		targetVersion: z.number().int().positive().max(2_147_483_647),
+		changeReason: z.literal("ROLLBACK"),
+	})
+	.strict();
+export type AdminConfigRollbackRequest = z.infer<
+	typeof AdminConfigRollbackRequestSchema
+>;
+
 export const AdminAuditCursorSchema = AdminOpaqueTokenSchema;
 export type AdminAuditCursor = z.infer<typeof AdminAuditCursorSchema>;
 
@@ -1873,6 +2294,8 @@ export const AdminAuditActionSchema = z.enum([
 	"ADMIN_STATUS_CHANGED_LOCKED",
 	"ADMIN_STATUS_CHANGED_DISABLED",
 	"ADMIN_BOOTSTRAP_COMPLETED",
+	"ADMIN_CONFIG_PUBLISHED",
+	"ADMIN_CONFIG_ROLLED_BACK",
 ]);
 export type AdminAuditAction = z.infer<typeof AdminAuditActionSchema>;
 
@@ -1880,10 +2303,83 @@ export const AdminAuditEventSchema = z
 	.object({
 		auditEventId: z.uuid(),
 		action: AdminAuditActionSchema,
-		targetType: z.enum(["ADMIN_USER", "ADMIN_SESSION", "ADMIN_CREDENTIAL"]),
+		targetType: z.enum([
+			"ADMIN_USER",
+			"ADMIN_SESSION",
+			"ADMIN_CREDENTIAL",
+			"APP_CONFIG",
+		]),
 		occurredAt: z.iso.datetime(),
+		configKey: AdminConfigKeySchema.optional(),
+		newVersion: z.number().int().positive().max(2_147_483_647).optional(),
+		sourceVersion: z
+			.number()
+			.int()
+			.positive()
+			.max(2_147_483_647)
+			.nullable()
+			.optional(),
+		changeReason: AdminConfigChangeReasonSchema.optional(),
 	})
-	.strict();
+	.strict()
+	.superRefine((value, context) => {
+		const isConfigurationAction =
+			value.action === "ADMIN_CONFIG_PUBLISHED" ||
+			value.action === "ADMIN_CONFIG_ROLLED_BACK";
+		const isConfigurationTarget = value.targetType === "APP_CONFIG";
+		const isConfigurationEvent = isConfigurationTarget && isConfigurationAction;
+		const hasEveryConfigurationField =
+			value.configKey !== undefined &&
+			value.newVersion !== undefined &&
+			value.sourceVersion !== undefined &&
+			value.changeReason !== undefined;
+		const hasAnyConfigurationField =
+			value.configKey !== undefined ||
+			value.newVersion !== undefined ||
+			value.sourceVersion !== undefined ||
+			value.changeReason !== undefined;
+
+		if (isConfigurationAction !== isConfigurationTarget) {
+			context.addIssue({
+				code: "custom",
+				message: "配置审计动作与 APP_CONFIG 目标必须成对",
+			});
+		}
+		if (isConfigurationEvent && !hasEveryConfigurationField) {
+			context.addIssue({
+				code: "custom",
+				message: "配置审计事件必须包含固定的非敏感变更字段",
+			});
+		}
+		if (!isConfigurationEvent && hasAnyConfigurationField) {
+			context.addIssue({
+				code: "custom",
+				message: "非配置审计事件不得包含配置变更字段",
+			});
+			return;
+		}
+		if (
+			value.action === "ADMIN_CONFIG_PUBLISHED" &&
+			value.changeReason === "ROLLBACK"
+		) {
+			context.addIssue({
+				code: "custom",
+				path: ["changeReason"],
+				message: "发布事件不能使用回滚原因",
+			});
+		}
+		if (
+			value.action === "ADMIN_CONFIG_ROLLED_BACK" &&
+			value.changeReason !== undefined &&
+			value.changeReason !== "ROLLBACK"
+		) {
+			context.addIssue({
+				code: "custom",
+				path: ["changeReason"],
+				message: "回滚事件只能使用回滚原因",
+			});
+		}
+	});
 export type AdminAuditEvent = z.infer<typeof AdminAuditEventSchema>;
 
 export const AdminAuditPageResponseSchema = z

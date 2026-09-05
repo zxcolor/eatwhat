@@ -13,6 +13,7 @@ import com.chishenme.app.data.remote.GroupRecommendationRequest
 import com.chishenme.app.data.remote.GroupRecommendationResponse
 import com.chishenme.app.data.remote.GroupRecommendationResult
 import com.chishenme.app.data.remote.OpenStatus
+import com.chishenme.app.data.remote.PublicRecommendationDefaults
 import com.chishenme.app.data.remote.ReasonCode
 import com.chishenme.app.data.remote.RecommendationDataMode
 import com.chishenme.app.data.remote.RecommendationReason
@@ -46,6 +47,131 @@ class GroupDecisionViewModelTest {
         accuracyMeters = 50.0,
         crs = CoordinateReferenceSystem.WGS84,
     )
+
+    @Test
+    fun `server defaults initialize new members without rewriting an existing member choice`() = runTest {
+        withMainDispatcher(testScheduler) {
+            val gate = RuntimeAppVersionGate("1.0.0")
+            val viewModel = authorizedViewModel(
+                RecordingGroupApi(),
+                gate,
+                enabledConfig().copy(
+                    recommendationDefaults = PublicRecommendationDefaults("NATIONWIDE", 750, 1_000),
+                ),
+            )
+            assertTrue(viewModel.start())
+            assertEquals(listOf(750, 750), viewModel.state.value.input.members.map { it.radiusMeters })
+            assertTrue(viewModel.updateMember(0, member(radius = 3_000)))
+            assertTrue(viewModel.setMemberCount(3))
+            assertEquals(listOf(3_000, 750, 750), viewModel.state.value.input.members.map { it.radiusMeters })
+        }
+    }
+
+    @Test
+    fun `operational range caps shared intersection rather than each members acceptable distance`() = runTest {
+        withMainDispatcher(testScheduler) {
+            val gate = RuntimeAppVersionGate("1.0.0")
+            val api = RecordingGroupApi()
+            val viewModel = authorizedViewModel(
+                api,
+                gate,
+                enabledConfig().copy(
+                    recommendationDefaults = PublicRecommendationDefaults("NATIONWIDE", 750, 1_000),
+                ),
+            )
+            assertTrue(viewModel.start())
+            assertTrue(viewModel.setLocation(location))
+            assertTrue(viewModel.updateMember(0, member(radius = 5_000)))
+            assertTrue(viewModel.confirmCurrentMember())
+            assertTrue(viewModel.confirmCurrentMember())
+            assertTrue(viewModel.review())
+            assertEquals(750, requireNotNull(viewModel.state.value.aggregation).effectiveRadiusMeters)
+            assertTrue(viewModel.submit())
+            advanceUntilIdle()
+            assertEquals(GroupDecisionPhase.RESULT, viewModel.state.value.phase)
+            assertEquals(listOf(5_000, 750), api.requests.single().members.map { it.radiusMeters })
+        }
+    }
+
+    @Test
+    fun `over limit intersection requires explicit correction and sends nothing`() = runTest {
+        withMainDispatcher(testScheduler) {
+            val gate = RuntimeAppVersionGate("1.0.0")
+            val api = RecordingGroupApi()
+            val viewModel = authorizedViewModel(
+                api,
+                gate,
+                enabledConfig().copy(
+                    recommendationDefaults = PublicRecommendationDefaults("NATIONWIDE", 750, 1_000),
+                ),
+            )
+            assertTrue(viewModel.start())
+            assertTrue(viewModel.setLocation(location))
+            assertTrue(viewModel.updateMember(0, member(radius = 3_000)))
+            assertTrue(viewModel.confirmCurrentMember())
+            assertTrue(viewModel.updateMember(1, member(radius = 1_500)))
+            assertTrue(viewModel.confirmCurrentMember())
+            assertFalse(viewModel.review())
+            assertFalse(viewModel.submit())
+            assertTrue(requireNotNull(viewModel.state.value.formError).contains("1000 米"))
+            assertEquals(listOf(3_000, 1_500), viewModel.state.value.input.members.map { it.radiusMeters })
+            assertEquals(0, api.requests.size)
+
+            assertTrue(viewModel.updateMember(1, member(radius = 900)))
+            assertTrue(viewModel.confirmCurrentMember())
+            assertTrue(viewModel.review())
+            assertTrue(viewModel.submit())
+            advanceUntilIdle()
+            assertEquals(listOf(3_000, 900), api.requests.single().members.map { it.radiusMeters })
+        }
+    }
+
+    @Test
+    fun `range change revokes a submitting group and rejects its late result`() = runTest {
+        withMainDispatcher(testScheduler) {
+            val gate = RuntimeAppVersionGate("1.0.0")
+            val api = LateGroupApi()
+            val viewModel = authorizedViewModel(
+                api,
+                gate,
+                enabledConfig().copy(
+                    recommendationDefaults = PublicRecommendationDefaults("NATIONWIDE", 1_500, 3_000),
+                ),
+            )
+            prepareReview(viewModel)
+            assertTrue(viewModel.submit())
+            runCurrent()
+            val oldRequest = requireNotNull(api.request)
+            viewModel.applyFeatureConfig(
+                enabledConfig().copy(
+                    recommendationDefaults = PublicRecommendationDefaults("NATIONWIDE", 750, 1_000),
+                ),
+                trust(gate),
+            )
+            assertEquals(GroupDecisionPhase.CLOSED, viewModel.state.value.phase)
+            assertNull(viewModel.state.value.input.location)
+            api.resume(validResponse(oldRequest))
+            advanceUntilIdle()
+            assertNull(viewModel.state.value.response)
+            assertTrue(viewModel.start())
+            assertEquals(listOf(750, 750), viewModel.state.value.input.members.map { it.radiusMeters })
+        }
+    }
+
+    @Test
+    fun `invalid range config cannot authorize a group session`() = runTest {
+        withMainDispatcher(testScheduler) {
+            val gate = RuntimeAppVersionGate("1.0.0")
+            val viewModel = authorizedViewModel(
+                RecordingGroupApi(),
+                gate,
+                enabledConfig().copy(
+                    recommendationDefaults = PublicRecommendationDefaults("NATIONWIDE", 1_500, 1_000),
+                ),
+            )
+            assertFalse(viewModel.start())
+        }
+    }
 
     @Test
     fun `direct start and guest recommendation fallback cannot open group flow`() = runTest {

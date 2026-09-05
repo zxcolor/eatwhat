@@ -9,6 +9,8 @@ import com.chishenme.app.data.remote.DataRightsMode
 import com.chishenme.app.data.remote.FeatureConfig
 import com.chishenme.app.data.remote.GroupConstraintAggregation
 import com.chishenme.app.data.remote.GroupRecommendationResponse
+import com.chishenme.app.data.remote.MealPeriod
+import com.chishenme.app.data.remote.PublicRecommendationDefaults
 import com.chishenme.app.data.remote.TravelMode
 import com.chishenme.app.data.remote.effectiveServiceCapabilities
 import com.chishenme.app.domain.GroupConstraintAggregator
@@ -17,6 +19,7 @@ import com.chishenme.app.domain.GroupDecisionInputValidator
 import com.chishenme.app.domain.GroupInputValidation
 import com.chishenme.app.domain.GroupMemberConstraints
 import com.chishenme.app.domain.GroupRecommendationRequestFactory
+import com.chishenme.app.domain.RecommendationRadiusPolicy
 import com.chishenme.app.feature.config.RuntimeAppVersionGate
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -48,6 +51,7 @@ data class GroupDecisionUiState(
     val aggregation: GroupConstraintAggregation? = null,
     val response: GroupRecommendationResponse? = null,
     val formError: String? = null,
+    val recommendationDefaults: PublicRecommendationDefaults? = null,
 ) {
     val busy: Boolean
         get() = phase == GroupDecisionPhase.SUBMITTING
@@ -75,6 +79,7 @@ class GroupDecisionViewModel @Inject constructor(
         val configurationGeneration: Long,
         val dataRightsMode: DataRightsMode,
         val ruleVersion: String,
+        val recommendationDefaults: PublicRecommendationDefaults?,
     )
 
     private var capabilitySession: CapabilitySession? = null
@@ -104,7 +109,8 @@ class GroupDecisionViewModel @Inject constructor(
             capabilities.groupRecommendationsEnabled &&
             configurationGeneration != null &&
             config.ruleVersion.isNotBlank() &&
-            config.ruleVersion.length <= 80
+            config.ruleVersion.length <= 80 &&
+            config.recommendationDefaults?.isValid() != false
         ) {
             runtimeAppVersionGate.acquireRemoteAccessLease(configurationGeneration)
         } else {
@@ -116,6 +122,7 @@ class GroupDecisionViewModel @Inject constructor(
                 existing.configurationGeneration == configurationGeneration &&
                     existing.dataRightsMode == config?.dataRightsMode &&
                     existing.ruleVersion == config.ruleVersion &&
+                    existing.recommendationDefaults == config.recommendationDefaults &&
                     runtimeAppVersionGate.isRemoteAccessCurrent(existing.lease)
             } == true
         ) {
@@ -128,12 +135,14 @@ class GroupDecisionViewModel @Inject constructor(
                 configurationGeneration = configurationGeneration,
                 dataRightsMode = config.dataRightsMode,
                 ruleVersion = config.ruleVersion,
+                recommendationDefaults = config.recommendationDefaults,
             )
         } else {
             null
         }
         mutableState.value = GroupDecisionUiState(
             capabilityAvailable = newLease != null,
+            recommendationDefaults = capabilitySession?.recommendationDefaults,
             formError = if (newLease == null) {
                 "同设备群组推荐尚未通过当前配置校验"
             } else {
@@ -153,6 +162,8 @@ class GroupDecisionViewModel @Inject constructor(
         mutableState.value = GroupDecisionUiState(
             phase = GroupDecisionPhase.EDITING,
             capabilityAvailable = true,
+            input = GroupDecisionInput(members = List(2) { defaultMember() }),
+            recommendationDefaults = capabilitySession?.recommendationDefaults,
         )
         return true
     }
@@ -170,7 +181,7 @@ class GroupDecisionViewModel @Inject constructor(
                 current.input.members.take(count)
             } else {
                 current.input.members + List(count - current.input.members.size) {
-                    GroupMemberConstraints()
+                    defaultMember()
                 }
             }
             current.copy(
@@ -253,6 +264,11 @@ class GroupDecisionViewModel @Inject constructor(
             }
             GroupInputValidation.Valid -> {
                 val aggregation = GroupConstraintAggregator.aggregate(snapshot.input.members)
+                val radiusError = groupRadiusError(aggregation)
+                if (radiusError != null) {
+                    mutableState.update { it.copy(formError = radiusError) }
+                    return false
+                }
                 mutableState.update {
                     it.copy(
                         phase = GroupDecisionPhase.REVIEW,
@@ -327,6 +343,18 @@ class GroupDecisionViewModel @Inject constructor(
             }
             return false
         }
+        val radiusError = groupRadiusError(aggregation)
+        if (radiusError != null) {
+            mutableState.update {
+                it.copy(
+                    phase = GroupDecisionPhase.EDITING,
+                    aggregation = null,
+                    response = null,
+                    formError = radiusError,
+                )
+            }
+            return false
+        }
         val request = GroupRecommendationRequestFactory.create(input)
         val generation = invalidateOperation()
         mutableState.update {
@@ -388,6 +416,21 @@ class GroupDecisionViewModel @Inject constructor(
 
     private fun canEdit(): Boolean =
         mutableState.value.phase == GroupDecisionPhase.EDITING && groupAccessIsCurrent()
+
+    private fun defaultMember() = GroupMemberConstraints(
+        radiusMeters = RecommendationRadiusPolicy.automaticRadius(
+            MealPeriod.LUNCH,
+            capabilitySession?.recommendationDefaults,
+        ),
+    )
+
+    /** A member may accept a wider radius when the shared intersection stays in range. */
+    private fun groupRadiusError(aggregation: GroupConstraintAggregation): String? {
+        val maximum = RecommendationRadiusPolicy.maximumRadius(capabilitySession?.recommendationDefaults)
+        return if (aggregation.effectiveRadiusMeters > maximum) {
+            "共同最远距离为 ${aggregation.effectiveRadiusMeters} 米，当前服务最远支持 $maximum 米。请由成员主动调整距离，再复核共同条件。"
+        } else null
+    }
 
     private fun validateMember(index: Int, member: GroupMemberConstraints): String? {
         val ordinal = index + 1

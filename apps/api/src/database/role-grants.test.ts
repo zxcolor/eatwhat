@@ -61,16 +61,21 @@ describe("database role grant deployment gate", () => {
 		expect(sql).toContain("export_worker_role psql variable is required");
 		expect(sql).toContain(":'admin_runtime_role' <> :'export_worker_role'");
 		expect(sql).toContain("AS phone_only_schema_0011");
+		expect(sql).toContain("AS wechat_union_alias_schema_0012");
+		expect(sql).toContain("AS admin_config_schema_0013");
 		expect(sql).toContain("AS wechat_union_alias_schema");
 		expect(sql).toContain("AS legacy_fusion_schema");
 		expect(sql).toContain(
-			":'phone_only_schema_0011'::boolean OR :'wechat_union_alias_schema'::boolean",
+			":'phone_only_schema_0011'::boolean\n  OR :'wechat_union_alias_schema_0012'::boolean\n  OR :'admin_config_schema_0013'::boolean",
 		);
 		expect(sql).not.toContain(
 			"SELECT (:phone_only_schema OR :legacy_fusion_schema)",
 		);
 		expect(sql).toContain(
-			"role grants require the exact 0010, 0011 or 0012 auth schema",
+			"role grants require the exact 0010, 0011, 0012 or 0013 schema",
+		);
+		expect(sql).toMatch(
+			/\\if :admin_config_schema_0013[\s\S]*runtime_list_active_app_config\(\)[\s\S]*\\endif/u,
 		);
 	});
 
@@ -217,9 +222,9 @@ describe("database role grant deployment gate", () => {
 		const adminGrants = grants.filter((grant) =>
 			grant.includes('TO :"admin_runtime_role"'),
 		);
-		expect(adminGrants).toHaveLength(21);
+		expect(adminGrants).toHaveLength(26);
 		expect(adminGrants.join("\n")).not.toMatch(
-			/ON public\.(admin_users|admin_roles|admin_user_roles|admin_mfa_credentials|admin_sessions|admin_webauthn_challenges)/u,
+			/ON public\.(admin_users|admin_roles|admin_user_roles|admin_mfa_credentials|admin_sessions|admin_webauthn_challenges|app_config_versions)/u,
 		);
 		for (const functionName of [
 			"admin_begin_login_challenge",
@@ -234,9 +239,14 @@ describe("database role grant deployment gate", () => {
 			"admin_get_self_credential_record",
 			"admin_revoke_self_credential",
 			"admin_list_sanitized_audit_events",
+			"admin_list_sanitized_audit_events_v2",
 			"admin_grant_role",
 			"admin_revoke_role",
 			"admin_set_user_status",
+			"admin_list_active_app_config",
+			"admin_list_app_config_history",
+			"admin_publish_app_config",
+			"admin_rollback_app_config",
 		]) {
 			expect(adminGrants.join("\n")).toContain(`public.${functionName}`);
 		}
@@ -337,6 +347,12 @@ describe("database role grant deployment gate", () => {
 		);
 		expect(sql).not.toContain(
 			"GRANT SELECT, INSERT, DELETE ON public.favorites",
+		);
+		expect(sql).toContain(
+			"GRANT EXECUTE ON FUNCTION public.runtime_list_active_app_config()",
+		);
+		expect(sql).not.toMatch(
+			/GRANT SELECT ON[^;]*public\.app_config_versions[^;]*TO :"runtime_role"/u,
 		);
 		expect(sql).not.toContain(
 			'GRANT EXECUTE ON FUNCTION public.unlock_user_account(uuid) TO :"runtime_role"',

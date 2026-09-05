@@ -256,7 +256,7 @@ assert_wechat_union_aliases_ready() {
 
   active_transition="$(read_env_value "$active_deploy/deployment.env" AUTH_SCHEMA_TRANSITION_MODE)"
   [[ "$active_transition" == 'none' ]] ||
-    die 'WeChat authentication requires the final non-transition schema 0012 release'
+    die 'WeChat authentication requires the final non-transition schema 0013 release'
   active_realm="$(read_env_value "$active_deploy/deployment.env" WECHAT_OPEN_PLATFORM_REALM_ID)"
   candidate_realm="$(read_env_value "$deployment_env" WECHAT_OPEN_PLATFORM_REALM_ID)"
   [[ "$active_realm" =~ ^[a-z0-9][a-z0-9._-]{0,63}$ ]] ||
@@ -278,8 +278,9 @@ assert_wechat_union_aliases_ready() {
       'export PGPASSWORD="$(cat /run/secrets/postgres_bootstrap_password)"; exec psql -X -qAt -v ON_ERROR_STOP=1 -v expected_wechat_realm="$1" -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
       sh "$active_realm" <<'SQL'
 SELECT (
-  (SELECT count(*) = 12 AND min(version) = 1 AND max(version) = 12
+  (SELECT count(*) = 13 AND min(version) = 1 AND max(version) = 13
      AND bool_or(version = 12 AND name = 'wechat_union_aliases')
+     AND bool_or(version = 13 AND name = 'admin_config_control')
    FROM public.schema_migrations)
   AND to_regclass('public.wechat_union_aliases') IS NOT NULL
   AND has_function_privilege(
@@ -333,7 +334,7 @@ SELECT (
 SQL
   )"
   [[ "$database_acl_ready" == 't' ]] ||
-    die 'schema 0012 and WeChat Union alias least-privilege ACL smoke must pass before enabling WeChat'
+    die 'schema 0013 and WeChat Union alias least-privilege ACL smoke must pass before enabling WeChat'
 }
 
 assert_qq_identity_state_change_ready() {
@@ -344,7 +345,7 @@ assert_qq_identity_state_change_ready() {
 
   active_transition="$(read_env_value "$active_deploy/deployment.env" AUTH_SCHEMA_TRANSITION_MODE)"
   [[ "$active_transition" == 'none' ]] ||
-    die 'QQ identity state requires the final non-transition schema 0012 release'
+    die 'QQ identity state requires the final non-transition schema 0013 release'
   candidate_realm="$(read_env_value "$deployment_env" QQ_OPEN_PLATFORM_REALM_ID)"
   [[ "$candidate_realm" =~ ^[a-z0-9][a-z0-9._-]{0,63}$ ]] ||
     die 'QQ identity state requires a stable candidate Open Platform realm'
@@ -614,7 +615,7 @@ if [[ "$mode" == '--apply' ]]; then
 fi
 
 if [[ "$mode" != '--legacy-drain' && "$current_schema_transition_mode" == 'wechat_union_aliases_pending' ]]; then
-  die 'activate the final schema 0012 release before updating authentication configuration'
+  die 'activate the final schema 0013 release before updating authentication configuration'
 fi
 if [[ "$mode" == '--apply' && "$target_wechat_auth_enabled" == 'true' ]]; then
   assert_wechat_union_aliases_ready

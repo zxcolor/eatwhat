@@ -71,6 +71,26 @@ export interface AdminSanitizedAuditEvent {
 	readonly action: string;
 	readonly targetType: string;
 	readonly createdAt: string;
+	readonly configKey: string | null;
+	readonly newVersion: number | null;
+	readonly sourceVersion: number | null;
+	readonly changeReason: string | null;
+}
+
+export interface AdminConfigurationRecord {
+	readonly configKey: string;
+	readonly configSchema: string;
+	readonly classification: string;
+	readonly version: number;
+	readonly value: unknown;
+	readonly changeReason: string;
+	readonly createdAt: string;
+	readonly activatedAt: string;
+}
+
+export interface AdminConfigurationMutationResult {
+	readonly status: string;
+	readonly record: AdminConfigurationRecord | null;
 }
 
 interface LoginCredentialOptionRow extends QueryResultRow {
@@ -124,6 +144,33 @@ interface SanitizedAuditRow extends QueryResultRow {
 	readonly action: string;
 	readonly target_type: string;
 	readonly created_at: Date | string;
+	readonly config_key: string | null;
+	readonly new_version: number | null;
+	readonly source_version: number | null;
+	readonly change_reason: string | null;
+}
+
+interface ConfigurationRow extends QueryResultRow {
+	readonly config_key: string;
+	readonly config_schema: string;
+	readonly classification: string;
+	readonly version: number;
+	readonly value_json: unknown;
+	readonly change_reason: string;
+	readonly created_at: Date | string;
+	readonly activated_at: Date | string;
+}
+
+interface ConfigurationMutationRow extends QueryResultRow {
+	readonly status: string;
+	readonly config_key: string | null;
+	readonly config_schema: string | null;
+	readonly classification: string | null;
+	readonly version: number | null;
+	readonly value_json: unknown;
+	readonly change_reason: string | null;
+	readonly created_at: Date | string | null;
+	readonly activated_at: Date | string | null;
 }
 
 function isoDate(value: Date | string): string {
@@ -492,8 +539,9 @@ export class AdminRepository {
 		readonly pageSize: number;
 	}): Promise<readonly AdminSanitizedAuditEvent[]> {
 		const result = await this.database.query<SanitizedAuditRow>(
-			`SELECT event_id, action, target_type, created_at
-			FROM public.admin_list_sanitized_audit_events(
+			`SELECT event_id, action, target_type, created_at, config_key,
+				new_version, source_version, change_reason
+			FROM public.admin_list_sanitized_audit_events_v2(
 				$1::varchar, $2::varchar, $3::varchar, $4::varchar,
 				$5::varchar, $6::timestamptz, $7::uuid, $8::integer
 			)`,
@@ -511,9 +559,98 @@ export class AdminRepository {
 					action: row.action,
 					targetType: row.target_type,
 					createdAt: isoDate(row.created_at),
+					configKey: row.config_key,
+					newVersion: row.new_version,
+					sourceVersion: row.source_version,
+					changeReason: row.change_reason,
 				}),
 			),
 		);
+	}
+
+	async listActiveConfiguration(
+		session: AdminSessionProof,
+	): Promise<readonly AdminConfigurationRecord[]> {
+		const result = await this.database.query<ConfigurationRow>(
+			`SELECT config_key, config_schema, classification, version,
+				value_json, change_reason, created_at, activated_at
+			FROM public.admin_list_active_app_config(
+				$1::varchar, $2::varchar, $3::varchar, $4::varchar, $5::varchar
+			)`,
+			this.sessionValues(session),
+		);
+		return Object.freeze(
+			result.rows.map((row) => this.configurationRecord(row)),
+		);
+	}
+
+	async listConfigurationHistory(input: {
+		readonly session: AdminSessionProof;
+		readonly configKey: string;
+		readonly pageSize: number;
+	}): Promise<readonly AdminConfigurationRecord[]> {
+		const result = await this.database.query<ConfigurationRow>(
+			`SELECT config_key, config_schema, classification, version,
+				value_json, change_reason, created_at, activated_at
+			FROM public.admin_list_app_config_history(
+				$1::varchar, $2::varchar, $3::varchar, $4::varchar,
+				$5::varchar, $6::varchar, $7::integer
+			)`,
+			[...this.sessionValues(input.session), input.configKey, input.pageSize],
+		);
+		return Object.freeze(
+			result.rows.map((row) => this.configurationRecord(row)),
+		);
+	}
+
+	async publishConfiguration(input: {
+		readonly session: AdminSessionProof;
+		readonly configKey: string;
+		readonly expectedActiveVersion: number | null;
+		readonly value: unknown;
+		readonly changeReason: string;
+	}): Promise<AdminConfigurationMutationResult> {
+		const result = await this.database.query<ConfigurationMutationRow>(
+			`SELECT status, config_key, config_schema, classification, version,
+				value_json, change_reason, created_at, activated_at
+			FROM public.admin_publish_app_config(
+				$1::varchar, $2::varchar, $3::varchar, $4::varchar,
+				$5::varchar, $6::varchar, $7::integer, $8::jsonb, $9::varchar
+			)`,
+			[
+				...this.sessionValues(input.session),
+				input.configKey,
+				input.expectedActiveVersion,
+				input.value,
+				input.changeReason,
+			],
+		);
+		return this.configurationMutation(result.rows[0]);
+	}
+
+	async rollbackConfiguration(input: {
+		readonly session: AdminSessionProof;
+		readonly configKey: string;
+		readonly expectedActiveVersion: number;
+		readonly targetVersion: number;
+		readonly changeReason: "ROLLBACK";
+	}): Promise<AdminConfigurationMutationResult> {
+		const result = await this.database.query<ConfigurationMutationRow>(
+			`SELECT status, config_key, config_schema, classification, version,
+				value_json, change_reason, created_at, activated_at
+			FROM public.admin_rollback_app_config(
+				$1::varchar, $2::varchar, $3::varchar, $4::varchar,
+				$5::varchar, $6::varchar, $7::integer, $8::integer, $9::varchar
+			)`,
+			[
+				...this.sessionValues(input.session),
+				input.configKey,
+				input.expectedActiveVersion,
+				input.targetVersion,
+				input.changeReason,
+			],
+		);
+		return this.configurationMutation(result.rows[0]);
 	}
 
 	private challengeValues(proof: AdminChallengeProof): readonly unknown[] {
@@ -542,6 +679,51 @@ export class AdminRepository {
 			credentialHandle: row.credential_handle,
 			createdAt: isoDate(row.created_at),
 			lastUsedAt: row.last_used_at === null ? null : isoDate(row.last_used_at),
+		});
+	}
+
+	private configurationRecord(row: ConfigurationRow): AdminConfigurationRecord {
+		return Object.freeze({
+			configKey: row.config_key,
+			configSchema: row.config_schema,
+			classification: row.classification,
+			version: row.version,
+			value: row.value_json,
+			changeReason: row.change_reason,
+			createdAt: isoDate(row.created_at),
+			activatedAt: isoDate(row.activated_at),
+		});
+	}
+
+	private configurationMutation(
+		row: ConfigurationMutationRow | undefined,
+	): AdminConfigurationMutationResult {
+		if (row === undefined) {
+			return Object.freeze({ status: "UNAVAILABLE", record: null });
+		}
+		if (
+			row.config_key === null ||
+			row.config_schema === null ||
+			row.classification === null ||
+			row.version === null ||
+			row.change_reason === null ||
+			row.created_at === null ||
+			row.activated_at === null
+		) {
+			return Object.freeze({ status: row.status, record: null });
+		}
+		return Object.freeze({
+			status: row.status,
+			record: this.configurationRecord({
+				...row,
+				config_key: row.config_key,
+				config_schema: row.config_schema,
+				classification: row.classification,
+				version: row.version,
+				change_reason: row.change_reason,
+				created_at: row.created_at,
+				activated_at: row.activated_at,
+			}),
 		});
 	}
 }

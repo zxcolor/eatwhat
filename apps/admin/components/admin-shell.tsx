@@ -24,7 +24,8 @@ const SessionContext = createContext<SessionContextValue | null>(null);
 
 const navigation = [
   { href: "/", mark: "总", label: "运营总览" },
-  { href: "/configuration", mark: "配", label: "推荐配置" },
+  { href: "/configuration", mark: "配", label: "配置中心" },
+  { href: "/integrations", mark: "接", label: "接口中心" },
   { href: "/health", mark: "康", label: "系统健康" },
   { href: "/diagnostics", mark: "诊", label: "推荐诊断" },
   { href: "/audit", mark: "审", label: "安全审计" },

@@ -2,6 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
 	AccountExportResponseSchema,
 	AccountExportStatusResponseSchema,
+	AdminAuditEventSchema,
+	AdminConfigHistoryQuerySchema,
+	AdminConfigPublishCommandSchema,
+	AdminConfigPublishRequestSchema,
+	AdminConfigRollbackRequestSchema,
+	AdminConfigVersionSchema,
+	AdminCoverageSettingsValueSchema,
+	AdminFeatureFlagsValueSchema,
+	AdminMinimumAppVersionValueSchema,
+	AdminPromptSettingsValueSchema,
+	AdminRecommendationRulesValueSchema,
 	AuthCapabilitiesSchema,
 	AuthTokenResponseSchema,
 	BindIdentityRequestSchema,
@@ -9,6 +20,7 @@ import {
 	CoordinateSchema,
 	CreatePrivateFeedbackRequestSchema,
 	CURRENT_CONTRACT_VERSION,
+	DEFAULT_ADMIN_RECOMMENDATION_RULES_VALUE,
 	EmailRequestCodeSchema,
 	FavoriteMutationRequestSchema,
 	FavoriteRecordSchema,
@@ -50,6 +62,170 @@ import {
 	WeatherApplicationSchema,
 	WeatherContextRequestSchema,
 } from "./index.js";
+
+describe("Administrator configuration contracts", () => {
+	const publishedAt = "2026-08-30T00:00:00.000Z";
+	const defaultRules = { ...DEFAULT_ADMIN_RECOMMENDATION_RULES_VALUE };
+
+	it("keeps the five values strict, bounded, and non-secret", () => {
+		expect(AdminFeatureFlagsValueSchema.parse({ enabled: true })).toEqual({
+			enabled: true,
+		});
+		expect(
+			AdminFeatureFlagsValueSchema.safeParse({
+				enabled: true,
+				rolloutPercentage: 50,
+			}).success,
+		).toBe(false);
+		expect(AdminRecommendationRulesValueSchema.parse(defaultRules)).toEqual(
+			defaultRules,
+		);
+		expect(
+			AdminRecommendationRulesValueSchema.safeParse({
+				...defaultRules,
+				diversityWeight: 9,
+			}).success,
+		).toBe(false);
+		expect(
+			AdminRecommendationRulesValueSchema.safeParse({
+				...defaultRules,
+				operationsAdjustmentMaximum: 5.0001,
+			}).success,
+		).toBe(false);
+		expect(
+			AdminPromptSettingsValueSchema.safeParse({
+				enabled: true,
+				promptVersion: "intent-prompt-v1",
+				modelVersion: "qwen3.7-flash-2026-07-15",
+				timeoutMs: 499,
+			}).success,
+		).toBe(false);
+		expect(
+			AdminPromptSettingsValueSchema.safeParse({
+				enabled: true,
+				promptVersion: "intent-prompt-v1",
+				modelVersion: "unregistered-model",
+				timeoutMs: 1_800,
+			}).success,
+		).toBe(false);
+		expect(
+			AdminCoverageSettingsValueSchema.safeParse({
+				defaultRadiusMeters: 2_000,
+				maximumRadiusMeters: 1_000,
+				areaCode: "NATIONWIDE",
+			}).success,
+		).toBe(false);
+		expect(
+			AdminCoverageSettingsValueSchema.safeParse({
+				defaultRadiusMeters: 1_000,
+				maximumRadiusMeters: 2_000,
+				areaCode: "BEIJING",
+			}).success,
+		).toBe(false);
+		expect(
+			AdminMinimumAppVersionValueSchema.safeParse({ android: "01.0.0" })
+				.success,
+		).toBe(false);
+	});
+
+	it("associates each publish value with its fixed config key", () => {
+		const body = AdminConfigPublishRequestSchema.parse({
+			expectedActiveVersion: null,
+			changeReason: "ROUTINE_TUNING",
+			value: { enabled: true },
+		});
+		expect(
+			AdminConfigPublishCommandSchema.safeParse({
+				configKey: "features.ai-assistance",
+				...body,
+			}).success,
+		).toBe(true);
+		expect(
+			AdminConfigPublishCommandSchema.safeParse({
+				configKey: "coverage.default",
+				...body,
+			}).success,
+		).toBe(false);
+		expect(
+			AdminConfigPublishRequestSchema.safeParse({
+				...body,
+				changeReason: "ROLLBACK",
+			}).success,
+		).toBe(false);
+	});
+
+	it("requires rollback concurrency and a literal rollback reason", () => {
+		expect(
+			AdminConfigRollbackRequestSchema.parse({
+				expectedActiveVersion: 3,
+				targetVersion: 1,
+				changeReason: "ROLLBACK",
+			}),
+		).toEqual({
+			expectedActiveVersion: 3,
+			targetVersion: 1,
+			changeReason: "ROLLBACK",
+		});
+		expect(
+			AdminConfigRollbackRequestSchema.safeParse({
+				expectedActiveVersion: null,
+				targetVersion: 1,
+				changeReason: "ROLLBACK",
+			}).success,
+		).toBe(false);
+		expect(AdminConfigHistoryQuerySchema.parse({})).toEqual({ limit: 20 });
+	});
+
+	it("returns only the fixed record fields and supports config audit events", () => {
+		const record = {
+			configKey: "features.ai-assistance",
+			configSchema: "FEATURE_FLAGS_V1",
+			classification: "PUBLIC",
+			version: 1,
+			value: { enabled: true },
+			changeReason: "ROUTINE_TUNING",
+			createdAt: publishedAt,
+			activatedAt: publishedAt,
+		};
+		expect(AdminConfigVersionSchema.safeParse(record).success).toBe(true);
+		expect(
+			AdminConfigVersionSchema.safeParse({ ...record, secret: "must-not-leak" })
+				.success,
+		).toBe(false);
+		expect(
+			AdminAuditEventSchema.safeParse({
+				auditEventId: VALID_UUID,
+				action: "ADMIN_CONFIG_PUBLISHED",
+				targetType: "APP_CONFIG",
+				configKey: "features.ai-assistance",
+				newVersion: 1,
+				sourceVersion: null,
+				changeReason: "ROUTINE_TUNING",
+				occurredAt: publishedAt,
+			}).success,
+		).toBe(true);
+		expect(
+			AdminAuditEventSchema.safeParse({
+				auditEventId: VALID_UUID,
+				action: "ADMIN_CONFIG_PUBLISHED",
+				targetType: "APP_CONFIG",
+				occurredAt: publishedAt,
+			}).success,
+		).toBe(false);
+		expect(
+			AdminAuditEventSchema.safeParse({
+				auditEventId: VALID_UUID,
+				action: "ADMIN_LOGIN_SUCCEEDED",
+				targetType: "ADMIN_USER",
+				configKey: "features.ai-assistance",
+				newVersion: 1,
+				sourceVersion: null,
+				changeReason: "ROUTINE_TUNING",
+				occurredAt: publishedAt,
+			}).success,
+		).toBe(false);
+	});
+});
 
 const VALID_RESULT_TOKEN = "A".repeat(43);
 const VALID_UUID = "2af305ae-82a1-4f87-86b7-1c97c4a8683f";
@@ -920,6 +1096,64 @@ describe("Private persisted recommendation contracts", () => {
 		expect(
 			FeatureConfigSchema.safeParse({ ...base, unknownCapability: true })
 				.success,
+		).toBe(false);
+	});
+
+	it("accepts the public operational projection while preserving Android compatibility", () => {
+		const base = {
+			coverageName: "全国范围",
+			dataRightsMode: "LIVE_DISPLAY_ONLY" as const,
+			aiEnabled: false,
+			accountsEnabled: false,
+			favoritesEnabled: false,
+			minimumSupportedVersion: "2.4.0",
+			ruleVersion: "rule-v1",
+			promptVersion: "prompt-v1",
+			modelVersion: "rules",
+			recommendationDefaults: {
+				areaCode: "NATIONWIDE",
+				defaultRadiusMeters: 1_200,
+				maximumRadiusMeters: 3_000,
+			},
+			minimumSupportedVersions: {
+				android: "2.4.0",
+				miniprogram: "1.2.0",
+			},
+		};
+
+		expect(FeatureConfigSchema.safeParse(base).success).toBe(true);
+		expect(
+			FeatureConfigSchema.safeParse({
+				...base,
+				recommendationDefaults: {
+					...base.recommendationDefaults,
+					areaCode: "BEIJING",
+				},
+			}).success,
+		).toBe(false);
+		expect(
+			FeatureConfigSchema.safeParse({
+				...base,
+				minimumSupportedVersions: {
+					...base.minimumSupportedVersions,
+					android: "2.5.0",
+				},
+			}).success,
+		).toBe(false);
+		expect(
+			FeatureConfigSchema.safeParse({
+				...base,
+				recommendationDefaults: {
+					...base.recommendationDefaults,
+					defaultRadiusMeters: 3_100,
+				},
+			}).success,
+		).toBe(false);
+		expect(
+			FeatureConfigSchema.safeParse({
+				...base,
+				minimumSupportedVersion: "02.4.0",
+			}).success,
 		).toBe(false);
 	});
 

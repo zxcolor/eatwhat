@@ -1,5 +1,6 @@
 import {
 	GroupRecommendationRequestSchema,
+	RecommendationContextSchema,
 	type RecommendationContext,
 } from "@chi-shen-me/contracts";
 import { describe, expect, it, vi } from "vitest";
@@ -14,6 +15,12 @@ import type {
 	PlaceProvider,
 } from "../recommendations/domain/place-candidate.js";
 import type { RecommendationQueryPlan } from "../recommendations/domain/recommendation-query-plan.js";
+import type { OperationalConfigService } from "../operational-config/operational-config.service.js";
+import { type OperationalConfigSnapshot, startupOperationalConfig } from "../operational-config/operational-config.types.js";
+import { IntentCoordinator } from "../recommendations/providers/intent-coordinator.js";
+import { QwenIntentProvider } from "../recommendations/providers/qwen-intent.provider.js";
+import { RuleIntentProvider } from "../recommendations/providers/rule-intent.provider.js";
+import { RecommendationsService } from "../recommendations/recommendations.service.js";
 import { GroupRecommendationsService } from "./group-recommendations.service.js";
 
 const FIXED_NOW = Date.parse("2026-09-03T04:05:06.789Z");
@@ -120,7 +127,62 @@ function responseOf(error: unknown): unknown {
 	return (error as Readonly<{ getResponse(): unknown }>).getResponse();
 }
 
+function operational(snapshot: OperationalConfigSnapshot): OperationalConfigService {
+	return { current: vi.fn(async () => snapshot) } as unknown as OperationalConfigService;
+}
+
 describe("GroupRecommendationsService capability boundary", () => {
+	it.each(["STALE_CACHE", "SAFE_FALLBACK"] as const)(
+		"rejects %s before capability, provider, rights, model or token-registry work",
+		async (source) => {
+			const base = config(true);
+			const initial = startupOperationalConfig(base);
+			const places = provider();
+			const rights = policy();
+			const model = vi.spyOn(QwenIntentProvider.prototype, "resolve");
+			const registryIssue = vi.spyOn(RecommendationRequestRegistry.prototype, "issue");
+			try {
+				const service = new GroupRecommendationsService(base, clock, places.places, rights.value, operational({
+					...initial, source,
+					lastSuccessfulReadAt: source === "STALE_CACHE" ? "2026-09-06T01:00:00.000Z" : null,
+				}));
+				await expect(service.recommend(request)).rejects.toMatchObject({
+					status: 503, response: { code: "GROUP_RECOMMENDATIONS_UNAVAILABLE" },
+				});
+				expect(places.supportsQueryPlan).not.toHaveBeenCalled();
+				expect(places.search).not.toHaveBeenCalled();
+				expect(rights.effectiveMode).not.toHaveBeenCalled();
+				expect(model).not.toHaveBeenCalled();
+				expect(registryIssue).not.toHaveBeenCalled();
+			} finally {
+				model.mockRestore();
+				registryIssue.mockRestore();
+			}
+		},
+	);
+
+	it("applies the operations ceiling to the recomputed common radius, not each member's upper bound", async () => {
+		const base = config(true);
+		const snapshot = startupOperationalConfig(base);
+		const active = operational({ ...snapshot, coverage: { areaCode: "NATIONWIDE", defaultRadiusMeters: 500, maximumRadiusMeters: 1000 } });
+		const places = provider();
+		const rights = policy();
+		const service = new GroupRecommendationsService(base, clock, places.places, rights.value, active);
+		const accepted = await service.recommend(request);
+		expect(request.members[0]?.radiusMeters).toBe(1500);
+		expect(accepted.aggregation.effectiveRadiusMeters).toBe(900);
+		expect(places.search).toHaveBeenCalledWith(expect.objectContaining({ radiusMeters: 900 }), expect.any(Object));
+		places.supportsQueryPlan.mockClear();
+		places.search.mockClear();
+		rights.effectiveMode.mockClear();
+		await expect(service.recommend(GroupRecommendationRequestSchema.parse({
+			...request, members: request.members.map((member) => ({ ...member, radiusMeters: 1200 })),
+		}))).rejects.toMatchObject({ status: 400, response: { code: "RADIUS_EXCEEDS_ACTIVE_COVERAGE" } });
+		expect(places.supportsQueryPlan).not.toHaveBeenCalled();
+		expect(places.search).not.toHaveBeenCalled();
+		expect(rights.effectiveMode).not.toHaveBeenCalled();
+	});
+
 	it("fails a disabled switch closed before capability, provider or rights I/O", async () => {
 		const places = provider();
 		const rights = policy();
@@ -206,6 +268,69 @@ describe("GroupRecommendationsService capability boundary", () => {
 });
 
 describe("GroupRecommendationsService bounded execution", () => {
+	it("shares runtime weights with single recommendations while keeping code identity and LIVE order separate", async () => {
+		const base = config(true);
+		const initial = startupOperationalConfig(base);
+		const candidates = [
+			candidate({
+				providerPlaceId: "fast-low-rating", providerRank: 1, name: "快速候选", sourceRating: 1,
+				distanceMeters: 200, estimatedTravelMinutes: 2, estimatedMealMinutes: 15,
+			}),
+			candidate({
+				providerPlaceId: "slower-high-rating", providerRank: 2, name: "高评分候选", sourceRating: 5,
+				distanceMeters: 600, estimatedTravelMinutes: 8, estimatedMealMinutes: 30,
+				location: { latitude: 39.994, longitude: 116.312, crs: "WGS84" },
+			}),
+		];
+		const weights = [
+			{ revision: 4, qualityWeight: 95, timeWeight: 0, expected: ["高评分候选", "快速候选"] },
+			{ revision: 5, qualityWeight: 0, timeWeight: 95, expected: ["快速候选", "高评分候选"] },
+		];
+		for (const mode of ["LICENSED_ENRICHMENT", "LIVE_DISPLAY_ONLY"] as const) {
+			for (const weight of weights) {
+				const snapshot: OperationalConfigSnapshot = {
+					...initial, source: "DATABASE", lastSuccessfulReadAt: "2026-09-06T01:00:00.000Z",
+					recommendationRules: {
+						qualityWeight: weight.qualityWeight, timeWeight: weight.timeWeight,
+						budgetWeight: 0, intentWeight: 0, diversityWeight: 0, operationsAdjustmentMaximum: 0,
+					},
+					versions: { ...initial.versions, "recommendations.rules": weight.revision },
+				};
+				const places = provider({ candidates });
+				const rights = policy(mode);
+				const group = await new GroupRecommendationsService(base, clock, places.places, rights.value, operational(snapshot)).recommend(request);
+				const registry = new RecommendationRequestRegistry();
+				const qwenFetch = vi.fn();
+				try {
+					const intents = new IntentCoordinator(base, new QwenIntentProvider(base, qwenFetch as typeof fetch), new RuleIntentProvider());
+					const single = await new RecommendationsService(base, places.places, intents, registry, rights.value, operational(snapshot)).recommend(RecommendationContextSchema.parse({
+						location: request.location, travelMode: request.travelMode, mealPeriod: "LUNCH",
+						budgetMaxYuan: group.aggregation.effectiveBudgetMaxYuan,
+						availableMinutes: group.aggregation.effectiveAvailableMinutes,
+						radiusMeters: group.aggregation.effectiveRadiusMeters,
+						partySize: group.aggregation.memberCount,
+						preferredCuisines: group.aggregation.preferredCuisines,
+						excludedCuisines: group.aggregation.excludedCuisines,
+						aiAssistanceEnabled: false,
+					}));
+					const expectedOrder = mode === "LICENSED_ENRICHMENT" ? weight.expected : ["快速候选", "高评分候选"];
+					expect(group.results.map((result) => result.name)).toEqual(expectedOrder);
+					expect(single.results.map((result) => result.name)).toEqual(expectedOrder);
+					expect(group.results.map((result) => result.fitScore)).toEqual(single.results.map((result) => result.fitScore));
+					if (mode === "LIVE_DISPLAY_ONLY") expect(group.results.map((result) => result.fitScore)).toEqual([null, null]);
+					else expect(group.results.every((result) => result.fitScore !== null)).toBe(true);
+					expect(group.ruleVersion).toBe(base.versions.rule);
+					expect(single.ruleVersion).toBe(base.versions.rule);
+					expect(group.rulesConfigVersion).toBe(weight.revision);
+					expect(single.rulesConfigVersion).toBe(weight.revision);
+					expect(qwenFetch).not.toHaveBeenCalled();
+				} finally {
+					registry.onModuleDestroy();
+				}
+			}
+		}
+	});
+
 	it("recomputes constraints and fixes every internal recommendation dimension using server time", async () => {
 		const places = provider();
 		const rights = policy();

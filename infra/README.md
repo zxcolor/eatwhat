@@ -65,15 +65,17 @@ schema 0011 常态下的 `--disable` 仅做可逆紧急关停：清除供应商�
 身份/会话 HMAC、dedup version 与已有 OTP pepper pair；后续 `--apply` 必须沿用相同连续性
 材料，错误值会在共享 env 写入前拒绝。
 
-微信 UnionID 使用独立的 schema 0011→0012 受控过渡：先激活
+微信 UnionID 使用独立的 schema 0011→0012 受控过渡；当前完整迁移 head 为 0013。先激活
 `AUTH_SCHEMA_TRANSITION_MODE=wechat_union_aliases_pending` 且
-`WECHAT_AUTH_ENABLED=false` 的 plan12 bridge，再从活动 bridge 执行
+`WECHAT_AUTH_ENABLED=false`、允许 0012 及其后迁移保持 pending 的 bridge，再从活动 bridge 执行
 `scripts/provision-database.sh --wechat-union-aliases-cutover`。脚本在同一 mutation lock 内创建并
-验证 exact-schema11 备份，迁移至 exact-schema12，重新应用 schema11/12 兼容的角色授权，并
-验证 alias 表无直接 runtime 权限、只有 API runtime 可执行三项 state-bound 函数且表仍为空。
+验证 exact-schema11 备份，连续执行 0012 和 0013 至 exact-schema13，重新应用兼容
+schema11/12/13 的角色授权，并验证 0012 ledger、alias 表无直接 runtime 权限、只有 API runtime
+可执行三项 state-bound 函数且表仍为空。
 随后必须先激活 `transition=none`、微信仍关闭的 final release，最后才由认证配置更新器启用微信。
 `WECHAT_OPEN_PLATFORM_REALM_ID` 是稳定身份命名空间；常规 release 不允许相对活动 release
-更改。普通 schema12→11 数据库回退还要求 alias 表为空；写入任一真实 alias 后只允许向前修复。
+更改。保留的专用 schema12→11 回滚只适用于仍精确停在 0012 的旧过渡部署，并要求 alias 表为空；
+当前已到 0013 的部署不得借该入口跨越 0013 降级。写入任一真实 alias 后只允许向前修复。
 
 迁移锁键为 `(1129310029, 1296645202)`，`pg_try_advisory_lock` 最多 20 次、间隔 250 ms；保留期锁键为 `(1129310029, 1382374734)`，占用时立即失败。成功和失败路径都尝试释放。`schema_migrations` 固定为 `version integer`、`name varchar(120)`、`checksum varchar(64)`、`applied_at timestamptz`；未知版本、缺号、名称或 checksum 漂移会拒绝迁移/启动。
 

@@ -83,7 +83,11 @@ class GroupRecommendationRepository @Inject constructor(
             )
             is HttpException -> try {
                 val message = when (error.code()) {
-                    400 -> "成员条件有误，请返回重新录入"
+                    400 -> if (error.isActiveCoverageRejection()) {
+                        "服务范围已更新，请重新连接服务，再进入群组复核共同距离。"
+                    } else {
+                        "成员条件有误，请返回重新录入"
+                    }
                     429 -> "请求有点多，请稍后再试"
                     in 500..599 -> "群组推荐服务暂时不可用，请稍后重试"
                     else -> "请求失败（${error.code()}）"

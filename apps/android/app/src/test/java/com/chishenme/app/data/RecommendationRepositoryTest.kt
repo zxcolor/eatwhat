@@ -10,6 +10,7 @@ import com.chishenme.app.data.remote.FeatureConfig
 import com.chishenme.app.data.remote.IncompatibleApiContractException
 import com.chishenme.app.data.remote.MealPeriod
 import com.chishenme.app.data.remote.OpenStatus
+import com.chishenme.app.data.remote.PublicRecommendationDefaults
 import com.chishenme.app.data.remote.RecommendationApi
 import com.chishenme.app.data.remote.RecommendationContext
 import com.chishenme.app.data.remote.RecommendationActions
@@ -23,13 +24,67 @@ import com.chishenme.app.data.remote.ReasonCode
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
+import retrofit2.HttpException
 import retrofit2.Response
 
 class RecommendationRepositoryTest {
+    @Test
+    fun `range changed on server maps only a bounded known code to reconnection guidance`() = runTest {
+        val knownCode = """{"requestId":"11111111-1111-4111-8111-111111111111","code":"RADIUS_EXCEEDS_ACTIVE_COVERAGE","message":"untrusted upstream text"}"""
+        val bodies = listOf(
+            knownCode to "服务范围已更新，请重新连接服务，再调整最远距离后重试。",
+            knownCode.replace("RADIUS_EXCEEDS_ACTIVE_COVERAGE", "OTHER_CODE") to "推荐条件有误，请调整后重试",
+            knownCode.replace("11111111-1111-4111-8111-111111111111", "not-a-uuid") to "推荐条件有误，请调整后重试",
+            knownCode.replace("untrusted upstream text", "x".repeat(4 * 1_024)) to "推荐条件有误，请调整后重试",
+            "not-json" to "推荐条件有误，请调整后重试",
+        )
+        bodies.forEach { (body, expectedMessage) ->
+            val repository = RecommendationRepository(object : RecommendationApi {
+                override suspend fun featureConfig(): FeatureConfig = error("unused")
+                override suspend fun recommend(context: RecommendationContext): RecommendationResponse =
+                    throw HttpException(Response.error<Any>(
+                        400,
+                        body.toResponseBody("application/json; charset=utf-8".toMediaType()),
+                    ))
+                override suspend fun recordEvent(event: RecommendationEvent): Response<Unit> = error("unused")
+            })
+            val failure = repository.recommend(validContext()) as RecommendationOutcome.Failure
+            assertEquals(FailureKind.SERVER, failure.kind)
+            assertEquals(expectedMessage, failure.message)
+        }
+    }
+
+    @Test
+    fun `feature config accepts bounded defaults but rejects invalid regional or radius policies`() = runTest {
+        val validDefaults = PublicRecommendationDefaults("NATIONWIDE", 750, 1_250)
+        val candidates = listOf(
+            validDefaults to true,
+            validDefaults.copy(areaCode = "UNKNOWN_REGION") to false,
+            validDefaults.copy(defaultRadiusMeters = 199) to false,
+            validDefaults.copy(defaultRadiusMeters = 1_251) to false,
+            validDefaults.copy(maximumRadiusMeters = 10_001) to false,
+            validDefaults.copy(maximumRadiusMeters = 0) to false,
+        )
+        candidates.forEach { (defaults, valid) ->
+            val config = validFeatureConfig().copy(recommendationDefaults = defaults)
+            val repository = RecommendationRepository(object : RecommendationApi {
+                override suspend fun featureConfig(): FeatureConfig = config
+                override suspend fun recommend(context: RecommendationContext): RecommendationResponse = error("unused")
+                override suspend fun recordEvent(event: RecommendationEvent): Response<Unit> = error("unused")
+            })
+            assertEquals(
+                if (valid) FeatureConfigOutcome.Success(config) else FeatureConfigOutcome.Unavailable,
+                repository.featureConfig(),
+            )
+        }
+    }
+
     @Test
     fun `recommend maps API contract mismatch to an explicit update message`() = runTest {
         val repository = RecommendationRepository(

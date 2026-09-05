@@ -2,9 +2,15 @@
 
 import type {
   AdminAuditPage,
+  AdminConfigKey,
+  AdminConfigRecord,
+  AdminConfigRollbackRequest,
+  AdminConfigUpdateRequest,
   AdminCredentialRecord,
+  AdminConfigurationPage,
   AdminSession
 } from "./admin-contract";
+import { ADMIN_CLIENT_RELEASE_UNVERIFIED_MESSAGE } from "./admin-contract";
 
 interface PublicKeyDescriptorJSON {
   id: string;
@@ -43,11 +49,16 @@ interface EnrollOptionsResponse {
 export class AdminClientError extends Error {
   constructor(
     public readonly status: number,
-    message: string
+    message: string,
+    public readonly code: "ADMIN_CONFLICT" | "CLIENT_RELEASE_UNVERIFIED" | null = null
   ) {
     super(message);
     this.name = "AdminClientError";
   }
+}
+
+export function isAdminConfigurationVersionConflict(error: unknown): boolean {
+  return error instanceof AdminClientError && error.status === 409 && error.code === "ADMIN_CONFLICT";
 }
 
 function base64UrlToBuffer(value: string): ArrayBuffer {
@@ -90,13 +101,16 @@ async function request<T>(
   });
   if (!response.ok) {
     let message = "管理员服务暂不可用";
+    let code: AdminClientError["code"] = null;
     try {
-      const body = (await response.json()) as { message?: unknown };
+      const body = (await response.json()) as { code?: unknown; message?: unknown };
       if (typeof body.message === "string" && body.message.length <= 100) message = body.message;
+      if (body.code === "ADMIN_CONFLICT" || body.code === "CLIENT_RELEASE_UNVERIFIED") code = body.code;
+      if (code === "CLIENT_RELEASE_UNVERIFIED") message = ADMIN_CLIENT_RELEASE_UNVERIFIED_MESSAGE;
     } catch {
       // The BFF deliberately hides malformed upstream responses.
     }
-    throw new AdminClientError(response.status, message);
+    throw new AdminClientError(response.status, message, code);
   }
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
@@ -243,4 +257,44 @@ export function loadAuditPage(cursor?: string): Promise<AdminAuditPage> {
   const query = new URLSearchParams({ limit: "50" });
   if (cursor !== undefined) query.set("cursor", cursor);
   return request<AdminAuditPage>(`audit?${query.toString()}`);
+}
+
+export function loadAdminConfiguration(): Promise<AdminConfigurationPage> {
+  return request<AdminConfigurationPage>("configuration");
+}
+
+export function loadAdminConfigurationHistory(
+  configKey: AdminConfigKey,
+  limit = 20
+): Promise<AdminConfigurationPage> {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20) {
+    throw new AdminClientError(400, "历史版本数量必须在 1–20 之间");
+  }
+  const query = new URLSearchParams({ limit: String(limit) });
+  return request<AdminConfigurationPage>(
+    `configuration/${encodeURIComponent(configKey)}/history?${query.toString()}`
+  );
+}
+
+export function updateAdminConfiguration<K extends AdminConfigKey>(
+  configKey: K,
+  update: AdminConfigUpdateRequest<K>
+): Promise<AdminConfigRecord> {
+  return request<AdminConfigRecord>(`configuration/${encodeURIComponent(configKey)}`, {
+    method: "PUT",
+    body: JSON.stringify(update)
+  });
+}
+
+export function rollbackAdminConfiguration(
+  configKey: AdminConfigKey,
+  rollback: AdminConfigRollbackRequest
+): Promise<AdminConfigRecord> {
+  return request<AdminConfigRecord>(
+    `configuration/${encodeURIComponent(configKey)}/rollback`,
+    {
+      method: "POST",
+      body: JSON.stringify(rollback)
+    }
+  );
 }

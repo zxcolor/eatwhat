@@ -68,6 +68,35 @@ export function adminCredentialNotFound(): NotFoundException {
 	});
 }
 
+export function invalidAdminConfigRequest(): BadRequestException {
+	return new BadRequestException({
+		code: "INVALID_REQUEST",
+		message: "配置值与配置键不符合接口约定",
+	});
+}
+
+export function adminConfigVersionConflict(): ConflictException {
+	return new ConflictException({
+		code: "ADMIN_CONFIG_VERSION_CONFLICT",
+		message: "配置已被其他管理员更新，请刷新后重试",
+	});
+}
+
+export function adminConfigVersionNotFound(): NotFoundException {
+	return new NotFoundException({
+		code: "ADMIN_CONFIG_VERSION_NOT_FOUND",
+		message: "要回滚到的配置版本不存在",
+	});
+}
+
+export function adminClientReleaseUnverified(): ConflictException {
+	return new ConflictException({
+		code: "CLIENT_RELEASE_UNVERIFIED",
+		message:
+			"尚未接入可信客户端发布清单，不能首次设置、提高最低版本或新增平台门槛",
+	});
+}
+
 export function invalidAdminCursor(): BadRequestException {
 	return new BadRequestException({
 		code: "INVALID_ADMIN_CURSOR",

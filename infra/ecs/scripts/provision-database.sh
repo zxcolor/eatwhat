@@ -12,14 +12,18 @@ die() {
 
 phone_only_cutover='false'
 wechat_union_aliases_cutover='false'
+admin_config_rollback_release=''
+admin_config_cutover_started='false'
 if [[ "$#" -eq 0 ]]; then
   :
 elif [[ "$#" -eq 1 && "$1" == '--phone-only-cutover' ]]; then
   phone_only_cutover='true'
 elif [[ "$#" -eq 1 && "$1" == '--wechat-union-aliases-cutover' ]]; then
   wechat_union_aliases_cutover='true'
+elif [[ "$#" -eq 2 && "$1" == '--admin-config-cutover' ]]; then
+  admin_config_rollback_release="$2"
 else
-  die 'usage: provision-database.sh [--phone-only-cutover|--wechat-union-aliases-cutover]'
+  die 'usage: provision-database.sh [--phone-only-cutover|--wechat-union-aliases-cutover|--admin-config-cutover ROLLBACK_RELEASE]'
 fi
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -132,9 +136,15 @@ data_export_worker_value="$(<"$secrets_dir/data_export_worker_password")"
 
 roles_sql="$(mktemp /tmp/chi-shen-me-roles.XXXXXX.sql)"
 cleanup() {
+  local status="$?"
   rm -f -- "$roles_sql"
   unset api_runtime_value schema_migrator_value retention_worker_value
   unset admin_api_runtime_value data_export_worker_value
+  if [[ "$status" -ne 0 && "$admin_config_cutover_started" == 'true' ]]; then
+    printf 'ADMIN_CONFIG_RECOVERY_RELEASE=%s\n' "$admin_config_rollback_release" >&2
+    printf 'DATABASE_SCHEMA_READBACK_REQUIRED=true\nDATABASE_AUTOMATIC_DOWNGRADE=false\n' >&2
+  fi
+  return "$status"
 }
 trap cleanup EXIT
 chmod 600 "$roles_sql"
@@ -276,9 +286,45 @@ assert_wechat_union_aliases_cutover_ready() {
     die 'WeChat Union alias cutover backup migration ledger is not schema 0011'
 }
 
+assert_admin_config_cutover_ready() {
+  [[ -n "$admin_config_rollback_release" ]] ||
+    die 'schema 0012 requires explicit --admin-config-cutover with a schema 0013 compatible rollback release'
+  local active_release candidate_image_id backup_output recorded_release recorded_database_facts
+  candidate_image_id="$(read_deployment_value API_IMAGE_ID)"
+  [[ "$admin_config_rollback_release/deploy" != "$bundle_root" ]] ||
+    die 'candidate release cannot also be its rollback release'
+  "$script_dir/verify-rollback-release.sh" "$admin_config_rollback_release" \
+    --target-image "$candidate_image_id" >/dev/null
+
+  [[ -L /opt/chi-shen-me/current &&
+     "$(stat -c '%u:%g' /opt/chi-shen-me/current)" == '0:0' ]] ||
+    die 'admin configuration cutover requires a root-owned active release link'
+  active_release="$(realpath -e -- /opt/chi-shen-me/current)"
+  "$script_dir/verify-rollback-release.sh" "$active_release" >/dev/null
+  "$active_release/deploy/scripts/verify-runtime.sh" >/dev/null
+
+  # Back up through the still-active schema 0012 release. The inherited global
+  # lock spans compatibility checks, backup verification, migration and ACLs.
+  backup_output="$("$active_release/deploy/scripts/backup-database.sh" --mutation-lock-held)"
+  admin_config_cutover_backup="$(sed -n 's/^BACKUP_DIRECTORY=//p' <<<"$backup_output")"
+  [[ "$admin_config_cutover_backup" == /opt/chi-shen-me/backups/postgres/* ]] ||
+    die 'admin configuration cutover backup did not complete'
+  "$script_dir/verify-database-backup.sh" "$admin_config_cutover_backup" >/dev/null
+  recorded_release="$(sed -n 's/^release_path=//p' "$admin_config_cutover_backup/METADATA.txt")"
+  recorded_database_facts="$(sed -n 's/^database_facts=//p' "$admin_config_cutover_backup/METADATA.txt")"
+  [[ "$recorded_release" == "$active_release" &&
+     "$recorded_database_facts" =~ ^chi_shen_me\|[0-9]+\|12$ &&
+     "$(wc -l <"$admin_config_cutover_backup/SCHEMA_MIGRATIONS.txt")" -eq 12 &&
+     "$(tail -n 1 "$admin_config_cutover_backup/SCHEMA_MIGRATIONS.txt")" =~ ^12\|wechat_union_aliases\|[0-9a-f]{64}$ ]] ||
+    die 'admin configuration cutover backup does not match the active exact schema 0012 release'
+  [[ "$(realpath -e -- /opt/chi-shen-me/current)" == "$active_release" ]] ||
+    die 'active release changed during admin configuration cutover preparation'
+}
+
 schema_table="$(run_bootstrap_psql -qAt -c "SELECT to_regclass('public.schema_migrations')::text;")"
 if [[ -z "$schema_table" ]]; then
-  [[ "$phone_only_cutover" == 'false' && "$wechat_union_aliases_cutover" == 'false' ]] ||
+  [[ "$phone_only_cutover" == 'false' && "$wechat_union_aliases_cutover" == 'false' &&
+     -z "$admin_config_rollback_release" ]] ||
     die 'cutover flags require an exact supported existing schema'
 else
   schema_head="$(run_bootstrap_psql -qAt -F '|' -c \
@@ -295,6 +341,12 @@ else
     '12|1|12|wechat_union_aliases')
       [[ "$phone_only_cutover" == 'false' && "$wechat_union_aliases_cutover" == 'false' ]] ||
         die 'cutover flags cannot be reused after schema 0012 is active'
+      assert_admin_config_cutover_ready
+      ;;
+    '13|1|13|admin_config_control')
+      [[ "$phone_only_cutover" == 'false' && "$wechat_union_aliases_cutover" == 'false' &&
+         -z "$admin_config_rollback_release" ]] ||
+        die 'cutover flags cannot be reused after schema 0012 is active'
       ;;
     *) die 'database schema is not an exact supported provisioning state' ;;
   esac
@@ -308,6 +360,9 @@ run_bootstrap_psql \
   -f /opt/chi-shen-me/sql/bootstrap-extensions.sql
 run_bootstrap_psql -c 'ALTER DATABASE chi_shen_me OWNER TO schema_migrator; ALTER SCHEMA public OWNER TO schema_migrator;'
 
+if [[ -n "$admin_config_rollback_release" ]]; then
+  admin_config_cutover_started='true'
+fi
 docker compose --env-file deployment.env --profile ops run --rm migrate
 
 {
@@ -324,13 +379,20 @@ docker compose --env-file deployment.env --profile ops run --rm migrate
 run_bootstrap_psql -qAt -c \
   "SELECT count(*) FROM schema_migrations; SELECT extname || '=' || extversion FROM pg_extension WHERE extname IN ('pgcrypto','postgis') ORDER BY extname;"
 
+run_bootstrap_psql -qAt <"$bundle_root/sql/verify-admin-config-control.sql"
+
+if [[ -n "$admin_config_rollback_release" ]]; then
+  "$script_dir/verify-rollback-release.sh" "$admin_config_rollback_release" >/dev/null
+fi
+
 if [[ "$wechat_union_aliases_cutover" == 'true' ]]; then
   post_cutover_facts="$(run_bootstrap_psql -qAt -F '|' -c \
-    "SELECT count(*), min(version), max(version), max(name) FILTER (WHERE version = max_version)
+    "SELECT count(*), min(version), max(version), max(name) FILTER (WHERE version = max_version),
+            bool_or(version = 12 AND name = 'wechat_union_aliases')
        FROM public.schema_migrations
        CROSS JOIN (SELECT max(version) AS max_version FROM public.schema_migrations) AS head;")"
-  [[ "$post_cutover_facts" == '12|1|12|wechat_union_aliases' ]] ||
-    die 'WeChat Union alias cutover did not reach exact schema 0012'
+  [[ "$post_cutover_facts" == '13|1|13|admin_config_control|t' ]] ||
+    die 'WeChat Union alias cutover did not reach exact current schema 0013'
   alias_security_ready="$(run_bootstrap_psql -qAt -c \
     "SELECT
        to_regclass('public.wechat_union_aliases') IS NOT NULL
@@ -389,5 +451,10 @@ if [[ -n "${phone_only_cutover_backup:-}" ]]; then
 fi
 if [[ -n "${wechat_union_aliases_cutover_backup:-}" ]]; then
   printf 'WECHAT_UNION_ALIASES_CUTOVER_BACKUP=%s\n' "$wechat_union_aliases_cutover_backup"
+fi
+if [[ -n "${admin_config_cutover_backup:-}" ]]; then
+  printf 'ADMIN_CONFIG_CUTOVER_BACKUP=%s\n' "$admin_config_cutover_backup"
+  printf 'ADMIN_CONFIG_RECOVERY_RELEASE=%s\n' "$admin_config_rollback_release"
+  printf 'ADMIN_CONFIG_ACTIVATION_REQUIRES_EXPLICIT_ROLLBACK=true\n'
 fi
 docker image inspect --format 'API_IMAGE_ID={{.Id}}' "$api_image"
