@@ -301,7 +301,28 @@ class MainActivityGroupDecisionLocalFixtureTest {
         // the test device cache and are never part of normal app persistence.
         composeRule.waitForIdle()
         val instrumentation = InstrumentationRegistry.getInstrumentation()
-        val activeWindow = checkNotNull(instrumentation.uiAutomation.rootInActiveWindow)
+        try {
+            composeRule.waitUntil(UI_TIMEOUT_MS) {
+                val activeWindow = instrumentation.uiAutomation.rootInActiveWindow
+                    ?: return@waitUntil false
+                // Only an absent accessibility root is transient. Never wait for
+                // an obscuring system dialog or another app to disappear.
+                assertEquals(
+                    "A system dialog or another app must not obscure the fixture screenshot",
+                    instrumentation.targetContext.packageName,
+                    activeWindow.packageName?.toString(),
+                )
+                true
+            }
+        } catch (error: androidx.compose.ui.test.ComposeTimeoutException) {
+            throw AssertionError(
+                "Accessibility root remained unavailable for $UI_TIMEOUT_MS ms before fixture screenshot",
+                error,
+            )
+        }
+        val activeWindow = checkNotNull(instrumentation.uiAutomation.rootInActiveWindow) {
+            "Accessibility root became unavailable immediately before fixture screenshot"
+        }
         assertEquals(
             "A system dialog or another app must not obscure the fixture screenshot",
             instrumentation.targetContext.packageName,
