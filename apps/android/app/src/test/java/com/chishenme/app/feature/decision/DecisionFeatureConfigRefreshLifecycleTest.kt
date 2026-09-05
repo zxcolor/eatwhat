@@ -18,6 +18,7 @@ import com.chishenme.app.data.remote.LocationSearchRequest
 import com.chishenme.app.data.remote.LocationSearchResponse
 import com.chishenme.app.data.remote.MealPeriod
 import com.chishenme.app.data.remote.OpenStatus
+import com.chishenme.app.data.remote.PublicRecommendationDefaults
 import com.chishenme.app.data.remote.RecommendationApi
 import com.chishenme.app.data.remote.RecommendationActions
 import com.chishenme.app.data.remote.RecommendationContext
@@ -39,6 +40,7 @@ import com.chishenme.app.data.remote.WeatherContextKind
 import com.chishenme.app.data.remote.WeatherContextRequest
 import com.chishenme.app.data.remote.WeatherQueryModifier
 import com.chishenme.app.domain.BuiltInQuickLocations
+import com.chishenme.app.domain.DecisionScenario
 import com.chishenme.app.feature.config.RemoteFeatureConfigState
 import com.chishenme.app.feature.config.RuntimeAppVersionGate
 import com.chishenme.app.feature.session.ResultSessionState
@@ -70,6 +72,162 @@ import retrofit2.Response
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class DecisionFeatureConfigRefreshLifecycleTest {
+    @Test
+    fun `old service keeps meal defaults and later explicit radius survives meal selection`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val api = SpecialtyRecommendationApi(radiusConfig(null))
+            val viewModel = viewModel(api)
+            viewModel.startConsentSession()
+            advanceUntilIdle()
+            assertEquals(1_500, viewModel.uiState.value.input.radiusMeters)
+            viewModel.setMealPeriod(MealPeriod.BREAKFAST)
+            assertEquals(1_000, viewModel.uiState.value.input.radiusMeters)
+            viewModel.setMealPeriod(MealPeriod.DINNER)
+            assertEquals(3_000, viewModel.uiState.value.input.radiusMeters)
+
+            viewModel.setRadius(2_200)
+            viewModel.setMealPeriod(MealPeriod.BREAKFAST)
+            assertEquals(2_200, viewModel.uiState.value.input.radiusMeters)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `trusted defaults apply on first load and meal changes without losing profile gates`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val api = SpecialtyRecommendationApi(radiusConfig(PublicRecommendationDefaults("NATIONWIDE", 750, 900)))
+            val viewModel = viewModel(api)
+            viewModel.startConsentSession()
+            advanceUntilIdle()
+            assertEquals(750, viewModel.uiState.value.input.radiusMeters)
+            viewModel.setMealPeriod(MealPeriod.DINNER)
+            assertEquals(750, viewModel.uiState.value.input.radiusMeters)
+            viewModel.setLocation(BuiltInQuickLocations.choices.first())
+            assertTrue(viewModel.recommend())
+            advanceUntilIdle()
+            assertEquals(750, requireNotNull(api.lastRecommendation).radiusMeters)
+            assertEquals(MealPeriod.DINNER, requireNotNull(api.lastRecommendation).mealPeriod)
+            assertFalse(requireNotNull(api.lastRecommendation).aiAssistanceEnabled)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `user radius entered during first config load stays explicit and blocks over limit requests`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val api = SpecialtyRecommendationApi(radiusConfig(PublicRecommendationDefaults("NATIONWIDE", 750, 1_000)))
+            val viewModel = viewModel(api)
+            viewModel.startConsentSession()
+            viewModel.setRadius(2_000)
+            viewModel.setLocation(BuiltInQuickLocations.choices.first())
+            advanceUntilIdle()
+
+            assertEquals(2_000, viewModel.uiState.value.input.radiusMeters)
+            assertTrue(requireNotNull(viewModel.uiState.value.radiusError).contains("1000 米"))
+            assertFalse(viewModel.recommend())
+            advanceUntilIdle()
+            assertEquals(0, api.recommendCalls)
+
+            viewModel.setRadius(900)
+            assertNull(viewModel.uiState.value.radiusError)
+            assertTrue(viewModel.recommend())
+            advanceUntilIdle()
+            assertEquals(900, requireNotNull(api.lastRecommendation).radiusMeters)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `lowered server limit updates only automatic input and retry uses the new radius`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val api = SpecialtyRecommendationApi(radiusConfig(PublicRecommendationDefaults("NATIONWIDE", 2_400, 3_000)))
+            val viewModel = viewModel(api)
+            viewModel.startConsentSession()
+            advanceUntilIdle()
+            viewModel.setLocation(BuiltInQuickLocations.choices.first())
+            assertTrue(viewModel.recommend())
+            advanceUntilIdle()
+            assertEquals(2_400, requireNotNull(api.lastRecommendation).radiusMeters)
+
+            api.config = radiusConfig(PublicRecommendationDefaults("NATIONWIDE", 700, 900))
+            viewModel.startConsentSession()
+            advanceUntilIdle()
+            assertEquals(700, viewModel.uiState.value.input.radiusMeters)
+            assertTrue(requireNotNull(viewModel.uiState.value.transientMessage).contains("700 米"))
+            viewModel.retry()
+            advanceUntilIdle()
+            assertEquals(700, requireNotNull(api.lastRecommendation).radiusMeters)
+            assertEquals(2, api.recommendCalls)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `scenario radius is an explicit choice across a lowered limit and privacy reset restores defaults`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val api = SpecialtyRecommendationApi(radiusConfig(PublicRecommendationDefaults("NATIONWIDE", 1_500, 5_000)))
+            val viewModel = viewModel(api)
+            viewModel.startConsentSession()
+            advanceUntilIdle()
+            viewModel.applyScenario(DecisionScenario.FRIENDS_GATHERING)
+            api.config = radiusConfig(PublicRecommendationDefaults("NATIONWIDE", 750, 1_000))
+            viewModel.startConsentSession()
+            advanceUntilIdle()
+            viewModel.setMealPeriod(MealPeriod.DINNER)
+            viewModel.setLocation(BuiltInQuickLocations.choices.first())
+            assertEquals(3_000, viewModel.uiState.value.input.radiusMeters)
+            assertFalse(viewModel.recommend())
+            assertTrue(requireNotNull(viewModel.uiState.value.formError).contains("3000 米"))
+            assertEquals(0, api.recommendCalls)
+
+            viewModel.clearForPrivacyWithdrawal()
+            viewModel.startConsentSession()
+            advanceUntilIdle()
+            assertEquals(750, viewModel.uiState.value.input.radiusMeters)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `radius config refresh cancels in flight request and rejects its late result`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val api = LateRecommendationApi()
+        try {
+            api.config = radiusConfig(PublicRecommendationDefaults("NATIONWIDE", 1_500, 3_000))
+            val viewModel = viewModel(api)
+            viewModel.startConsentSession()
+            advanceUntilIdle()
+            viewModel.setLocation(BuiltInQuickLocations.choices.first())
+            assertTrue(viewModel.recommend())
+            runCurrent()
+            assertTrue(api.recommendationStarted.isCompleted)
+
+            api.config = radiusConfig(PublicRecommendationDefaults("NATIONWIDE", 700, 900))
+            viewModel.startConsentSession()
+            runCurrent()
+            assertEquals(700, viewModel.uiState.value.input.radiusMeters)
+            api.releaseRecommendation()
+            advanceUntilIdle()
+
+            assertEquals(RecommendationLoadState.Idle, viewModel.uiState.value.loadState)
+            assertEquals(0, api.eventCalls)
+        } finally {
+            api.releaseRecommendationIfNeeded()
+            advanceUntilIdle()
+            Dispatchers.resetMain()
+        }
+    }
+
     @Test
     fun `missing specialty capability object keeps every post baseline setter closed`() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
@@ -634,6 +792,14 @@ class DecisionFeatureConfigRefreshLifecycleTest {
         )
     }
 
+    private fun radiusConfig(defaults: PublicRecommendationDefaults?) = currentFeatureConfig().copy(
+        recommendationDefaults = defaults,
+        specialtyCapabilities = SpecialtyCapabilities.Disabled.copy(
+            breakfastProfileEnabled = true,
+            dinnerProfileEnabled = true,
+        ),
+    )
+
     private companion object {
         const val REQUIRED_UPDATE_MESSAGE =
             "当前版本过低，请更新到 9.0.0 或更高版本"
@@ -718,7 +884,7 @@ private class ImmediateRecommendationApi : RecommendationApi {
 }
 
 private class SpecialtyRecommendationApi(
-    private val config: FeatureConfig,
+    var config: FeatureConfig,
 ) : RecommendationApi {
     var recommendCalls = 0
     var lastRecommendation: RecommendationContext? = null
@@ -797,8 +963,10 @@ private class SpecialtyRecommendationApi(
 private class LateRecommendationApi : RecommendationApi {
     val recommendationStarted = CompletableDeferred<Unit>()
     private var recommendationContinuation: Continuation<RecommendationResponse>? = null
+    var config: FeatureConfig = currentFeatureConfig()
+    var eventCalls = 0
 
-    override suspend fun featureConfig(): FeatureConfig = currentFeatureConfig()
+    override suspend fun featureConfig(): FeatureConfig = config
 
     override suspend fun recommend(context: RecommendationContext): RecommendationResponse =
         suspendCoroutine { continuation ->
@@ -820,7 +988,10 @@ private class LateRecommendationApi : RecommendationApi {
         }
     }
 
-    override suspend fun recordEvent(event: RecommendationEvent): Response<Unit> = Response.success(Unit)
+    override suspend fun recordEvent(event: RecommendationEvent): Response<Unit> {
+        eventCalls += 1
+        return Response.success(Unit)
+    }
 }
 
 private class LateFirstFeatureConfigApi : RecommendationApi {

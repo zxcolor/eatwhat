@@ -276,6 +276,8 @@ data class FeatureConfig(
     /** Missing on older v1 services means the remote feedback write path is closed. */
     val supportFeedbackEnabled: Boolean = false,
     val minimumSupportedVersion: String,
+    /** Missing on older v1 services preserves the app's existing meal defaults. */
+    val recommendationDefaults: PublicRecommendationDefaults? = null,
     val ruleVersion: String,
     val promptVersion: String,
     val modelVersion: String,
@@ -287,6 +289,18 @@ data class FeatureConfig(
     /** Missing as a whole means every post-1.1 target/profile capability is disabled. */
     val specialtyCapabilities: SpecialtyCapabilities? = null,
 )
+
+@Serializable
+data class PublicRecommendationDefaults(
+    val areaCode: String,
+    val defaultRadiusMeters: Int,
+    val maximumRadiusMeters: Int,
+) {
+    fun isValid(): Boolean = areaCode == "NATIONWIDE" &&
+        defaultRadiusMeters in 200..10_000 &&
+        maximumRadiusMeters in 200..10_000 &&
+        defaultRadiusMeters <= maximumRadiusMeters
+}
 
 @Serializable
 data class SpecialtyCapabilities(

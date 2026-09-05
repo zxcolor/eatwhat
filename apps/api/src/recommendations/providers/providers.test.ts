@@ -1,6 +1,7 @@
 import { RecommendationContextSchema } from "@chi-shen-me/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { type AppConfig, loadAppConfig } from "../../config/app-config.js";
+import { startupOperationalConfig } from "../../operational-config/operational-config.types.js";
 import { getAmapFailureDiagnostic } from "../../providers/amap-response-status.js";
 import { toGcj02 } from "../domain/geo.js";
 import {
@@ -15,6 +16,7 @@ import {
 } from "./amap-place.provider.js";
 import { DemoPlaceProvider } from "./demo-place.provider.js";
 import { IntentCoordinator } from "./intent-coordinator.js";
+import { buildQwenSystemMessage } from "./qwen-intent-registry.js";
 import { QwenIntentProvider } from "./qwen-intent.provider.js";
 import { buildRuleIntent, RuleIntentProvider } from "./rule-intent.provider.js";
 import { UnavailablePlaceProvider } from "./unavailable-place.provider.js";
@@ -101,6 +103,61 @@ describe("intent providers", () => {
 		expect(fetchMock).toHaveBeenCalledOnce();
 	});
 
+	it("selects the Qwen system message by prompt version", () => {
+		const testRegistry = Object.freeze({
+			"test-prompt-a": "system prompt A",
+			"test-prompt-b": "system prompt B",
+		});
+		expect(buildQwenSystemMessage("test-prompt-a", testRegistry)?.content).toBe(
+			"system prompt A",
+		);
+		expect(buildQwenSystemMessage("test-prompt-b", testRegistry)?.content).toBe(
+			"system prompt B",
+		);
+		expect(buildQwenSystemMessage("unknown", testRegistry)).toBeNull();
+	});
+
+	it("refuses an unregistered model before any Qwen request", async () => {
+		const fetchMock = vi.fn();
+		const provider = new QwenIntentProvider(
+			enabledConfig(),
+			fetchMock as typeof fetch,
+		);
+		await expect(
+			provider.resolve(recommendationContext, undefined, {
+				promptVersion: "intent-prompt-v1",
+				modelVersion: "unregistered-model" as never,
+				timeoutMs: 1_800,
+			}),
+		).rejects.toThrow("AI 意图服务暂时不可用");
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		{ mealPeriod: "BREAKFAST" },
+		{ mealPeriod: "DINNER" },
+		{ target: "COFFEE" },
+		{ weatherContext: { kind: "USER_REPORTED", preference: "WARMING" } },
+	])(
+		"rejects non-lunch or weather plans even when Qwen is called directly: %j",
+		async (override) => {
+			const fetchMock = vi.fn();
+			const provider = new QwenIntentProvider(
+				enabledConfig(),
+				fetchMock as typeof fetch,
+			);
+			await expect(
+				provider.resolve(
+					RecommendationContextSchema.parse({
+						...recommendationContext,
+						...override,
+					}),
+				),
+			).rejects.toThrow("AI 意图服务暂时不可用");
+			expect(fetchMock).not.toHaveBeenCalled();
+		},
+	);
+
 	it("falls back to rules after a Qwen failure", async () => {
 		const fetchMock = vi.fn(
 			async () => new Response("bad gateway", { status: 502 }),
@@ -183,6 +240,25 @@ describe("intent providers", () => {
 
 		expect(result.profile.provider).toBe("RULE_FALLBACK");
 		expect(result.profile.mealTypes[0]).toBe(entry.expectedFirstTerm);
+		expect(result.fallbackUsed).toBe(false);
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it("honors an operator AI kill switch without calling Qwen", async () => {
+		const fetchMock = vi.fn();
+		const config = enabledConfig();
+		const qwen = new QwenIntentProvider(config, fetchMock as typeof fetch);
+		const coordinator = new IntentCoordinator(
+			config,
+			qwen,
+			new RuleIntentProvider(),
+		);
+		const startup = startupOperationalConfig(config, "DATABASE");
+		const result = await coordinator.resolve(recommendationContext, undefined, {
+			...startup,
+			aiAssistanceEnabled: false,
+		});
+		expect(result.profile.provider).toBe("RULE_FALLBACK");
 		expect(result.fallbackUsed).toBe(false);
 		expect(fetchMock).not.toHaveBeenCalled();
 	});

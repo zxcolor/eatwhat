@@ -156,7 +156,10 @@ private fun androidx.compose.foundation.lazy.LazyListScope.editingItems(
         AppCard {
             AppSectionHeader(
                 title = "共同出行",
-                subtitle = "所有成员使用同一出发地点和交通方式。",
+                subtitle = "所有成员使用同一出发地点和交通方式。" +
+                    (state.recommendationDefaults?.let {
+                        "当前服务最远支持 ${it.maximumRadiusMeters} 米；共同距离取所有成员中最小的值。"
+                    } ?: ""),
             )
             ChoiceRow(
                 options = listOf(
@@ -208,6 +211,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.editingItems(
                 ordinal = state.activeMemberIndex + 1,
                 total = state.input.members.size,
                 member = member,
+                maximumRadiusMeters = state.recommendationDefaults?.maximumRadiusMeters,
                 onChange = { viewModel.updateMember(state.activeMemberIndex, it) },
             )
         }
@@ -245,6 +249,7 @@ private fun MemberEditor(
     ordinal: Int,
     total: Int,
     member: GroupMemberConstraints,
+    maximumRadiusMeters: Int?,
     onChange: (GroupMemberConstraints) -> Unit,
 ) {
     AppCard {
@@ -280,13 +285,15 @@ private fun MemberEditor(
         )
         GroupOption(
             title = "最远距离",
-            options = listOf(
-                500 to "500 米",
-                1_000 to "1 公里",
-                1_500 to "1.5 公里",
-                3_000 to "3 公里",
-                5_000 to "5 公里",
-            ),
+            options = (listOf(500, 1_000, 1_500, 3_000, 5_000) +
+                listOfNotNull(maximumRadiusMeters) + member.radiusMeters)
+                .distinct().sorted().map { radius ->
+                    radius to when {
+                        radius < 1_000 -> "$radius 米"
+                        radius % 1_000 == 0 -> "${radius / 1_000} 公里"
+                        else -> "${radius / 1_000.0} 公里"
+                    }
+                },
             selected = member.radiusMeters,
             onSelected = { onChange(member.copy(radiusMeters = it)) },
         )
@@ -515,7 +522,7 @@ private fun AggregationCard(aggregation: GroupConstraintAggregation) {
             aggregation.effectiveBudgetMaxYuan?.let { "$it 元" } ?: "不限",
         )
         SummaryLine("可用时间", "${aggregation.effectiveAvailableMinutes} 分钟")
-        SummaryLine("最远距离", formatDistance(aggregation.effectiveRadiusMeters.toDouble()))
+        SummaryLine("最远距离", "${aggregation.effectiveRadiusMeters} 米")
         SummaryLine(
             "共同偏好",
             aggregation.preferredCuisines.takeIf(List<String>::isNotEmpty)?.joinToString("、") ?: "无额外共同偏好",

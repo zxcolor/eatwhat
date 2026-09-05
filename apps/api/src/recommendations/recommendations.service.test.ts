@@ -7,6 +7,8 @@ import { describe, expect, it, vi } from "vitest";
 import { RecommendationRequestRegistry } from "../common/recommendation-request.registry.js";
 import { type AppConfig, loadAppConfig } from "../config/app-config.js";
 import type { DataRightsPolicy } from "../config/data-rights-policy.js";
+import type { OperationalConfigService } from "../operational-config/operational-config.service.js";
+import { type OperationalConfigSnapshot, startupOperationalConfig } from "../operational-config/operational-config.types.js";
 import type { PlaceProvider } from "./domain/place-candidate.js";
 import { AmapPlaceProvider } from "./providers/amap-place.provider.js";
 import { DemoPlaceProvider } from "./providers/demo-place.provider.js";
@@ -42,14 +44,116 @@ describe("recommendationNotice", () => {
 });
 
 describe("RecommendationsService token transaction", () => {
+	it.each(["STALE_CACHE", "SAFE_FALLBACK"] as const)(
+		"rejects %s before capability, model, provider, rights or token-registry operations",
+		async (source) => {
+			const base = loadAppConfig({ NODE_ENV: "test" });
+			const initial = startupOperationalConfig(base);
+			const operational = {
+				current: vi.fn(async () => ({
+					...initial, source,
+					lastSuccessfulReadAt: source === "STALE_CACHE" ? "2026-09-06T01:00:00.000Z" : null,
+					// Execution must honor availability even if old diagnostic values were enabled.
+					aiAssistanceEnabled: true,
+				})),
+			} as unknown as OperationalConfigService;
+			const places = { kind: "AUTHORIZED_VENDOR", dataMode: "LIVE", supportsQueryPlan: vi.fn(), search: vi.fn() } as unknown as PlaceProvider;
+			const intents = { resolve: vi.fn() } as unknown as IntentCoordinator;
+			const rights = { effectiveMode: vi.fn() } as unknown as DataRightsPolicy;
+			const registry = new RecommendationRequestRegistry();
+			const issue = vi.spyOn(registry, "issue");
+			const revoke = vi.spyOn(registry, "revoke");
+			const service = new RecommendationsService(base, places, intents, registry, rights, operational);
+			await expect(service.recommend(RecommendationContextSchema.parse({
+				location: { latitude: 39.9928, longitude: 116.3109 }, mealPeriod: "LUNCH", radiusMeters: 1500,
+			}))).rejects.toMatchObject({ status: 503, response: { code: "OPERATIONAL_CONFIG_UNAVAILABLE" } });
+			expect(places.supportsQueryPlan).not.toHaveBeenCalled();
+			expect(places.search).not.toHaveBeenCalled();
+			expect(intents.resolve).not.toHaveBeenCalled();
+			expect(rights.effectiveMode).not.toHaveBeenCalled();
+			expect(issue).not.toHaveBeenCalled();
+			expect(revoke).not.toHaveBeenCalled();
+			expect(registry.diagnostics().activeRequestCount).toBe(0);
+			registry.onModuleDestroy();
+		},
+	);
+
+	it("rejects a radius above the active operations ceiling before provider calls", async () => {
+		const places = {
+			kind: "AUTHORIZED_VENDOR",
+			dataMode: "LIVE",
+			search: vi.fn(),
+		} as unknown as PlaceProvider;
+		const intents = { resolve: vi.fn() } as unknown as IntentCoordinator;
+		const operationalSnapshot = {
+			source: "DATABASE",
+			lastSuccessfulReadAt: "2026-09-06T01:00:00.000Z",
+			aiAssistanceEnabled: false,
+			recommendationRules: {
+				qualityWeight: 25,
+				timeWeight: 25,
+				budgetWeight: 20,
+				intentWeight: 15,
+				diversityWeight: 10,
+				operationsAdjustmentMaximum: 5,
+			},
+			prompt: {
+				enabled: false,
+				promptVersion: "intent-prompt-v1",
+				modelVersion: "qwen3.7-flash-2026-07-15",
+				timeoutMs: 1_500,
+			},
+			coverage: {
+				defaultRadiusMeters: 1_000,
+				maximumRadiusMeters: 2_000,
+				areaCode: "NATIONWIDE",
+			},
+			minimumAppVersions: { android: "1.0.0" },
+			versions: {
+				"features.ai-assistance": 1,
+				"recommendations.rules": 1,
+				"recommendations.prompt": 1,
+				"coverage.default": 1,
+				"clients.minimum-version": 1,
+			},
+		} satisfies OperationalConfigSnapshot;
+		const operational = {
+			current: vi.fn(async () => operationalSnapshot),
+		} as unknown as OperationalConfigService;
+		const service = new RecommendationsService(
+			{} as AppConfig,
+			places,
+			intents,
+			new RecommendationRequestRegistry(),
+			{} as DataRightsPolicy,
+			operational,
+		);
+
+		await expect(
+			service.recommend(
+				RecommendationContextSchema.parse({
+					location: { latitude: 39.9928, longitude: 116.3109 },
+					mealPeriod: "LUNCH",
+					radiusMeters: 2_500,
+				}),
+			),
+		).rejects.toMatchObject({
+			response: { code: "RADIUS_EXCEEDS_ACTIVE_COVERAGE" },
+		});
+		expect(places.search).not.toHaveBeenCalled();
+		expect(intents.resolve).not.toHaveBeenCalled();
+	});
+
 	it("revokes an issued mapping when the public response fails validation", async () => {
 		const registry = new RecommendationRequestRegistry();
+		const revoke = vi.spyOn(registry, "revoke");
 		const originalIssue = registry.issue.bind(registry);
 		vi.spyOn(registry, "issue").mockImplementation((requestId, references) => {
 			originalIssue(requestId, references);
 			return ["invalid-token" as ResultToken];
 		});
 		const config = {
+			...loadAppConfig({ NODE_ENV: "test" }),
 			versions: {
 				rule: "test-rule",
 				prompt: "test-prompt",
@@ -124,6 +228,8 @@ describe("RecommendationsService token transaction", () => {
 				}),
 			),
 		).rejects.toBeDefined();
+		expect(registry.issue).toHaveBeenCalledOnce();
+		expect(revoke).toHaveBeenCalledWith(expect.any(String));
 		expect(registry.diagnostics().activeRequestCount).toBe(0);
 		registry.onModuleDestroy();
 	});
@@ -145,6 +251,7 @@ describe("RecommendationsService query-plan coordination", () => {
 		const effectiveMode = vi.fn();
 		const policy = { effectiveMode } as unknown as DataRightsPolicy;
 		const config = {
+			...loadAppConfig({ NODE_ENV: "test" }),
 			versions: {
 				rule: "test-rule",
 				prompt: "test-prompt",

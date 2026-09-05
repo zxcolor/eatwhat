@@ -8,8 +8,10 @@ import {
 	RecommendationContextSchema,
 } from "@chi-shen-me/contracts";
 import {
+	BadRequestException,
 	Inject,
 	Injectable,
+	Optional,
 	ServiceUnavailableException,
 } from "@nestjs/common";
 import { APP_CONFIG, type AppConfig } from "../config/app-config.js";
@@ -26,6 +28,11 @@ import {
 import { rankCandidates } from "../recommendations/domain/recommendation-engine.js";
 import { buildRecommendationQueryPlan } from "../recommendations/domain/recommendation-query-plan.js";
 import { buildRuleIntent } from "../recommendations/providers/rule-intent.provider.js";
+import { OperationalConfigService } from "../operational-config/operational-config.service.js";
+import {
+	isOperationalConfigAvailable,
+	startupOperationalConfig,
+} from "../operational-config/operational-config.types.js";
 import { aggregateGroupConstraints } from "./group-constraint-aggregator.js";
 
 const GROUP_UNAVAILABLE_RESPONSE = Object.freeze({
@@ -75,6 +82,7 @@ export class GroupRecommendationsService {
 		@Inject(APP_CLOCK) private readonly clock: AppClock,
 		@Inject(PLACE_PROVIDER) private readonly places: PlaceProvider,
 		private readonly dataRightsPolicy: DataRightsPolicy,
+		@Optional() private readonly operationalConfig?: OperationalConfigService,
 	) {}
 
 	async recommend(
@@ -89,7 +97,20 @@ export class GroupRecommendationsService {
 			return failUnavailable();
 		}
 
+		const operational =
+			(await this.operationalConfig?.current()) ??
+			startupOperationalConfig(this.config);
+		if (!isOperationalConfigAvailable(operational)) return failUnavailable();
 		const aggregation = aggregateGroupConstraints(request.members);
+		if (
+			aggregation.effectiveRadiusMeters >
+			operational.coverage.maximumRadiusMeters
+		) {
+			throw new BadRequestException({
+				code: "RADIUS_EXCEEDS_ACTIVE_COVERAGE",
+				message: "搜索半径超过当前运营配置允许的范围",
+			});
+		}
 		const generatedAt = new Date(this.clock.now()).toISOString();
 		const context = RecommendationContextSchema.parse({
 			location: request.location,
@@ -160,6 +181,7 @@ export class GroupRecommendationsService {
 			intent,
 			candidates,
 			dataRightsMode,
+			rules: operational.recommendationRules,
 		});
 
 		return GroupRecommendationResponseSchema.parse({
@@ -168,6 +190,7 @@ export class GroupRecommendationsService {
 			coverage: "NATIONWIDE",
 			dataRightsMode,
 			ruleVersion: this.config.versions.rule,
+			rulesConfigVersion: operational.versions["recommendations.rules"],
 			aggregation,
 			results: results.map((result) => ({
 				provider: result.provider,

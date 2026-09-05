@@ -106,6 +106,7 @@ import com.chishenme.app.data.remote.effectiveSpecialtyCapabilities
 import com.chishenme.app.domain.BuiltInQuickLocations
 import com.chishenme.app.domain.DecisionScenario
 import com.chishenme.app.domain.LocationChoice
+import com.chishenme.app.domain.RecommendationRadiusPolicy
 import com.chishenme.app.feature.decision.DecisionUiState
 import com.chishenme.app.feature.decision.DecisionViewModel
 import com.chishenme.app.feature.decision.LocationSearchUiState
@@ -156,6 +157,8 @@ fun HomeScreen(
             ?.effectiveSpecialtyCapabilities()
     val availableSpecialtyTargets = specialtyTargetOptions(specialtyCapabilities)
     val availableMealPeriods = mealPeriodOptions(specialtyCapabilities)
+    val recommendationDefaults = state.featureConfig?.recommendationDefaults
+    val maximumRadius = RecommendationRadiusPolicy.maximumRadius(recommendationDefaults)
 
     fun locateOnlyWhileHomeStarted() {
         if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
@@ -516,12 +519,22 @@ fun HomeScreen(
                 item {
                     OptionSection(
                         title = "最远距离",
-                        options = listOf(
-                            1_000 to "1 km",
-                            1_500 to "1.5 km",
-                            3_000 to "3 km",
-                            5_000 to "5 km",
-                        ),
+                        subtitle = recommendationDefaults?.let {
+                            "当前服务最远支持 ${it.maximumRadiusMeters} 米；保留你主动选择的距离。"
+                        },
+                        options = (
+                            listOf(1_000, 1_500, 3_000, 5_000).filter { it <= maximumRadius } +
+                                listOfNotNull(
+                                    recommendationDefaults?.defaultRadiusMeters,
+                                    recommendationDefaults?.maximumRadiusMeters,
+                                ) + state.input.radiusMeters
+                            ).distinct().sorted().map { radius ->
+                                radius to when {
+                                    radius < 1_000 -> "$radius m"
+                                    radius % 1_000 == 0 -> "${radius / 1_000} km"
+                                    else -> "${radius / 1_000.0} km"
+                                }
+                            },
                         selected = state.input.radiusMeters,
                         onSelected = viewModel::setRadius,
                     )
@@ -562,7 +575,7 @@ fun HomeScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    state.formError?.let { error ->
+                    (state.formError ?: state.radiusError)?.let { error ->
                         Surface(
                             modifier = Modifier.semantics {
                                 liveRegion = LiveRegionMode.Assertive
@@ -577,6 +590,15 @@ fun HomeScreen(
                                 style = MaterialTheme.typography.bodyMedium,
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
                             )
+                        }
+                    }
+                    if (state.radiusError != null) {
+                        val suggestedRadius = RecommendationRadiusPolicy.automaticRadius(
+                            state.input.mealPeriod,
+                            recommendationDefaults,
+                        )
+                        TextButton(onClick = { viewModel.setRadius(suggestedRadius) }) {
+                            Text("将最远距离改为 $suggestedRadius 米")
                         }
                     }
                     HomePrimaryAction(

@@ -809,7 +809,7 @@ jobs:
           test "$(psql -X -At -c "SELECT has_table_privilege('retention_worker','public.users','SELECT')")" = "f"
           test "$(psql -X -At -c "SELECT has_column_privilege('retention_worker','public.otp_challenges','destination_hash','UPDATE')")" = "f"
           test "$(psql -X -At -c "SELECT has_table_privilege('api_runtime','public.users','SELECT')")" = "t"
-          test "$(psql -X -At -c "SELECT count(*) || '|' || max(version) || '|' || max(name) FILTER (WHERE version=12) FROM public.schema_migrations")" = "12|12|wechat_union_aliases"
+          test "$(psql -X -At -c "SELECT count(*) || '|' || max(version) || '|' || max(name) FILTER (WHERE version=13) FROM public.schema_migrations")" = "13|13|admin_config_control"
           for role in api_runtime retention_worker admin_api_runtime data_export_worker; do
             test "$(psql -X -At -c "SELECT count(*) FROM unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) AS checked(privilege_name) WHERE has_table_privilege('$role','public.wechat_union_aliases',privilege_name)")" = "0"
             test "$(psql -X -At -c "SELECT count(*) FROM unnest(ARRAY['SELECT','INSERT','UPDATE','REFERENCES']) AS checked(privilege_name) WHERE has_any_column_privilege('$role','public.wechat_union_aliases',privilege_name)")" = "0"
@@ -974,7 +974,7 @@ jobs:
           export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
           test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM public.wechat_union_aliases WHERE identity_binding_id='$first_binding_id'")" = "1"
           test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM public.identity_bindings WHERE id='$first_binding_id' AND revoked_at IS NOT NULL")" = "1"
-      - name: Exercise schema 0010 ACL restore, 0011 PHONE and 0012 UnionID grants
+      - name: Exercise schema 0010 ACL restore, 0011 PHONE, 0012 UnionID and current grants
         env:
           PGHOST: 127.0.0.1
           PGPORT: "5432"
@@ -1124,18 +1124,24 @@ jobs:
           await client.connect();
           try {
             const result = await runMigrationsWithClient(client, await loadMigrationPlan());
-            if (result.currentVersion !== 12) throw new Error("UnionID migration did not reach 0012");
+            if (result.currentVersion !== 13) throw new Error("UnionID cutover did not reach current schema 0013");
           } finally {
             await client.end();
           }
           NODE
+          export PGUSER=postgres PGPASSWORD=ci-bootstrap-password
+          for service_role in api_runtime retention_worker admin_api_runtime data_export_worker; do
+            test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) AS checked(privilege_name) WHERE has_table_privilege('$service_role','public.app_config_versions',privilege_name)")" = "0"
+            test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM unnest(ARRAY['SELECT','INSERT','UPDATE','REFERENCES']) AS checked(privilege_name) WHERE has_any_column_privilege('$service_role','public.app_config_versions',privilege_name)")" = "0"
+          done
           export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
           psql -X -v migration_owner=schema_migrator \
             -v runtime_role=api_runtime -v maintenance_role=retention_worker \
             -v admin_runtime_role=admin_api_runtime -v export_worker_role=data_export_worker \
             -f infra/postgres/role-grants.sql
           export PGUSER=postgres PGPASSWORD=ci-bootstrap-password
-          test "$(psql -X -At -c "SELECT count(*) || '|' || max(version) || '|' || max(name) FILTER (WHERE version=12) FROM public.schema_migrations")" = "12|12|wechat_union_aliases"
+          test "$(psql -X -At -c "SELECT count(*) || '|' || max(version) || '|' || max(name) FILTER (WHERE version=13) FROM public.schema_migrations")" = "13|13|admin_config_control"
+          test "$(psql -X -At -c "SELECT count(*) FROM public.schema_migrations WHERE version=12 AND name='wechat_union_aliases'")" = "1"
           test "$(psql -X -At -c "SELECT to_regclass('public.wechat_union_aliases') IS NOT NULL")" = "t"
           test "$(psql -X -At -c "SELECT has_table_privilege('api_runtime','public.wechat_union_aliases','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')")" = "f"
           test "$(psql -X -At -c "SELECT has_function_privilege('api_runtime','public.consume_oauth_state_with_wechat_union(uuid,character varying,character varying,character varying,character varying,uuid,character varying,character varying,character varying,character varying,character varying,character varying,character varying,character varying)','EXECUTE')")" = "t"
@@ -2122,6 +2128,416 @@ jobs:
           test "$(psql -X -At -c "SELECT count(*) FROM public.admin_mfa_credentials WHERE id='c1000000-0000-0000-0000-000000000001' AND revoked_at IS NOT NULL")" = "1"
           test "$(psql -X -At -c "SELECT count(*) FROM public.admin_sessions WHERE admin_user_id='a1000000-0000-0000-0000-000000000001' AND revoked_at IS NULL")" = "0"
           test "$(psql -X -At -c "SELECT count(*) FROM public.admin_audit_log WHERE action_type IN ('ADMIN_LOGIN_FAILED','ADMIN_LOGIN_SUCCEEDED','ADMIN_SESSION_REVOKED','ADMIN_WEBAUTHN_COUNTER_ROLLBACK')")" -ge 4
+      - name: Exercise administrator configuration publish, rollback and ACL gates
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: "5432"
+          PGDATABASE: chi_shen_me_ci
+        run: |
+          set -euo pipefail
+          export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          BEGIN;
+          SELECT set_config('chi_shen_me.admin_security_mutation','enabled',true);
+          INSERT INTO public.admin_users (
+            id, login_lookup_hash, login_hash_algorithm, login_hash_key_version,
+            status, created_at, status_changed_at
+          ) VALUES
+            (
+              'a3000000-0000-0000-0000-000000000001', repeat('abcdef01',8),
+              'HMAC-SHA256', 'ci-v1', 'ACTIVE', now(), now()
+            ),
+            (
+              'a4000000-0000-0000-0000-000000000001', repeat('10fedcba',8),
+              'HMAC-SHA256', 'ci-v1', 'ACTIVE', now(), now()
+            );
+          INSERT INTO public.admin_user_roles (admin_user_id, role_id)
+          SELECT fixture.admin_user_id, role.id
+          FROM (VALUES
+            ('a3000000-0000-0000-0000-000000000001'::uuid, 'ALGORITHM_ADMIN'::text),
+            ('a3000000-0000-0000-0000-000000000001'::uuid, 'AUDITOR'::text),
+            ('a4000000-0000-0000-0000-000000000001'::uuid, 'OPERATOR'::text)
+          ) AS fixture(admin_user_id, role_code)
+          JOIN public.admin_roles AS role ON role.role_code = fixture.role_code;
+          INSERT INTO public.admin_sessions (
+            id, admin_user_id, token_hash, token_hash_algorithm,
+            token_hash_key_version, device_hash, last_ip_hash,
+            binding_hash_key_version, created_at, last_seen_at,
+            idle_expires_at, absolute_expires_at, retain_until
+          ) VALUES
+            (
+              'e3000000-0000-0000-0000-000000000001',
+              'a3000000-0000-0000-0000-000000000001', repeat('13579bdf',8),
+              'HMAC-SHA256', 'ci-v1', repeat('11223344',8), repeat('55667788',8),
+              'ci-config-bind-v1', now(), now(), now() + interval '15 minutes',
+              now() + interval '8 hours', now() + interval '30 days 8 hours'
+            ),
+            (
+              'e4000000-0000-0000-0000-000000000001',
+              'a4000000-0000-0000-0000-000000000001', repeat('2468ace0',8),
+              'HMAC-SHA256', 'ci-v1', repeat('99aabbcc',8), repeat('ddeeff00',8),
+              'ci-config-bind-v1', now(), now(), now() + interval '15 minutes',
+              now() + interval '8 hours', now() + interval '30 days 8 hours'
+            );
+          SELECT set_config('chi_shen_me.admin_security_mutation','disabled',true);
+          COMMIT;
+          SQL
+
+          export PGUSER=postgres PGPASSWORD=ci-bootstrap-password
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_proc AS routine WHERE routine.pronamespace='public'::regnamespace AND routine.proname IN ('runtime_list_active_app_config','admin_list_sanitized_audit_events_v2','admin_list_active_app_config','admin_list_app_config_history','admin_publish_app_config','admin_rollback_app_config') AND has_function_privilege('api_runtime',routine.oid,'EXECUTE')")" = "1"
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_proc AS routine WHERE routine.pronamespace='public'::regnamespace AND routine.proname IN ('runtime_list_active_app_config','admin_list_sanitized_audit_events_v2','admin_list_active_app_config','admin_list_app_config_history','admin_publish_app_config','admin_rollback_app_config') AND has_function_privilege('admin_api_runtime',routine.oid,'EXECUTE')")" = "5"
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_proc AS routine WHERE routine.pronamespace='public'::regnamespace AND routine.proname IN ('runtime_list_active_app_config','admin_list_sanitized_audit_events_v2','admin_list_active_app_config','admin_list_app_config_history','admin_publish_app_config','admin_rollback_app_config') AND (has_function_privilege('retention_worker',routine.oid,'EXECUTE') OR has_function_privilege('data_export_worker',routine.oid,'EXECUTE'))")" = "0"
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_proc AS routine CROSS JOIN LATERAL aclexplode(COALESCE(routine.proacl,acldefault('f',routine.proowner))) AS acl WHERE routine.pronamespace='public'::regnamespace AND routine.proname IN ('app_config_value_is_valid','reject_direct_app_config_mutation','runtime_list_active_app_config','admin_list_sanitized_audit_events_v2','admin_list_active_app_config','admin_list_app_config_history','admin_publish_app_config','admin_rollback_app_config') AND acl.grantee=0 AND acl.privilege_type='EXECUTE'")" = "0"
+          for role in api_runtime retention_worker admin_api_runtime data_export_worker; do
+            test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) AS checked(privilege_name) WHERE has_table_privilege('$role','public.app_config_versions',privilege_name)")" = "0"
+            test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM unnest(ARRAY['SELECT','INSERT','UPDATE','REFERENCES']) AS checked(privilege_name) WHERE has_any_column_privilege('$role','public.app_config_versions',privilege_name)")" = "0"
+          done
+
+          export PGUSER=admin_api_runtime PGPASSWORD=ci-admin-runtime-password
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          DO $ci_config$
+          DECLARE
+            outcome record;
+            history_versions integer[];
+          BEGIN
+            SELECT * INTO outcome FROM public.admin_publish_app_config(
+              repeat('13579bdf',8), 'ci-v1', repeat('55667788',8),
+              repeat('11223344',8), 'ci-config-bind-v1',
+              'features.ai-assistance', NULL::integer,
+              '{"enabled":true}'::jsonb, 'ROUTINE_TUNING'
+            );
+            IF outcome.status IS DISTINCT FROM 'PUBLISHED'
+              OR outcome.version IS DISTINCT FROM 1
+              OR outcome.config_schema IS DISTINCT FROM 'FEATURE_FLAGS_V1'
+              OR outcome.classification IS DISTINCT FROM 'PUBLIC' THEN
+              RAISE EXCEPTION 'feature configuration initial publish failed';
+            END IF;
+            SELECT * INTO outcome FROM public.admin_publish_app_config(
+              repeat('13579bdf',8), 'ci-v1', repeat('55667788',8),
+              repeat('11223344',8), 'ci-config-bind-v1',
+              'recommendations.rules', NULL::integer,
+              '{"qualityWeight":25,"timeWeight":20,"budgetWeight":20,"intentWeight":15,"diversityWeight":15,"operationsAdjustmentMaximum":5}'::jsonb,
+              'ROUTINE_TUNING'
+            );
+            IF outcome.status IS DISTINCT FROM 'PUBLISHED'
+              OR outcome.version IS DISTINCT FROM 1
+              OR outcome.config_schema IS DISTINCT FROM 'RECOMMENDATION_RULES_V1'
+              OR outcome.classification IS DISTINCT FROM 'INTERNAL' THEN
+              RAISE EXCEPTION 'recommendation rules initial publish failed';
+            END IF;
+            SELECT * INTO outcome FROM public.admin_publish_app_config(
+              repeat('13579bdf',8), 'ci-v1', repeat('55667788',8),
+              repeat('11223344',8), 'ci-config-bind-v1',
+              'recommendations.prompt', NULL::integer,
+              '{"enabled":true,"promptVersion":"intent-prompt-v1","modelVersion":"qwen3.7-flash-2026-07-15","timeoutMs":1500}'::jsonb,
+              'ROUTINE_TUNING'
+            );
+            IF outcome.status IS DISTINCT FROM 'PUBLISHED'
+              OR outcome.version IS DISTINCT FROM 1
+              OR outcome.config_schema IS DISTINCT FROM 'PROMPT_SETTINGS_V1'
+              OR outcome.classification IS DISTINCT FROM 'INTERNAL' THEN
+              RAISE EXCEPTION 'prompt settings initial publish failed';
+            END IF;
+            SELECT * INTO outcome FROM public.admin_publish_app_config(
+              repeat('13579bdf',8), 'ci-v1', repeat('55667788',8),
+              repeat('11223344',8), 'ci-config-bind-v1',
+              'coverage.default', NULL::integer,
+              '{"defaultRadiusMeters":1500,"maximumRadiusMeters":2500,"areaCode":"NATIONWIDE"}'::jsonb,
+              'RELEASE_COMPATIBILITY'
+            );
+            IF outcome.status IS DISTINCT FROM 'PUBLISHED'
+              OR outcome.version IS DISTINCT FROM 1
+              OR outcome.config_schema IS DISTINCT FROM 'COVERAGE_SETTINGS_V1'
+              OR outcome.classification IS DISTINCT FROM 'PUBLIC' THEN
+              RAISE EXCEPTION 'coverage settings initial publish failed';
+            END IF;
+            SELECT * INTO outcome FROM public.admin_publish_app_config(
+              repeat('13579bdf',8), 'ci-v1', repeat('55667788',8),
+              repeat('11223344',8), 'ci-config-bind-v1',
+              'clients.minimum-version', NULL::integer,
+              '{"android":"1.2.3","ios":"1.2.0","miniprogram":"1.1.0"}'::jsonb,
+              'RELEASE_COMPATIBILITY'
+            );
+            IF outcome.status IS DISTINCT FROM 'CLIENT_RELEASE_UNVERIFIED'
+              OR outcome.version IS NOT NULL OR outcome.value_json IS NOT NULL THEN
+              RAISE EXCEPTION 'unverified minimum client version initial publish was accepted';
+            END IF;
+
+            SELECT * INTO outcome FROM public.admin_publish_app_config(
+              repeat('13579bdf',8), 'ci-v1', repeat('55667788',8),
+              repeat('11223344',8), 'ci-config-bind-v1',
+              'recommendations.prompt', 1,
+              '{"enabled":true,"promptVersion":"unregistered-prompt","modelVersion":"qwen3.7-flash-2026-07-15","timeoutMs":1500}'::jsonb,
+              'ROUTINE_TUNING'
+            );
+            IF outcome.status IS DISTINCT FROM 'INVALID_VALUE' THEN
+              RAISE EXCEPTION 'unregistered prompt label was accepted';
+            END IF;
+            SELECT * INTO outcome FROM public.admin_publish_app_config(
+              repeat('13579bdf',8), 'ci-v1', repeat('55667788',8),
+              repeat('11223344',8), 'ci-config-bind-v1',
+              'recommendations.prompt', 1,
+              '{"enabled":true,"promptVersion":"intent-prompt-v1","modelVersion":"unregistered-model","timeoutMs":1500}'::jsonb,
+              'ROUTINE_TUNING'
+            );
+            IF outcome.status IS DISTINCT FROM 'INVALID_VALUE' THEN
+              RAISE EXCEPTION 'unregistered model label was accepted';
+            END IF;
+            SELECT * INTO outcome FROM public.admin_publish_app_config(
+              repeat('13579bdf',8), 'ci-v1', repeat('55667788',8),
+              repeat('11223344',8), 'ci-config-bind-v1',
+              'coverage.default', 1,
+              '{"defaultRadiusMeters":1500,"maximumRadiusMeters":2500,"areaCode":"UNREGISTERED_AREA"}'::jsonb,
+              'ROUTINE_TUNING'
+            );
+            IF outcome.status IS DISTINCT FROM 'INVALID_VALUE' THEN
+              RAISE EXCEPTION 'unregistered coverage label was accepted';
+            END IF;
+
+            IF (SELECT count(*) FROM public.admin_list_active_app_config(
+              repeat('13579bdf',8), 'ci-v1', repeat('55667788',8),
+              repeat('11223344',8), 'ci-config-bind-v1'
+            )) <> 5 THEN
+              RAISE EXCEPTION 'administrator active configuration list is incomplete';
+            END IF;
+
+            SELECT * INTO outcome FROM public.admin_publish_app_config(
+              repeat('13579bdf',8), 'ci-v1', repeat('55667788',8),
+              repeat('11223344',8), 'ci-config-bind-v1',
+              'features.ai-assistance', 1, '{"enabled":false}'::jsonb,
+              'INCIDENT_RESPONSE'
+            );
+            IF outcome.status IS DISTINCT FROM 'PUBLISHED'
+              OR outcome.version IS DISTINCT FROM 2 THEN
+              RAISE EXCEPTION 'feature configuration second publish failed';
+            END IF;
+            SELECT * INTO outcome FROM public.admin_publish_app_config(
+              repeat('13579bdf',8), 'ci-v1', repeat('55667788',8),
+              repeat('11223344',8), 'ci-config-bind-v1',
+              'features.ai-assistance', 1, '{"enabled":true}'::jsonb,
+              'ROUTINE_TUNING'
+            );
+            IF outcome.status IS DISTINCT FROM 'VERSION_CONFLICT' THEN
+              RAISE EXCEPTION 'stale optimistic-lock publish was accepted';
+            END IF;
+            SELECT * INTO outcome FROM public.admin_rollback_app_config(
+              repeat('13579bdf',8), 'ci-v1', repeat('55667788',8),
+              repeat('11223344',8), 'ci-config-bind-v1',
+              'features.ai-assistance', 2, 1, 'ROLLBACK'
+            );
+            IF outcome.status IS DISTINCT FROM 'ROLLED_BACK'
+              OR outcome.version IS DISTINCT FROM 3
+              OR outcome.value_json IS DISTINCT FROM '{"enabled":true}'::jsonb
+              OR outcome.change_reason IS DISTINCT FROM 'ROLLBACK' THEN
+              RAISE EXCEPTION 'copy-forward rollback failed';
+            END IF;
+            IF (SELECT count(*) FROM public.admin_list_app_config_history(
+              repeat('13579bdf',8), 'ci-v1', repeat('55667788',8),
+              repeat('11223344',8), 'ci-config-bind-v1',
+              'features.ai-assistance', 20
+            )) <> 3 OR NOT EXISTS (
+              SELECT 1 FROM public.admin_list_app_config_history(
+                repeat('13579bdf',8), 'ci-v1', repeat('55667788',8),
+                repeat('11223344',8), 'ci-config-bind-v1',
+                'features.ai-assistance', 20
+              ) AS history
+              WHERE history.version = 3
+                AND history.value_json = '{"enabled":true}'::jsonb
+                AND history.change_reason = 'ROLLBACK'
+            ) THEN
+              RAISE EXCEPTION 'configuration history or rollback copy is invalid';
+            END IF;
+            SELECT array_agg(history.version) INTO history_versions
+            FROM public.admin_list_app_config_history(
+              repeat('13579bdf',8), 'ci-v1', repeat('55667788',8),
+              repeat('11223344',8), 'ci-config-bind-v1',
+              'features.ai-assistance', 20
+            ) AS history;
+            IF history_versions IS DISTINCT FROM ARRAY[3,2,1] THEN
+              RAISE EXCEPTION 'configuration history is not newest-first';
+            END IF;
+            SELECT * INTO outcome FROM public.admin_rollback_app_config(
+              repeat('13579bdf',8), 'ci-v1', repeat('55667788',8),
+              repeat('11223344',8), 'ci-config-bind-v1',
+              'features.ai-assistance', 3, 99, 'ROLLBACK'
+            );
+            IF outcome.status IS DISTINCT FROM 'TARGET_NOT_FOUND' THEN
+              RAISE EXCEPTION 'missing rollback target was accepted';
+            END IF;
+            IF (
+              SELECT count(*)
+              FROM public.admin_list_sanitized_audit_events_v2(
+                repeat('13579bdf',8), 'ci-v1', repeat('55667788',8),
+                repeat('11223344',8), 'ci-config-bind-v1',
+                NULL::timestamptz, NULL::uuid, 101
+              ) AS audit
+              WHERE audit.action IN (
+                'ADMIN_CONFIG_PUBLISHED', 'ADMIN_CONFIG_ROLLED_BACK'
+              )
+            ) <> 7 OR NOT EXISTS (
+              SELECT 1
+              FROM public.admin_list_sanitized_audit_events_v2(
+                repeat('13579bdf',8), 'ci-v1', repeat('55667788',8),
+                repeat('11223344',8), 'ci-config-bind-v1',
+                NULL::timestamptz, NULL::uuid, 101
+              ) AS audit
+              WHERE audit.action = 'ADMIN_CONFIG_PUBLISHED'
+                AND audit.config_key = 'features.ai-assistance'
+                AND audit.new_version = 2
+                AND audit.source_version = 1
+                AND audit.change_reason = 'INCIDENT_RESPONSE'
+            ) OR NOT EXISTS (
+              SELECT 1
+              FROM public.admin_list_sanitized_audit_events_v2(
+                repeat('13579bdf',8), 'ci-v1', repeat('55667788',8),
+                repeat('11223344',8), 'ci-config-bind-v1',
+                NULL::timestamptz, NULL::uuid, 101
+              ) AS audit
+              WHERE audit.action = 'ADMIN_CONFIG_ROLLED_BACK'
+                AND audit.config_key = 'features.ai-assistance'
+                AND audit.new_version = 3
+                AND audit.source_version = 1
+                AND audit.change_reason = 'ROLLBACK'
+            ) THEN
+              RAISE EXCEPTION 'sanitized configuration audit projection is invalid';
+            END IF;
+          END;
+          $ci_config$;
+          SQL
+
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM public.admin_list_active_app_config(repeat('2468ace0',8),'ci-v1',repeat('ddeeff00',8),repeat('99aabbcc',8),'ci-config-bind-v1')")" = "0"
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM public.admin_list_sanitized_audit_events_v2(repeat('2468ace0',8),'ci-v1',repeat('ddeeff00',8),repeat('99aabbcc',8),'ci-config-bind-v1',NULL::timestamptz,NULL::uuid,20)")" = "0"
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT status FROM public.admin_publish_app_config(repeat('2468ace0',8),'ci-v1',repeat('ddeeff00',8),repeat('99aabbcc',8),'ci-config-bind-v1','features.ai-assistance',3,'{\"enabled\":false}'::jsonb,'ROUTINE_TUNING')")" = "UNAUTHORIZED"
+          if psql -X -c "SELECT count(*) FROM public.app_config_versions" >/tmp/admin-config-base-read.log 2>&1; then
+            echo "administrator runtime can read configuration base rows" >&2
+            exit 1
+          fi
+          if psql -X -c "SELECT * FROM public.runtime_list_active_app_config()" >/tmp/admin-config-runtime-read.log 2>&1; then
+            echo "administrator runtime can bypass administrator configuration functions" >&2
+            exit 1
+          fi
+
+          export PGUSER=api_runtime PGPASSWORD=ci-runtime-password
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          DO $ci_runtime$
+          BEGIN
+            IF (SELECT count(*) FROM public.runtime_list_active_app_config()) <> 4
+              OR NOT EXISTS (
+                SELECT 1 FROM public.runtime_list_active_app_config() AS active
+                WHERE active.config_key = 'features.ai-assistance'
+                  AND active.version = 3
+                  AND active.value_json = '{"enabled":true}'::jsonb
+                  AND active.change_reason = 'ROLLBACK'
+              ) THEN
+              RAISE EXCEPTION 'runtime active configuration projection is invalid';
+            END IF;
+          END;
+          $ci_runtime$;
+          SQL
+          if psql -X -c "SELECT count(*) FROM public.app_config_versions" >/tmp/runtime-config-base-read.log 2>&1; then
+            echo "ordinary API runtime can read configuration base rows" >&2
+            exit 1
+          fi
+          if psql -X -c "SELECT status FROM public.admin_publish_app_config(repeat('13579bdf',8),'ci-v1',repeat('55667788',8),repeat('11223344',8),'ci-config-bind-v1','features.ai-assistance',3,'{\"enabled\":false}'::jsonb,'ROUTINE_TUNING')" >/tmp/runtime-admin-config-call.log 2>&1; then
+            echo "ordinary API runtime can execute administrator configuration functions" >&2
+            exit 1
+          fi
+
+          export PGUSER=schema_migrator PGPASSWORD=ci-migrator-password
+          if psql -X -c "INSERT INTO public.app_config_versions (config_key,version,value_json,config_schema,classification,created_by_admin_user_id,activated_at,change_reason) VALUES ('features.ai-assistance',99,'{\"enabled\":true}'::jsonb,'FEATURE_FLAGS_V1','PUBLIC','a3000000-0000-0000-0000-000000000001',now(),'ROUTINE_TUNING')" >/tmp/direct-config-mutation.log 2>&1; then
+            echo "migration owner bypassed controlled configuration mutation" >&2
+            exit 1
+          fi
+          grep -q "configuration mutations require a controlled function" /tmp/direct-config-mutation.log
+          if psql -X -c "UPDATE public.app_config_versions SET value_json=value_json WHERE config_key='features.ai-assistance' AND version=3" >/tmp/direct-config-update.log 2>&1; then
+            echo "migration owner bypassed controlled configuration update" >&2
+            exit 1
+          fi
+          grep -q "configuration mutations require a controlled function" /tmp/direct-config-update.log
+          if psql -X -c "DELETE FROM public.app_config_versions WHERE config_key='features.ai-assistance' AND version=1" >/tmp/direct-config-delete.log 2>&1; then
+            echo "migration owner bypassed controlled configuration delete" >&2
+            exit 1
+          fi
+          grep -q "configuration mutations require a controlled function" /tmp/direct-config-delete.log
+          if psql -X -c "TRUNCATE public.app_config_versions" >/tmp/direct-config-truncate.log 2>&1; then
+            echo "migration owner bypassed controlled configuration truncate" >&2
+            exit 1
+          fi
+          grep -q "configuration mutations require a controlled function" /tmp/direct-config-truncate.log
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM public.app_config_versions")" = "6"
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM public.app_config_versions WHERE config_key='clients.minimum-version'")" = "0"
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM public.admin_audit_log WHERE context_json->>'configKey'='clients.minimum-version'")" = "0"
+          test "$(psql -X -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FILTER (WHERE action_type='ADMIN_CONFIG_PUBLISHED') || '|' || count(*) FILTER (WHERE action_type='ADMIN_CONFIG_ROLLED_BACK') FROM public.admin_audit_log")" = "5|1"
+          psql -X -v ON_ERROR_STOP=1 <<'SQL'
+          DO $ci_config_audit$
+          BEGIN
+            IF EXISTS (
+              SELECT 1
+              FROM public.admin_audit_log AS audit
+              WHERE audit.action_type IN (
+                  'ADMIN_CONFIG_PUBLISHED', 'ADMIN_CONFIG_ROLLED_BACK'
+                ) AND (
+                  audit.target_type IS DISTINCT FROM 'APP_CONFIG'
+                  OR (SELECT count(*) FROM jsonb_object_keys(audit.context_json)) <> 4
+                  OR NOT audit.context_json ?& ARRAY[
+                    'configKey', 'newVersion', 'sourceVersion', 'changeReason'
+                  ]
+                  OR public.audit_context_is_valid(
+                    audit.action_type, audit.context_json
+                  ) IS DISTINCT FROM true
+                  OR jsonb_typeof(audit.context_json -> 'configKey')
+                    IS DISTINCT FROM 'string'
+                  OR jsonb_typeof(audit.context_json -> 'newVersion')
+                    IS DISTINCT FROM 'number'
+                  OR COALESCE(
+                    jsonb_typeof(audit.context_json -> 'sourceVersion')
+                      IN ('number', 'null'), false
+                  ) IS DISTINCT FROM true
+                  OR jsonb_typeof(audit.context_json -> 'changeReason')
+                    IS DISTINCT FROM 'string'
+                  OR audit.target_id_hash IS DISTINCT FROM encode(
+                    public.digest(
+                      convert_to(audit.context_json ->> 'configKey', 'UTF8'),
+                      'sha256'
+                    ),
+                    'hex'
+                  )
+                )
+            ) THEN
+              RAISE EXCEPTION 'configuration audit context shape is unsafe';
+            END IF;
+            IF (
+              SELECT count(*)
+              FROM public.admin_audit_log AS audit
+              WHERE audit.action_type = 'ADMIN_CONFIG_PUBLISHED'
+                AND audit.context_json -> 'newVersion' = '1'::jsonb
+                AND audit.context_json -> 'sourceVersion' = 'null'::jsonb
+            ) <> 4 THEN
+              RAISE EXCEPTION 'initial publish audit lineage is incomplete';
+            END IF;
+            IF (
+              SELECT count(*)
+              FROM public.admin_audit_log AS audit
+              WHERE audit.action_type = 'ADMIN_CONFIG_PUBLISHED'
+                AND audit.context_json = '{"configKey":"features.ai-assistance","newVersion":2,"sourceVersion":1,"changeReason":"INCIDENT_RESPONSE"}'::jsonb
+            ) <> 1 THEN
+              RAISE EXCEPTION 'replacement publish audit lineage is invalid';
+            END IF;
+            IF (
+              SELECT count(*)
+              FROM public.admin_audit_log AS audit
+              WHERE audit.action_type = 'ADMIN_CONFIG_ROLLED_BACK'
+                AND audit.context_json = '{"configKey":"features.ai-assistance","newVersion":3,"sourceVersion":1,"changeReason":"ROLLBACK"}'::jsonb
+            ) <> 1 THEN
+              RAISE EXCEPTION 'rollback audit lineage is invalid';
+            END IF;
+          END;
+          $ci_config_audit$;
+          SQL
+          export PGUSER=postgres PGPASSWORD=ci-bootstrap-password
+          psql -X -v ON_ERROR_STOP=1 -f apps/api/src/database/fixtures/admin-config-minimum-version.sql
+          psql -X -v ON_ERROR_STOP=1 -f infra/postgres/verify-admin-config-control.sql
+          bash apps/api/src/database/fixtures/admin-config-rollback-scripts.sh
       - name: Exercise schema validators and runtime-only state transitions
         env:
           PGHOST: 127.0.0.1
@@ -2132,6 +2548,8 @@ jobs:
           psql -X -v ON_ERROR_STOP=1 <<'SQL'
           DO $$ BEGIN
             IF NOT public.app_config_value_is_valid(
+              'FEATURE_FLAGS_V1', '{"enabled":true}'::jsonb
+            ) OR public.app_config_value_is_valid(
               'FEATURE_FLAGS_V1', '{"enabled":true,"rolloutPercentage":25}'::jsonb
             ) OR public.app_config_value_is_valid(
               'FEATURE_FLAGS_V1', '{"enabled":true,"value":"13800138000"}'::jsonb

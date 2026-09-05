@@ -147,8 +147,9 @@ SELECT NOT EXISTS (
 \endif
 
 -- The isolated restore path can intentionally recreate the last legacy schema
--- (0010), PHONE_ONLY (0011), or the UnionID alias schema (0012). Select exactly
--- one least-privilege whitelist; never apply a mixed authentication grant set.
+-- (0010), PHONE_ONLY (0011), the UnionID alias schema (0012), or the current
+-- administrator configuration schema (0013). Select exactly one
+-- least-privilege whitelist; never apply a mixed authentication grant set.
 SELECT (
   count(*) = 11
   AND min(version) = 1
@@ -160,7 +161,13 @@ SELECT (
   AND min(version) = 1
   AND max(version) = 12
   AND bool_or(version = 12 AND name = 'wechat_union_aliases')
-) AS wechat_union_alias_schema,
+) AS wechat_union_alias_schema_0012,
+(
+  count(*) = 13
+  AND min(version) = 1
+  AND max(version) = 13
+  AND bool_or(version = 13 AND name = 'admin_config_control')
+) AS admin_config_schema_0013,
 (
   count(*) = 10
   AND min(version) = 1
@@ -170,11 +177,18 @@ SELECT (
 FROM public.schema_migrations
 \gset
 SELECT (
-  :'phone_only_schema_0011'::boolean OR :'wechat_union_alias_schema'::boolean
+  :'phone_only_schema_0011'::boolean
+  OR :'wechat_union_alias_schema_0012'::boolean
+  OR :'admin_config_schema_0013'::boolean
 ) AS phone_only_schema,
 (
+  :'wechat_union_alias_schema_0012'::boolean
+  OR :'admin_config_schema_0013'::boolean
+) AS wechat_union_alias_schema,
+(
   :'phone_only_schema_0011'::boolean
-  OR :'wechat_union_alias_schema'::boolean
+  OR :'wechat_union_alias_schema_0012'::boolean
+  OR :'admin_config_schema_0013'::boolean
   OR :'legacy_fusion_schema'::boolean
 ) AS supported_auth_schema \gset
 \if :supported_auth_schema
@@ -183,7 +197,7 @@ SELECT (
   BEGIN
     RAISE EXCEPTION USING
       ERRCODE = '55000',
-      MESSAGE = 'role grants require the exact 0010, 0011 or 0012 auth schema';
+      MESSAGE = 'role grants require the exact 0010, 0011, 0012 or 0013 schema';
   END
   $psql_fail$;
 \endif
@@ -295,10 +309,11 @@ GRANT UPDATE (status, last_seen_at, last_ip_hash, compromised_at, revoked_at)
   ON public.auth_session_families TO :"runtime_role";
 GRANT UPDATE (revoked_at) ON public.auth_access_tokens TO :"runtime_role";
 GRANT SELECT ON public.account_deletion_jobs TO :"runtime_role";
-GRANT SELECT ON
-  public.coverage_areas,
-  public.app_config_versions
-TO :"runtime_role";
+GRANT SELECT ON public.coverage_areas TO :"runtime_role";
+\if :admin_config_schema_0013
+GRANT EXECUTE ON FUNCTION public.runtime_list_active_app_config()
+  TO :"runtime_role";
+\endif
 GRANT EXECUTE ON FUNCTION public.data_rights_authorization_allows(
   uuid, varchar, text
 ) TO :"runtime_role";
@@ -523,6 +538,23 @@ GRANT EXECUTE ON FUNCTION public.admin_revoke_self_credential(
 GRANT EXECUTE ON FUNCTION public.admin_list_sanitized_audit_events(
   varchar, varchar, varchar, varchar, varchar, timestamptz, uuid, integer
 ) TO :"admin_runtime_role";
+\if :admin_config_schema_0013
+GRANT EXECUTE ON FUNCTION public.admin_list_sanitized_audit_events_v2(
+  varchar, varchar, varchar, varchar, varchar, timestamptz, uuid, integer
+) TO :"admin_runtime_role";
+GRANT EXECUTE ON FUNCTION public.admin_list_active_app_config(
+  varchar, varchar, varchar, varchar, varchar
+) TO :"admin_runtime_role";
+GRANT EXECUTE ON FUNCTION public.admin_list_app_config_history(
+  varchar, varchar, varchar, varchar, varchar, varchar, integer
+) TO :"admin_runtime_role";
+GRANT EXECUTE ON FUNCTION public.admin_publish_app_config(
+  varchar, varchar, varchar, varchar, varchar, varchar, integer, jsonb, varchar
+) TO :"admin_runtime_role";
+GRANT EXECUTE ON FUNCTION public.admin_rollback_app_config(
+  varchar, varchar, varchar, varchar, varchar, varchar, integer, integer, varchar
+) TO :"admin_runtime_role";
+\endif
 GRANT EXECUTE ON FUNCTION public.admin_grant_role(
   varchar, varchar, varchar, varchar, varchar, uuid, varchar, timestamptz
 ) TO :"admin_runtime_role";
@@ -573,6 +605,7 @@ REVOKE ALL ON public.admin_audit_log,
   public.admin_mfa_credentials,
   public.admin_sessions,
   public.admin_webauthn_challenges,
+  public.app_config_versions,
   public.data_rights_authorizations,
   public.data_rights_authorization_operations,
   public.external_place_references,

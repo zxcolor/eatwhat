@@ -176,10 +176,15 @@ export async function runMigrationsWithClient(
 export async function verifySchemaWithClient(
 	client: SqlClient,
 	plan: readonly MigrationDefinition[],
-	allowedPendingFinalMigration?: Readonly<{
+	allowedPendingAuthMigration?: Readonly<{
 		readonly version: number;
 		readonly name: string;
 		readonly fileName: string;
+		readonly approvedPlanHead: Readonly<{
+			readonly version: number;
+			readonly name: string;
+			readonly fileName: string;
+		}>;
 	}>,
 ): Promise<void> {
 	const tableResult = await client.query<{
@@ -189,20 +194,29 @@ export async function verifySchemaWithClient(
 		throw new Error("数据库尚未执行版本化迁移");
 	}
 	const applied = await readAppliedMigrations(client);
-	if (allowedPendingFinalMigration === undefined) {
+	if (allowedPendingAuthMigration === undefined) {
 		validateAppliedMigrations(plan, applied, true);
 		return;
 	}
 
 	validateAppliedMigrations(plan, applied, false);
 	if (applied.length === plan.length) return;
-	const finalMigration = plan.at(-1);
+	const planHead = plan.at(-1);
+	const approvedHead = allowedPendingAuthMigration.approvedPlanHead;
 	if (
-		applied.length !== plan.length - 1 ||
-		finalMigration?.version !== allowedPendingFinalMigration.version ||
-		finalMigration.name !== allowedPendingFinalMigration.name ||
-		finalMigration.fileName !== allowedPendingFinalMigration.fileName
+		planHead?.version !== approvedHead.version ||
+		planHead.name !== approvedHead.name ||
+		planHead.fileName !== approvedHead.fileName
 	) {
+		throw new Error("数据库结构版本不符合受控认证迁移过渡条件");
+	}
+	const targetIndex = plan.findIndex(
+		(migration) =>
+			migration.version === allowedPendingAuthMigration.version &&
+			migration.name === allowedPendingAuthMigration.name &&
+			migration.fileName === allowedPendingAuthMigration.fileName,
+	);
+	if (targetIndex < 0 || applied.length !== targetIndex) {
 		throw new Error("数据库结构版本不符合受控认证迁移过渡条件");
 	}
 }

@@ -3,7 +3,9 @@ package com.chishenme.app
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasSetTextAction
@@ -66,6 +68,8 @@ class MainActivityGroupDecisionLocalFixtureTest {
     private val configCallCount = AtomicInteger(0)
     private val groupCallCount = AtomicInteger(0)
     private val requests = CopyOnWriteArrayList<CapturedRequest>()
+    @Volatile
+    private var configuredRadiusMeters: Int? = null
 
     @Before
     fun startDeviceServerAndResetState() {
@@ -153,6 +157,55 @@ class MainActivityGroupDecisionLocalFixtureTest {
     }
 
     @Test
+    fun publicRadiusDefaults_keepExactReviewAndRequireExplicitIntersectionCorrection() {
+        configuredRadiusMeters = 1_250
+        ActivityScenario.launch(MainActivity::class.java).use {
+            enterGroupFlow()
+            scrollToContent(hasText("当前服务最远支持 1250 米", substring = true))
+                .assertIsDisplayed()
+            radiusOption("1.25 公里").assertIsSelected()
+            captureSyntheticScreenshot("group-radius-1250-default.png")
+            clickScrollableAction("确认第 1 位条件")
+            awaitText("第 2 位 / 共 2 位")
+            radiusOption("1.25 公里").assertIsSelected()
+            clickScrollableAction("确认第 2 位条件")
+            clickScrollableAction("复核共同条件")
+            scrollToContent(hasText("1250 米")).assertIsDisplayed()
+            assertFalse("共同约束不得将1250米舍入为1.3公里", hasUiText("1.3 公里"))
+            captureSyntheticScreenshot("group-radius-1250-review.png")
+
+            clickScrollableAction("返回重新录入")
+            clickScrollableAction("第 1 位")
+            radiusOption("1.5 公里").performClick()
+            clickScrollableAction("确认第 1 位条件")
+            radiusOption("1.5 公里").performClick()
+            clickScrollableAction("确认第 2 位条件")
+            clickScrollableAction("复核共同条件")
+            val error = "共同最远距离为 1500 米，当前服务最远支持 1250 米。" +
+                "请由成员主动调整距离，再复核共同条件。"
+            scrollToContent(hasText(error)).assertIsDisplayed()
+            assertEquals("共同距离超限不得发送请求", 0, groupCallCount.get())
+            captureSyntheticScreenshot("group-radius-over-limit.png")
+
+            clickScrollableAction("第 1 位")
+            radiusOption("1.5 公里").assertIsSelected()
+            radiusOption("1.25 公里").performClick()
+            clickScrollableAction("确认第 1 位条件")
+            radiusOption("1.5 公里").assertIsSelected()
+            clickScrollableAction("复核共同条件")
+            scrollToContent(hasText("1250 米")).assertIsDisplayed()
+            clickScrollableAction("按共同条件查找候选")
+            awaitText(RESTAURANT_NAME)
+            scrollToContent(hasTestTag("group-result-card-0"))
+                .assertIsDisplayed()
+                .assertHasNoClickAction()
+            captureSyntheticScreenshot("group-radius-corrected-result.png")
+            composeRule.waitUntil(UI_TIMEOUT_MS) { groupCallCount.get() == 1 }
+        }
+        assertTransportContract(expectedMemberRadii = listOf(1_250, 1_500))
+    }
+
+    @Test
     fun configurationRecreation_keepsInMemoryProgressWithoutRouteArguments() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             enterGroupFlow()
@@ -218,7 +271,7 @@ class MainActivityGroupDecisionLocalFixtureTest {
         awaitText("第 1 位 / 共 2 位")
     }
 
-    private fun assertTransportContract() {
+    private fun assertTransportContract(expectedMemberRadii: List<Int> = listOf(1_500, 1_500)) {
         assertTrue(
             "设备夹具收到未声明接口：$requests",
             requests.all {
@@ -249,7 +302,7 @@ class MainActivityGroupDecisionLocalFixtureTest {
         )
         val members = body.getValue("members").jsonArray
         assertEquals(2, members.size)
-        members.forEach { memberElement ->
+        members.forEachIndexed { index, memberElement ->
             val member = memberElement.jsonObject
             assertEquals(
                 setOf(
@@ -263,7 +316,10 @@ class MainActivityGroupDecisionLocalFixtureTest {
             )
             assertTrue(member.getValue("budgetMaxYuan").toString() == "null")
             assertEquals("60", member.getValue("availableMinutes").jsonPrimitive.content)
-            assertEquals("1500", member.getValue("radiusMeters").jsonPrimitive.content)
+            assertEquals(
+                expectedMemberRadii[index].toString(),
+                member.getValue("radiusMeters").jsonPrimitive.content,
+            )
             assertTrue(member.getValue("preferredCuisines").jsonArray.isEmpty())
             assertTrue(member.getValue("excludedCuisines").jsonArray.isEmpty())
         }
@@ -285,6 +341,19 @@ class MainActivityGroupDecisionLocalFixtureTest {
         scrollToContent(hasClickAction() and hasText(text))
             .assertIsDisplayed()
             .performClick()
+    }
+
+    private fun radiusOption(text: String): SemanticsNodeInteraction {
+        scrollToContent(hasText("最远距离")).assertIsDisplayed()
+        val radiusLabels = listOf("500 米", "1 公里", "1.25 公里", "1.5 公里", "3 公里", "5 公里")
+            .map { hasText(it) }.reduce { result, next -> result or next }
+        composeRule.onNode(
+            hasScrollToIndexAction() and hasAnyAncestor(hasScrollToIndexAction()) and
+                hasAnyDescendant(radiusLabels),
+        ).performScrollToNode(hasText(text))
+        return composeRule.onNode(hasClickAction() and hasText(text))
+            .performScrollTo()
+            .assertIsDisplayed()
     }
 
     private fun scrollToContent(matcher: SemanticsMatcher): SemanticsNodeInteraction {
@@ -391,6 +460,11 @@ class MainActivityGroupDecisionLocalFixtureTest {
     private fun configurationBody(): String = """
         {
           "coverageName":"全国服务",
+          ${configuredRadiusMeters?.let { """
+          "recommendationDefaults":{
+            "areaCode":"NATIONWIDE","defaultRadiusMeters":$it,"maximumRadiusMeters":$it
+          },
+          """.trimIndent() }.orEmpty()}
           "dataRightsMode":"LIVE_DISPLAY_ONLY",
           "aiEnabled":false,
           "accountsEnabled":false,
@@ -421,7 +495,7 @@ class MainActivityGroupDecisionLocalFixtureTest {
             "memberCount":2,
             "effectiveBudgetMaxYuan":null,
             "effectiveAvailableMinutes":60,
-            "effectiveRadiusMeters":1500,
+            "effectiveRadiusMeters":${configuredRadiusMeters ?: 1_500},
             "preferredCuisines":[],
             "excludedCuisines":[]
           },

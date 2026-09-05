@@ -13,6 +13,7 @@ import com.chishenme.app.data.remote.DecisionMode
 import com.chishenme.app.data.remote.ExplorationMode
 import com.chishenme.app.data.remote.FeatureConfig
 import com.chishenme.app.data.remote.MealPeriod
+import com.chishenme.app.data.remote.PublicRecommendationDefaults
 import com.chishenme.app.data.remote.LocationSearchDataMode
 import com.chishenme.app.data.remote.LocationSearchPlace
 import com.chishenme.app.data.remote.LocationSearchQueryValidation
@@ -35,6 +36,7 @@ import com.chishenme.app.domain.InputValidation
 import com.chishenme.app.domain.LocationChoice
 import com.chishenme.app.domain.LocationSearchSelectionMapper
 import com.chishenme.app.domain.RecommendationRequestFactory
+import com.chishenme.app.domain.RecommendationRadiusPolicy
 import com.chishenme.app.domain.applyScenario
 import com.chishenme.app.feature.config.RemoteFeatureConfigState
 import com.chishenme.app.feature.config.RuntimeAppVersionGate
@@ -112,6 +114,12 @@ data class DecisionUiState(
 ) {
     val featureConfig: FeatureConfig?
         get() = remoteFeatureConfig.configOrNull
+
+    val radiusError: String?
+        get() = RecommendationRadiusPolicy.validationMessage(
+            input.radiusMeters,
+            featureConfig?.recommendationDefaults,
+        )
 }
 
 internal fun DecisionUiState.afterLocationRequestCancellation(): DecisionUiState =
@@ -163,6 +171,8 @@ class DecisionViewModel @Inject constructor(
     private var locationSearchGeneration: Long = 0
     private var consentSessionStarted = false
     private var selectedResultToken: String? = null
+    /** Includes a user-selected scenario; survives refresh, but never privacy withdrawal. */
+    private var radiusExplicitlySelected = false
 
     fun ensureConsentSessionStarted() {
         if (!consentSessionStarted) startConsentSession()
@@ -229,7 +239,21 @@ class DecisionViewModel @Inject constructor(
                 if (!configurationRefreshIsCurrent(generation)) state else when (outcome) {
                     is FeatureConfigOutcome.Success -> {
                         val gateStatus = runtimeAppVersionGate.currentState.status
+                        val nextRadius = if (
+                            gateStatus == RuntimeAppVersionGate.Status.COMPATIBLE &&
+                            !radiusExplicitlySelected
+                        ) {
+                            RecommendationRadiusPolicy.automaticRadius(
+                                state.input.mealPeriod,
+                                outcome.config.recommendationDefaults,
+                            )
+                        } else state.input.radiusMeters
+                        val radiusMessage = RecommendationRadiusPolicy.validationMessage(
+                            nextRadius,
+                            outcome.config.recommendationDefaults,
+                        )
                         state.copy(
+                            input = state.input.copy(radiusMeters = nextRadius),
                             remoteFeatureConfig = if (
                                 gateStatus == RuntimeAppVersionGate.Status.UNKNOWN
                             ) {
@@ -245,13 +269,18 @@ class DecisionViewModel @Inject constructor(
                             // generation may remain in the restored Home UI.
                             formError = if (
                                 gateStatus == RuntimeAppVersionGate.Status.COMPATIBLE
-                            ) null else state.formError,
+                            ) radiusMessage else state.formError,
                             transientMessage = when (gateStatus) {
                                 RuntimeAppVersionGate.Status.UPDATE_REQUIRED ->
                                     requiredUpdateMessage()
                                 RuntimeAppVersionGate.Status.UNKNOWN ->
                                     "服务端最低版本配置无效，远程能力已按安全默认值关闭"
-                                RuntimeAppVersionGate.Status.COMPATIBLE -> null
+                                RuntimeAppVersionGate.Status.COMPATIBLE -> when {
+                                    radiusMessage != null -> radiusMessage
+                                    nextRadius != state.input.radiusMeters ->
+                                        "已按当前服务建议将最远距离调整为 $nextRadius 米。"
+                                    else -> null
+                                }
                             },
                         )
                     }
@@ -281,11 +310,16 @@ class DecisionViewModel @Inject constructor(
     fun setDecisionMode(value: DecisionMode) = updateInput { copy(decisionMode = value) }
 
     fun applyScenario(value: DecisionScenario) {
+        radiusExplicitlySelected = true
         _uiState.update { state ->
+            val input = state.input.applyScenario(value)
             state.copy(
-                input = state.input.applyScenario(value),
+                input = input,
                 activeScenario = value,
-                formError = null,
+                formError = RecommendationRadiusPolicy.validationMessage(
+                    input.radiusMeters,
+                    trustedRecommendationDefaults(),
+                ),
             )
         }
     }
@@ -305,12 +339,11 @@ class DecisionViewModel @Inject constructor(
             return
         }
         updateInput {
-        val defaultRadius = when (value) {
-            MealPeriod.BREAKFAST -> 1_000
-            MealPeriod.LUNCH -> 1_500
-            MealPeriod.DINNER -> 3_000
-        }
-        copy(mealPeriod = value, radiusMeters = defaultRadius)
+            copy(
+                mealPeriod = value,
+                radiusMeters = if (radiusExplicitlySelected) radiusMeters else
+                    RecommendationRadiusPolicy.automaticRadius(value, trustedRecommendationDefaults()),
+            )
         }
     }
 
@@ -352,7 +385,10 @@ class DecisionViewModel @Inject constructor(
 
     fun setBudget(value: Int?) = updateInput { copy(budgetMaxYuan = value) }
     fun setAvailableMinutes(value: Int) = updateInput { copy(availableMinutes = value) }
-    fun setRadius(value: Int) = updateInput { copy(radiusMeters = value) }
+    fun setRadius(value: Int) {
+        radiusExplicitlySelected = true
+        updateInput { copy(radiusMeters = value) }
+    }
     fun setTravelMode(value: TravelMode) = updateInput { copy(travelMode = value) }
     fun setExplorationMode(value: ExplorationMode) = updateInput { copy(explorationMode = value) }
     fun setLocation(value: LocationChoice) {
@@ -629,6 +665,7 @@ class DecisionViewModel @Inject constructor(
         consentSessionStarted = false
         selectedResultToken = null
         lastSubmittedInput = null
+        radiusExplicitlySelected = false
         _uiState.value = DecisionUiState()
     }
 
@@ -636,6 +673,16 @@ class DecisionViewModel @Inject constructor(
         val accessLease = currentRecommendationAccessLease()
         if (accessLease == null) {
             _uiState.update { it.copy(loadState = RecommendationLoadState.Idle, formError = remoteAccessBlockedMessage()) }
+            return false
+        }
+        val radiusError = RecommendationRadiusPolicy.validationMessage(
+            input.radiusMeters,
+            trustedRecommendationDefaults(),
+        )
+        if (radiusError != null) {
+            _uiState.update {
+                it.copy(loadState = RecommendationLoadState.Idle, formError = radiusError)
+            }
             return false
         }
         if (
@@ -797,6 +844,14 @@ class DecisionViewModel @Inject constructor(
             }
             ?.config
             ?.effectiveSpecialtyCapabilities()
+
+    private fun trustedRecommendationDefaults(): PublicRecommendationDefaults? =
+        (_uiState.value.remoteFeatureConfig as? RemoteFeatureConfigState.Ready)
+            ?.takeIf { ready ->
+                runtimeAppVersionGate.acquireRemoteAccessLease(ready.generation) != null
+            }
+            ?.config
+            ?.recommendationDefaults
 
     private fun specialtyInputAuthorized(
         input: DecisionInput,

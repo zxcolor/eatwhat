@@ -9,6 +9,7 @@ import {
 import { AdminRepository } from "./admin.repository.js";
 import {
 	AdminAuditService,
+	AdminConfigurationService,
 	AdminCredentialsService,
 	AdminLoginService,
 	AdminSessionService,
@@ -42,6 +43,7 @@ import { AdminWebAuthnAdapter } from "./admin-webauthn.adapter.js";
 		AdminSessionService,
 		AdminCredentialsService,
 		AdminAuditService,
+		AdminConfigurationService,
 		AdminApiEnabledGuard,
 		AdminRateLimitGuard,
 		AdminSessionGuard,

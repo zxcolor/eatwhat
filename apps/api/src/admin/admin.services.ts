@@ -3,6 +3,15 @@ import {
 	AdminAuditEventSchema,
 	type AdminAuditPageResponse,
 	type AdminAuditQuery,
+	type AdminConfigHistoryQuery,
+	type AdminConfigHistoryResponse,
+	type AdminConfigKey,
+	type AdminConfigListResponse,
+	AdminConfigPublishCommandSchema,
+	type AdminConfigPublishRequest,
+	type AdminConfigRollbackRequest,
+	type AdminConfigVersion,
+	AdminConfigVersionSchema,
 	type AdminCredentialEnrollOptionsResponse,
 	type AdminCredentialEnrollVerifyRequest,
 	type AdminCredentialEnrollVerifyResponse,
@@ -19,6 +28,8 @@ import { HttpException, Injectable } from "@nestjs/common";
 import type { AdminPrincipal } from "./admin.guards.js";
 import {
 	type AdminChallengeProof,
+	type AdminConfigurationMutationResult,
+	type AdminConfigurationRecord,
 	AdminRepository,
 	type AdminSelfCredentialRecord,
 	type AdminSessionProof,
@@ -28,12 +39,16 @@ import { AdminCrypto } from "./admin-crypto.js";
 import { AdminDatabaseQueryError } from "./admin-database.pool.js";
 import {
 	adminAuthenticationFailed,
+	adminClientReleaseUnverified,
+	adminConfigVersionConflict,
+	adminConfigVersionNotFound,
 	adminCredentialConflict,
 	adminCredentialNotFound,
 	adminLastCredentialConflict,
 	adminSecurityLocked,
 	adminSessionInvalid,
 	adminUnavailable,
+	invalidAdminConfigRequest,
 } from "./admin-errors.js";
 import {
 	type AdminHttpRequest,
@@ -61,6 +76,14 @@ function toCredentialRecord(
 		createdAt: record.createdAt,
 		lastUsedAt: record.lastUsedAt,
 	};
+}
+
+function toConfigurationVersion(
+	record: AdminConfigurationRecord,
+): AdminConfigVersion {
+	const parsed = AdminConfigVersionSchema.safeParse(record);
+	if (!parsed.success) throw new Error("invalid administrator configuration");
+	return parsed.data;
 }
 
 function challengeProof(
@@ -507,11 +530,23 @@ export class AdminAuditService {
 			});
 			const retained = rows.slice(0, query.limit);
 			const items = retained.map((row) => {
+				const hasConfigurationProjection =
+					row.configKey !== null ||
+					row.newVersion !== null ||
+					row.changeReason !== null;
 				const parsed = AdminAuditEventSchema.safeParse({
 					auditEventId: row.eventId,
 					action: row.action,
 					targetType: row.targetType,
 					occurredAt: row.createdAt,
+					...(hasConfigurationProjection
+						? {
+								configKey: row.configKey,
+								newVersion: row.newVersion,
+								sourceVersion: row.sourceVersion,
+								changeReason: row.changeReason,
+							}
+						: {}),
 				});
 				if (!parsed.success) throw new Error("invalid audit event");
 				return parsed.data;
@@ -532,6 +567,111 @@ export class AdminAuditService {
 		} catch (error) {
 			if (error instanceof HttpException) throw error;
 			throw adminUnavailable();
+		}
+	}
+}
+
+@Injectable()
+export class AdminConfigurationService {
+	constructor(private readonly repository: AdminRepository) {}
+
+	async list(principal: AdminPrincipal): Promise<AdminConfigListResponse> {
+		try {
+			const records = await this.repository.listActiveConfiguration(
+				principal.sessionProof,
+			);
+			return { items: records.map(toConfigurationVersion) };
+		} catch (error) {
+			if (error instanceof HttpException) throw error;
+			throw adminUnavailable();
+		}
+	}
+
+	async history(
+		principal: AdminPrincipal,
+		configKey: AdminConfigKey,
+		query: AdminConfigHistoryQuery,
+	): Promise<AdminConfigHistoryResponse> {
+		try {
+			const records = await this.repository.listConfigurationHistory({
+				session: principal.sessionProof,
+				configKey,
+				pageSize: query.limit,
+			});
+			return { items: records.map(toConfigurationVersion) };
+		} catch (error) {
+			if (error instanceof HttpException) throw error;
+			throw adminUnavailable();
+		}
+	}
+
+	async publish(
+		principal: AdminPrincipal,
+		configKey: AdminConfigKey,
+		input: AdminConfigPublishRequest,
+	): Promise<AdminConfigVersion> {
+		const command = AdminConfigPublishCommandSchema.safeParse({
+			configKey,
+			...input,
+		});
+		if (!command.success) throw invalidAdminConfigRequest();
+		try {
+			const result = await this.repository.publishConfiguration({
+				session: principal.sessionProof,
+				configKey: command.data.configKey,
+				expectedActiveVersion: command.data.expectedActiveVersion,
+				value: command.data.value,
+				changeReason: command.data.changeReason,
+			});
+			return this.completedMutation(result, "PUBLISHED");
+		} catch (error) {
+			if (error instanceof HttpException) throw error;
+			throw adminUnavailable();
+		}
+	}
+
+	async rollback(
+		principal: AdminPrincipal,
+		configKey: AdminConfigKey,
+		input: AdminConfigRollbackRequest,
+	): Promise<AdminConfigVersion> {
+		try {
+			const result = await this.repository.rollbackConfiguration({
+				session: principal.sessionProof,
+				configKey,
+				expectedActiveVersion: input.expectedActiveVersion,
+				targetVersion: input.targetVersion,
+				changeReason: input.changeReason,
+			});
+			return this.completedMutation(result, "ROLLED_BACK");
+		} catch (error) {
+			if (error instanceof HttpException) throw error;
+			throw adminUnavailable();
+		}
+	}
+
+	private completedMutation(
+		result: AdminConfigurationMutationResult,
+		expectedStatus: "PUBLISHED" | "ROLLED_BACK",
+	): AdminConfigVersion {
+		if (result.status === expectedStatus && result.record !== null) {
+			return toConfigurationVersion(result.record);
+		}
+		switch (result.status) {
+			case "CLIENT_RELEASE_UNVERIFIED":
+				throw adminClientReleaseUnverified();
+			case "VERSION_CONFLICT":
+				throw adminConfigVersionConflict();
+			case "TARGET_NOT_FOUND":
+				throw adminConfigVersionNotFound();
+			case "INVALID_CONFIG_KEY":
+			case "INVALID_CHANGE_REASON":
+			case "INVALID_VALUE":
+				throw invalidAdminConfigRequest();
+			case "UNAUTHORIZED":
+				throw adminSessionInvalid();
+			default:
+				throw adminUnavailable();
 		}
 	}
 }

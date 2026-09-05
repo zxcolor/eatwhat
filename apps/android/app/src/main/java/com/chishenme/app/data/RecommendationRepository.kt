@@ -39,6 +39,7 @@ class RecommendationRepository @Inject constructor(
         val config = api.featureConfig()
         if (
             config.coverageName.isNotBlank() &&
+                config.recommendationDefaults?.isValid() != false &&
                 config.minimumSupportedVersion.matches(Regex("^\\d+\\.\\d+\\.\\d+$")) &&
                 config.ruleVersion.isNotBlank() &&
                 config.promptVersion.isNotBlank() &&
@@ -140,7 +141,11 @@ class RecommendationRepository @Inject constructor(
             )
             is HttpException -> try {
                 val message = when (error.code()) {
-                    400 -> "推荐条件有误，请调整后重试"
+                    400 -> if (error.isActiveCoverageRejection()) {
+                        "服务范围已更新，请重新连接服务，再调整最远距离后重试。"
+                    } else {
+                        "推荐条件有误，请调整后重试"
+                    }
                     429 -> "请求有点多，请稍后再试"
                     in 500..599 -> "推荐服务暂时不可用，请稍后重试"
                     else -> "请求失败（${error.code()}）"

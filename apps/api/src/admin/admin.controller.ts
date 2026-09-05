@@ -1,6 +1,14 @@
 import {
 	type AdminAuditQuery,
 	AdminAuditQuerySchema,
+	type AdminConfigHistoryQuery,
+	AdminConfigHistoryQuerySchema,
+	type AdminConfigPath,
+	AdminConfigPathSchema,
+	type AdminConfigPublishRequest,
+	AdminConfigPublishRequestSchema,
+	type AdminConfigRollbackRequest,
+	AdminConfigRollbackRequestSchema,
 	type AdminCredentialEnrollVerifyRequest,
 	AdminCredentialEnrollVerifyRequestSchema,
 	type AdminCredentialPath,
@@ -21,6 +29,7 @@ import {
 	HttpStatus,
 	Param,
 	Post,
+	Put,
 	Query,
 	Req,
 	UseGuards,
@@ -38,6 +47,7 @@ import {
 } from "./admin.guards.js";
 import {
 	AdminAuditService,
+	AdminConfigurationService,
 	AdminCredentialsService,
 	AdminLoginService,
 	AdminSessionService,
@@ -58,6 +68,7 @@ export class AdminController {
 		private readonly sessions: AdminSessionService,
 		private readonly credentials: AdminCredentialsService,
 		private readonly audit: AdminAuditService,
+		private readonly configuration: AdminConfigurationService,
 	) {}
 
 	@Post("auth/login/options")
@@ -157,5 +168,65 @@ export class AdminController {
 		@Query(new ZodBodyPipe(AdminAuditQuerySchema)) query: AdminAuditQuery,
 	) {
 		return this.audit.list(principal(request), query);
+	}
+
+	@Get("configuration")
+	@UseGuards(AdminSessionGuard, AdminPermissionGuard)
+	@RequireAdminPermission("ALGORITHM_CONFIG_READ")
+	@AdminRateLimit(60, 60_000)
+	listConfiguration(@Req() request: AuthenticatedAdminHttpRequest) {
+		return this.configuration.list(principal(request));
+	}
+
+	@Get("configuration/:configKey/history")
+	@UseGuards(AdminSessionGuard, AdminPermissionGuard)
+	@RequireAdminPermission("ALGORITHM_CONFIG_READ")
+	@AdminRateLimit(30, 60_000)
+	configurationHistory(
+		@Req() request: AuthenticatedAdminHttpRequest,
+		@Param(new ZodBodyPipe(AdminConfigPathSchema)) path: AdminConfigPath,
+		@Query(new ZodBodyPipe(AdminConfigHistoryQuerySchema))
+		query: AdminConfigHistoryQuery,
+	) {
+		return this.configuration.history(
+			principal(request),
+			path.configKey,
+			query,
+		);
+	}
+
+	@Put("configuration/:configKey")
+	@UseGuards(AdminSessionGuard, AdminPermissionGuard)
+	@RequireAdminPermission("ALGORITHM_CONFIG_WRITE")
+	@AdminRateLimit(12, 60_000)
+	updateConfiguration(
+		@Req() request: AuthenticatedAdminHttpRequest,
+		@Param(new ZodBodyPipe(AdminConfigPathSchema)) path: AdminConfigPath,
+		@Body(new ZodBodyPipe(AdminConfigPublishRequestSchema))
+		input: AdminConfigPublishRequest,
+	) {
+		return this.configuration.publish(
+			principal(request),
+			path.configKey,
+			input,
+		);
+	}
+
+	@Post("configuration/:configKey/rollback")
+	@UseGuards(AdminSessionGuard, AdminPermissionGuard)
+	@RequireAdminPermission("ALGORITHM_CONFIG_WRITE")
+	@AdminRateLimit(6, 60_000)
+	@HttpCode(HttpStatus.OK)
+	rollbackConfiguration(
+		@Req() request: AuthenticatedAdminHttpRequest,
+		@Param(new ZodBodyPipe(AdminConfigPathSchema)) path: AdminConfigPath,
+		@Body(new ZodBodyPipe(AdminConfigRollbackRequestSchema))
+		input: AdminConfigRollbackRequest,
+	) {
+		return this.configuration.rollback(
+			principal(request),
+			path.configKey,
+			input,
+		);
 	}
 }

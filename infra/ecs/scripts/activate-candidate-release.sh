@@ -11,7 +11,14 @@ die() {
 if [[ "$(id -u)" -ne 0 ]]; then
   die 'run as root'
 fi
-[[ "$#" -eq 0 ]] || die 'activate-candidate-release.sh does not accept arguments'
+requested_rollback_release=''
+if [[ "$#" -eq 0 ]]; then
+  :
+elif [[ "$#" -eq 2 && "$1" == '--rollback-release' ]]; then
+  requested_rollback_release="$2"
+else
+  die 'usage: activate-candidate-release.sh [--rollback-release ROLLBACK_RELEASE]'
+fi
 
 for required_command in curl docker find flock grep install ln mv readlink realpath rm seq sha256sum sleep stat; do
   command -v "$required_command" >/dev/null || die "required command is unavailable: $required_command"
@@ -146,12 +153,25 @@ old_image="$(read_env_value "$old_deployment_env" API_IMAGE)"
 old_image_id="$(docker image inspect --format '{{.Id}}' "$old_image")"
 [[ "$old_image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || die 'current API image ID is invalid'
 
+rollback_release="${requested_rollback_release:-$old_release}"
+[[ "$rollback_release" != "$candidate_release" ]] ||
+  die 'candidate release cannot also be its rollback release'
+"$script_dir/verify-rollback-release.sh" "$rollback_release" >/dev/null ||
+  die 'rollback compatibility precheck failed; active API was not changed'
+rollback_deploy="$rollback_release/deploy"
+rollback_image_id="$(read_env_value "$rollback_deploy/deployment.env" API_IMAGE_ID)"
+rollback_runtime_verifier="$rollback_deploy/scripts/verify-runtime.sh"
+
 candidate_compose() {
   ( cd "$bundle_root" && docker compose --env-file deployment.env "$@" )
 }
 
 old_compose_command() {
   ( cd "$old_deploy" && docker compose --env-file deployment.env "$@" )
+}
+
+rollback_compose_command() {
+  ( cd "$rollback_deploy" && docker compose --env-file deployment.env "$@" )
 }
 
 container_state() {
@@ -217,14 +237,14 @@ assert_postgres_unchanged() {
 }
 
 rollback_current() {
-  if current_target_is "$old_release"; then
+  if current_target_is "$rollback_release"; then
     current_switched='false'
     return 0
   fi
-  if current_target_is "$candidate_release"; then
-    atomic_replace_current "$old_release" rollback || return 1
+  if current_target_is "$candidate_release" || current_target_is "$old_release"; then
+    atomic_replace_current "$rollback_release" rollback || return 1
     current_switched='false'
-    current_target_is "$old_release"
+    current_target_is "$rollback_release"
     return
   fi
   return 1
@@ -233,15 +253,15 @@ rollback_current() {
 rollback_old_api() {
   local restored_api
   local restored_image_id
-  old_compose_command up -d --no-deps --force-recreate --pull never --no-build api >/dev/null || return 1
-  restored_api="$(old_compose_command ps -q api)"
+  rollback_compose_command up -d --no-deps --force-recreate --pull never --no-build api >/dev/null || return 1
+  restored_api="$(rollback_compose_command ps -q api)"
   [[ -n "$restored_api" ]] || return 1
   wait_for_healthy_container "$restored_api" || return 1
   restored_image_id="$(docker inspect --format '{{.Image}}' "$restored_api")"
-  [[ "$restored_image_id" == "$old_image_id" ]] || return 1
+  [[ "$restored_image_id" == "$rollback_image_id" ]] || return 1
   health_http_200 "$old_port" || return 1
   assert_postgres_unchanged || return 1
-  "$old_runtime_verifier" >/dev/null
+  "$rollback_runtime_verifier" >/dev/null
 }
 
 old_compose_command config --quiet
@@ -278,6 +298,7 @@ activation_cleanup() {
       exit 70
     fi
     printf 'ACTIVATION_ROLLBACK=OK\n' >&2
+    printf 'ACTIVATION_ROLLBACK_RELEASE=%s\n' "$rollback_release" >&2
   fi
   return "$status"
 }

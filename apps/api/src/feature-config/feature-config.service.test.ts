@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { type AppConfig, loadAppConfig } from "../config/app-config.js";
 import type { DataRightsPolicy } from "../config/data-rights-policy.js";
 import type { LocationSearchProvider } from "../location-search/location-search.provider.js";
+import type { OperationalConfigService } from "../operational-config/operational-config.service.js";
+import { type OperationalConfigSnapshot, startupOperationalConfig } from "../operational-config/operational-config.types.js";
 import type { PlaceKeywordSearchProvider } from "../place-search/place-keyword-search.provider.js";
 import type { PlaceProvider } from "../recommendations/domain/place-candidate.js";
 import type { RecommendationQueryPlan } from "../recommendations/domain/recommendation-query-plan.js";
@@ -100,6 +102,137 @@ function supportFeedback(
 }
 
 describe("FeatureConfigService persistence capabilities", () => {
+	it("publishes only the validated operational snapshot fields", async () => {
+		const baseConfig = config();
+		const baseOperational = startupOperationalConfig(baseConfig);
+		const operational = {
+			current: vi.fn(async () => ({
+				...baseOperational,
+				source: "DATABASE" as const,
+				lastSuccessfulReadAt: "2026-09-06T01:00:00.000Z",
+				aiAssistanceEnabled: false,
+				coverage: {
+					defaultRadiusMeters: 1_200,
+					maximumRadiusMeters: 3_000,
+					areaCode: "NATIONWIDE",
+				},
+				minimumAppVersions: { android: "2.4.0" },
+				versions: {
+					...baseOperational.versions,
+					"recommendations.rules": 7,
+				},
+			})),
+		} as unknown as OperationalConfigService;
+		const service = new FeatureConfigService(
+			baseConfig,
+			placeProvider,
+			locationSearchProvider,
+			placeSearchProvider,
+			policy(),
+			supportFeedback(),
+			operational,
+		);
+
+		await expect(service.getPublicConfig()).resolves.toMatchObject({
+			coverageName: "全国范围",
+			aiEnabled: false,
+			minimumSupportedVersion: "2.4.0",
+			minimumSupportedVersions: { android: "2.4.0" },
+			recommendationDefaults: {
+				areaCode: "NATIONWIDE",
+				defaultRadiusMeters: 1_200,
+				maximumRadiusMeters: 3_000,
+			},
+			ruleVersion: baseConfig.versions.rule,
+			rulesConfigVersion: 7,
+			operationalConfig: {
+				source: "DATABASE",
+				lastSuccessfulReadAt: "2026-09-06T01:00:00.000Z",
+				cacheTtlMs: 5000,
+				versions: { ...baseOperational.versions, "recommendations.rules": 7 },
+				aiStatus: "SERVER_DISABLED",
+			},
+		});
+	});
+
+	it.each([
+		["STARTUP_DEFAULT", false, true, true, "SERVER_DISABLED"],
+		["DATABASE", true, false, true, "OPERATOR_DISABLED"],
+		["DATABASE", true, true, false, "PROMPT_DISABLED"],
+		["DATABASE", true, true, true, "ENABLED"],
+		["STALE_CACHE", true, true, true, "CONFIG_UNAVAILABLE"],
+		["SAFE_FALLBACK", false, false, false, "CONFIG_UNAVAILABLE"],
+	] as const)("projects AI gate %s / %s / %s / %s as %s", async (source, serverEnabled, operatorEnabled, promptEnabled, status) => {
+		const base = config();
+		const appConfig = { ...base, qwen: { ...base.qwen, enabled: serverEnabled } };
+		const initial = startupOperationalConfig(appConfig);
+		const snapshot: OperationalConfigSnapshot = {
+			...initial, source, aiAssistanceEnabled: operatorEnabled,
+			lastSuccessfulReadAt: source === "DATABASE" || source === "STALE_CACHE" ? "2026-09-06T01:00:00.000Z" : null,
+			prompt: { ...initial.prompt, enabled: promptEnabled },
+		};
+		const service = new FeatureConfigService(
+			appConfig, placeProvider, locationSearchProvider, placeSearchProvider, policy(), supportFeedback(),
+			{ current: vi.fn(async () => snapshot) } as unknown as OperationalConfigService,
+		);
+		const result = await service.getPublicConfig();
+		expect(result.aiEnabled).toBe(status === "ENABLED");
+		expect(result.operationalConfig?.aiStatus).toBe(status);
+		expect(result.modelVersion).toBe(status === "ENABLED" ? snapshot.prompt.modelVersion : appConfig.versions.ruleFallbackModel);
+	});
+
+	it("closes single, group and specialty capabilities on stale or initial-failure snapshots and restores them after recovery", async () => {
+		const base = config({ groupRecommendations: true });
+		const initial = startupOperationalConfig(base);
+		const fullyCapableProvider = {
+			kind: "AUTHORIZED_VENDOR", dataMode: "LIVE", supportsQueryPlan: vi.fn(() => true),
+		} as unknown as PlaceProvider;
+		const query = vi.fn()
+			.mockResolvedValueOnce({ ...initial, source: "STALE_CACHE", lastSuccessfulReadAt: "2026-09-06T01:00:00.000Z" })
+			.mockResolvedValueOnce({ ...initial, source: "SAFE_FALLBACK" })
+			.mockResolvedValueOnce({ ...initial, source: "DATABASE", lastSuccessfulReadAt: "2026-09-06T01:00:10.000Z" });
+		const service = new FeatureConfigService(
+			base, fullyCapableProvider, locationSearchProvider, placeSearchProvider, policy(), supportFeedback(),
+			{ current: query } as unknown as OperationalConfigService,
+		);
+		for (const source of ["STALE_CACHE", "SAFE_FALLBACK"]) {
+			const unavailable = await service.getPublicConfig();
+			expect(unavailable.operationalConfig?.source).toBe(source);
+			expect(unavailable.serviceCapabilities.recommendationsEnabled).toBe(false);
+			expect(unavailable.serviceCapabilities.groupRecommendationsEnabled).toBe(false);
+			expect(Object.values(unavailable.specialtyCapabilities ?? {})).toEqual([false, false, false, false, false, false]);
+			expect(fullyCapableProvider.supportsQueryPlan).not.toHaveBeenCalled();
+		}
+		const recovered = await service.getPublicConfig();
+		expect(recovered.serviceCapabilities.recommendationsEnabled).toBe(true);
+		expect(recovered.serviceCapabilities.groupRecommendationsEnabled).toBe(true);
+		expect(Object.values(recovered.specialtyCapabilities ?? {})).toEqual([true, true, true, true, true, true]);
+	});
+
+	it("keeps executable rule identity separate from mutable configuration revision", async () => {
+		const firstBuild = config();
+		const secondBuild = { ...firstBuild, versions: { ...firstBuild.versions, rule: "rules-next-test-build" } };
+		const revisions = [7, 8];
+		const results = [];
+		for (const appConfig of [firstBuild, secondBuild]) {
+			for (const revision of revisions) {
+				const initial = startupOperationalConfig(appConfig);
+				const service = new FeatureConfigService(
+					appConfig, placeProvider, locationSearchProvider, placeSearchProvider, policy(), supportFeedback(),
+					{ current: vi.fn(async () => ({
+						...initial, source: "DATABASE", lastSuccessfulReadAt: "2026-09-06T01:00:00.000Z",
+						versions: { ...initial.versions, "recommendations.rules": revision },
+					})) } as unknown as OperationalConfigService,
+				);
+				results.push(await service.getPublicConfig());
+			}
+		}
+		expect(results.map((result) => result.ruleVersion)).toEqual([
+			firstBuild.versions.rule, firstBuild.versions.rule, secondBuild.versions.rule, secondBuild.versions.rule,
+		]);
+		expect(results.map((result) => result.rulesConfigVersion)).toEqual([7, 8, 7, 8]);
+	});
+
 	it("always returns the complete fail-closed capability object", async () => {
 		const service = new FeatureConfigService(
 			config({

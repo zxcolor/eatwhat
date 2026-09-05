@@ -4,6 +4,7 @@ import type {
 } from "@chi-shen-me/contracts";
 import { Inject, Injectable } from "@nestjs/common";
 import { APP_CONFIG, type AppConfig } from "../../config/app-config.js";
+import type { OperationalConfigSnapshot } from "../../operational-config/operational-config.types.js";
 import {
 	buildRecommendationQueryPlan,
 	type RecommendationQueryPlan,
@@ -28,14 +29,19 @@ export class IntentCoordinator {
 	async resolve(
 		context: RecommendationContext,
 		plan: RecommendationQueryPlan = buildRecommendationQueryPlan(context),
+		operational?: OperationalConfigSnapshot,
 	): Promise<ResolvedIntent> {
+		const prompt = operational?.prompt;
 		const rulesRequired =
 			plan.profile.family !== "MEAL_LUNCH" ||
 			plan.weatherApplication.kind === "USER_REPORTED";
+		const operationallyEnabled =
+			(operational?.aiAssistanceEnabled ?? true) && (prompt?.enabled ?? true);
 		if (
 			rulesRequired ||
 			!context.aiAssistanceEnabled ||
-			!this.config.qwen.enabled
+			!this.config.qwen.enabled ||
+			!operationallyEnabled
 		) {
 			return {
 				profile: await this.rules.resolve(context, plan),
@@ -45,9 +51,9 @@ export class IntentCoordinator {
 		}
 		try {
 			return {
-				profile: await this.qwen.resolve(context),
+				profile: await this.qwen.resolve(context, plan, prompt),
 				fallbackUsed: false,
-				modelVersion: this.config.qwen.model,
+				modelVersion: prompt?.modelVersion ?? this.config.qwen.model,
 			};
 		} catch {
 			return {

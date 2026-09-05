@@ -21,15 +21,26 @@ const WECHAT_UNION_ALIASES_PENDING_MIGRATION = Object.freeze({
 	name: "wechat_union_aliases",
 	fileName: "0012_wechat_union_aliases.sql",
 });
+const AUTH_BRIDGE_APPROVED_PLAN_HEAD = Object.freeze({
+	version: 13,
+	name: "admin_config_control",
+	fileName: "0013_admin_config_control.sql",
+});
 
 function allowedPendingAuthMigration(
 	mode: AppConfig["database"]["authSchemaTransitionMode"],
 ) {
 	if (mode === "legacy_phone_drain") {
-		return LEGACY_PHONE_DRAIN_PENDING_MIGRATION;
+		return Object.freeze({
+			...LEGACY_PHONE_DRAIN_PENDING_MIGRATION,
+			approvedPlanHead: AUTH_BRIDGE_APPROVED_PLAN_HEAD,
+		});
 	}
 	if (mode === "wechat_union_aliases_pending") {
-		return WECHAT_UNION_ALIASES_PENDING_MIGRATION;
+		return Object.freeze({
+			...WECHAT_UNION_ALIASES_PENDING_MIGRATION,
+			approvedPlanHead: AUTH_BRIDGE_APPROVED_PLAN_HEAD,
+		});
 	}
 	return undefined;
 }

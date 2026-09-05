@@ -629,7 +629,7 @@ ca_private_digest="$(openssl pkey -in "$secrets_dir/postgres/ca.key" -pubout -ou
 [[ "$server_public_digest" == "$server_private_digest" ]] || die 'PostgreSQL certificate and private key do not match'
 [[ "$ca_public_digest" == "$ca_private_digest" ]] || die 'PostgreSQL CA certificate and private key do not match'
 docker run --rm --entrypoint sh "$api_image" -eu -c \
-  'test -r /app/dist/main.js && test -r /app/dist/auth/auth-config.js && test -r /app/dist/database/migrate-cli.js && test -r /app/migrations/0001_initial_schema.sql && test -r /app/migrations/0012_wechat_union_aliases.sql'
+  'test -r /app/dist/main.js && test -r /app/dist/auth/auth-config.js && test -r /app/dist/database/migrate-cli.js && test -r /app/migrations/0001_initial_schema.sql && test -r /app/migrations/0012_wechat_union_aliases.sql && test -r /app/migrations/0013_admin_config_control.sql'
 
 cd "$bundle_root"
 docker compose --env-file deployment.env config --quiet
