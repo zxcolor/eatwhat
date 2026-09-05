@@ -1,8 +1,62 @@
 # 验证报告
 
-验证日期：2026-09-04（同设备匿名群组本地候选验证）；2026-08-22（模拟器历史验收）；2026-08-23（完整自动化、ECS 正式切换、真实高德与公网 HTTPS 验收）；2026-08-24（云端 Debug 默认与独立 Fixture 构建门禁）；2026-08-26（固定 Alpha signer 历史构建验证）；2026-08-28（PHONE_ONLY 短信认证改造中）
+验证日期：2026-09-05（已完成功能 PR 整理）；2026-09-04（同设备匿名群组本地候选验证）；2026-08-22（模拟器历史验收）；2026-08-23（完整自动化、ECS 正式切换、真实高德与公网 HTTPS 验收）；2026-08-24（云端 Debug 默认与独立 Fixture 构建门禁）；2026-08-26（固定 Alpha signer 历史构建验证）；2026-08-28（PHONE_ONLY 短信认证改造中）
 
 本报告记录当前仓库快照的本机自动化、Android 模拟器、ECS 回环与公网 HTTPS 验证。它不是公开发布批准，也不能替代供应商商业授权、Release 签名、法务审查、关闭 Wi-Fi 真机矩阵或 Alpha/Beta 指标。
+
+## 2026-09-05：已完成候选功能的 PR 范围
+
+按用户“先不做新功能，把已经做好的先 PR”的要求，使用独立 `codex/android-ready-pr` 工作区承接 `8902449`、`a6bf08d`、`c83441a`、`b5b9106` 四个已有提交，并只补入已经取得定向证据的两项修复：
+
+- 小组件上下内边距各由 12 dp 改为 11 dp，解决 420 dpi / 72 dp 最小宿主下按钮裁切 1 px；48 dp 触控目标和 72 dp 宿主下限不变。JVM 回归直接读取真实 XML 并验证 14 种密度。
+- 群组截图仅对暂时不存在的 accessibility root 作有界等待；一旦存在立即检查包名，系统或其他 App 遮挡仍失败，截图前再核验，不降低业务断言。
+
+原工作区的三类新增专项设备夹具、Fixture Widget host、`InstalledFixtureGuard`、新增运行器已安装包哈希核验及其尚未完整验收的配套修改没有进入本 PR，原文件保持原状。此 PR 只提交已有候选能力，不表示完整 1.1、1.2 或 2.x 已完成；同设备群组不替代原计划的临时房间/跨设备加入，主动体感不替代合法天气接口，profile 不等于已训练模型。
+
+群组生产开关仍默认关闭；没有修改真实平台凭据或生产配置，没有部署、合并或开放分享/房间/商户认领/区域训练。两项 Alpha 公开 AppID 只从项目既有受控本地配置读取并注入当前验证进程；配置文件、服务端 Secret、签名私钥、APK 和构建日志不提交。
+
+本 PR 首轮群组设备复验用时 `87.822s`，2 条通过、1 条在截图门禁失败：活动窗口属于 `android` 而不是目标 App。对应事件日志明确记录 `com.android.systemui` 的 KeyguardService ANR，当前焦点是该系统组件的无响应弹窗，没有把它计为本 App ANR，也没有把本轮计为通过；支持反馈因严格运行器失败而未继续。失败日志保留在本机忽略目录 `artifacts/pr-group-device.log` 和 `artifacts/pr-device-initial-events.log`，随后关闭专用模拟器以待重新启动验收，测试断言和应用代码没有因此改变。
+
+### 本 PR 的完整本机验证
+
+独立工作区先执行 `pnpm install --frozen-lockfile`，再在当前进程注入两项受控 Alpha 公开 AppID 后执行：
+
+```powershell
+.\scripts\verify.ps1 -AlphaApiBaseUrl 'https://api.unfinished-era.com/'
+```
+
+最终退出码 `0`，明确输出“全部验证通过”。完整日志保留在本机忽略目录 `artifacts/pr-full-verify.log`：
+
+- lint：249 个文件通过；contracts/admin/API 类型检查通过；contracts 81 个测试通过；API 768 个测试通过、3 个独立 PostgreSQL E2E 测试跳过。跳过项不计为成功，对应 CI 工作流已显式设置 opt-in 与独立角色连接执行它们。
+- 编译后 API 的六条随机回环 smoke 路径通过；contracts/API/admin 生产构建通过，admin 生成 6 个静态页面。
+- PowerShell/Bash 静态检查、启动子进程密钥隔离、QQ 固定 JAR、ECS 不可变 bundle 与运维静态门禁通过；没有部署或调用真实供应商。
+- Android buildSrc 端点策略测试通过；App Debug 为 85 个套件、432 个测试，失败/错误/跳过均为 0；lint 为 0 个错误、16 个警告。
+- 干净 Debug/JVM/lint 构建 `13m 6s`，64 个任务中 63 个实际执行；Fixture/AppTest 构建 `8m 49s`，77 个任务全部执行；Alpha 构建 `10m 26s`，57 个任务全部执行。SDK XML 版本提示、现有弃用提示与微信 OpenSDK R8 字节码警告保留在日志中，没有将警告改记为零或忽略失败码。
+- Debug/Alpha 公网 HTTPS、Fixture 固定回环、分享关闭、最终 DEX/SDK/Manifest、archive/DEX 服务端 Secret 扫描、单 signer/v2 签名与固定 Alpha 证书隔离全部通过。
+
+| 工件 | SHA-256 |
+|---|---|
+| Debug | `91F4B6E5F14EEC1EDA5486ADC8FCA7F269C06EBE2D6BBBAB15D5DC74F6AB609D` |
+| Fixture | `70333AFA5A728A84832D8B273CA25276FD9A91A7154CB3EEC7B1476701F44D98` |
+| Fixture AndroidTest | `A63F8D48ABD849EBF8DC4A44FF9390AEECACF06CF119DA3200D61B82EE90AB94` |
+| 内部 Alpha | `A546516932547BE5FA33BA977AA742624C5BF294B02967A2CD31FFD10E9E2487` |
+
+这次补足的是本机完整构建/工件门禁，不是全设备矩阵、真实短信/OAuth、生产开放或公开发布验收。GitHub CI 结果以 PR 当前 HEAD 的检查为准，不能用本机结果替代。
+
+### 本 PR 同一工件的设备复验
+
+首次重启后的 `auto` 图形模式在启动阶段仍出现 SystemUI、输入法、电话等系统组件 ANR，前置检查据此停止，未启动第二轮业务测试；记录在 `artifacts/pr-device-restart-events.log`。模拟器日志显示 `auto` 实际使用软件渲染。之后仅调整专用 API 36 / Pixel 6 AVD 的启动参数为 `-gpu host`，继续使用 4 GB / 4 核、无快照、无可见窗口；没有修改 App、测试断言或用户的其它模拟器。
+
+在启动完成、无系统弹窗且通过已安装 Fixture/AppTest 与本机工件 SHA-256 精确匹配检查后，使用严格运行器与显式 SDK ADB 路径执行：
+
+- `MainActivityGroupDecisionLocalFixtureTest` + `groupDecisionLocalFixture=true`：`OK (3 tests)`，`31.056s`。
+- `MainActivitySupportFeedbackLocalFixtureTest` + `supportFeedbackLocalFixture=true`：`OK (1 test)`，`16.557s`。
+
+两者都使用 `-UseDeviceLocalApiFixture`，逐条状态为 `0`、instrumentation 最终状态为 `-1`，严格运行器和整体命令均成功；端口映射均已恢复。日志为 `artifacts/pr-group-device-final.log`、`artifacts/pr-support-device-final.log`。该次 boot 的最终 `am_anr` / `am_crash` 查询没有事件，先前失败仍单独保留。
+
+两次受包名保护的截图捕获在本次设备尺寸下得到相同字节，仓库只保留一张，已查看并确认无系统弹窗遮挡，中文、共同条件、只读候选及数据权利说明完整。截图是设备内合成数据，不是高德真实供应商验收；SHA-256 为 `17E08539AE331C498DE0342190CF368FDB82EC4A20B8DBCBC5539CC80E3138CD`。
+
+![同设备群组合成夹具的只读结果与权利说明](./screenshots/android-pr-20260905/group-readonly-result.png)
 
 ## 2026-09-04：同设备匿名群组本地候选验证
 
