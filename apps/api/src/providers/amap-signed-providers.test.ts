@@ -1,11 +1,13 @@
-import type {
-	PlaceSearchRequest,
-	RecommendationContext,
+import {
+	DEFAULT_RECOMMENDATION_PREFERENCE_VECTOR,
+	type PlaceSearchRequest,
+	type RecommendationContext,
 } from "@chi-shen-me/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { loadAppConfig } from "../config/app-config.js";
 import { AmapLocationSearchProvider } from "../location-search/providers/amap-location-search.provider.js";
 import { AmapPlaceKeywordSearchProvider } from "../place-search/providers/amap-place-keyword-search.provider.js";
+import { buildRecommendationQueryPlan } from "../recommendations/domain/recommendation-query-plan.js";
 import { AmapPlaceProvider } from "../recommendations/providers/amap-place.provider.js";
 import { computeAmapWebServiceSignature } from "./amap-request-signature.js";
 
@@ -18,6 +20,8 @@ const origin = Object.freeze({
 const recommendationContext: RecommendationContext = Object.freeze({
 	location: origin,
 	mealPeriod: "LUNCH",
+	target: "MEAL",
+	weatherContext: Object.freeze({ kind: "NONE" }),
 	decisionMode: "QUICK",
 	travelMode: "WALK",
 	explorationMode: "BALANCED",
@@ -28,6 +32,7 @@ const recommendationContext: RecommendationContext = Object.freeze({
 	partySize: 1,
 	excludedCuisines: [],
 	preferredCuisines: [],
+	preferenceVector: { ...DEFAULT_RECOMMENDATION_PREFERENCE_VECTOR },
 });
 
 const placeSearchRequest: PlaceSearchRequest = Object.freeze({
@@ -63,7 +68,7 @@ describe("signed AMap provider requests", () => {
 		);
 		await new AmapPlaceProvider(config, fetchMock).search(
 			recommendationContext,
-			["午餐"],
+			buildRecommendationQueryPlan(recommendationContext),
 		);
 
 		expect(requested.map((url) => url.pathname)).toEqual([

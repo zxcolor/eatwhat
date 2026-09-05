@@ -63,6 +63,7 @@ const JSON_POST_PATHS = new Set([
 	"/v1/auth/refresh",
 	"/v1/auth/register/phone-wechat",
 	"/v1/favorites",
+	"/v1/group-recommendations",
 	"/v1/location-search",
 	"/v1/place-search",
 	"/v1/private-feedback",

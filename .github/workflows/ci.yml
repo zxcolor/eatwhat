@@ -849,6 +849,21 @@ jobs:
           fi
           export PGUSER=postgres PGPASSWORD=ci-bootstrap-password
           test "$(psql -X -At -c "SELECT has_table_privilege('api_runtime','public.users','SELECT')")" = "t"
+      - name: Exercise support feedback HTTP and PostgreSQL vertical flow
+        env:
+          SUPPORT_FEEDBACK_POSTGRES_E2E: "true"
+          SUPPORT_FEEDBACK_POSTGRES_E2E_DATABASE_URL: postgresql://api_runtime:ci-runtime-password@127.0.0.1:5432/chi_shen_me_ci
+          SUPPORT_FEEDBACK_POSTGRES_E2E_CLEANUP_DATABASE_URL: postgresql://schema_migrator:ci-migrator-password@127.0.0.1:5432/chi_shen_me_ci
+        run: |
+          set -euo pipefail
+          cleanup_support_feedback_fixture() {
+            PGPASSWORD=ci-migrator-password psql -X -v ON_ERROR_STOP=1 \
+              -h 127.0.0.1 -p 5432 -U schema_migrator -d chi_shen_me_ci \
+              -c "DELETE FROM public.support_feedback WHERE encryption_key_version='e2e-enc-v1' AND content_fingerprint_key_version='e2e-hmac-v1'" \
+              >/dev/null
+          }
+          trap cleanup_support_feedback_fixture EXIT
+          pnpm --filter @chi-shen-me/api test:support-feedback-postgres
       - name: Exercise atomic WeChat UnionID alias persistence and conflicts
         env:
           PGHOST: 127.0.0.1

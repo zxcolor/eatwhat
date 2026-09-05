@@ -53,6 +53,7 @@ $allowedKeys = [System.Collections.Generic.HashSet[string]]::new(
     'DATA_RIGHTS_AUTHORIZATION_EXPIRES_AT',
     'ALLOW_DEMO_DATA',
     'RECOMMENDATION_PROVIDER_PRIORITY',
+    'GROUP_RECOMMENDATIONS_ENABLED',
     'LOCATION_SEARCH_PROVIDER_PRIORITY',
     'PLACE_SEARCH_PROVIDER_PRIORITY',
     'RULE_VERSION',
@@ -60,6 +61,11 @@ $allowedKeys = [System.Collections.Generic.HashSet[string]]::new(
     'MINIMUM_SUPPORTED_VERSION',
     'ACCOUNTS_ENABLED',
     'FAVORITES_ENABLED',
+    'SUPPORT_FEEDBACK_ENABLED',
+    'SUPPORT_FEEDBACK_ENCRYPTION_ACTIVE_VERSION',
+    'SUPPORT_FEEDBACK_ENCRYPTION_KEYS_JSON',
+    'SUPPORT_FEEDBACK_HMAC_ACTIVE_VERSION',
+    'SUPPORT_FEEDBACK_HMAC_KEYS_JSON',
     'DATA_EXPORT_DOWNLOAD_TOTAL_TIMEOUT_MS',
     'DATA_EXPORT_DOWNLOAD_IDLE_TIMEOUT_MS',
     'AMAP_ENABLED',
@@ -127,6 +133,8 @@ $secretKeys = [System.Collections.Generic.HashSet[string]]::new(
     'QWEN_API_KEY',
     'AUTH_HASH_KEYS_JSON',
     'AUTH_OTP_PEPPER_KEYS_JSON',
+    'SUPPORT_FEEDBACK_ENCRYPTION_KEYS_JSON',
+    'SUPPORT_FEEDBACK_HMAC_KEYS_JSON',
     'WECHAT_APP_SECRET',
     'QQ_APP_KEY',
     'SMTP_PASSWORD'
@@ -217,6 +225,13 @@ function Test-SecretEnabledForRuntime {
             return $Entries.Contains('ACCOUNTS_ENABLED') -and
                 $Entries['ACCOUNTS_ENABLED'] -ceq 'true' -and
                 $emailEnabled
+        }
+        { $_ -in @(
+            'SUPPORT_FEEDBACK_ENCRYPTION_KEYS_JSON',
+            'SUPPORT_FEEDBACK_HMAC_KEYS_JSON'
+        ) } {
+            return $Entries.Contains('SUPPORT_FEEDBACK_ENABLED') -and
+                $Entries['SUPPORT_FEEDBACK_ENABLED'] -ceq 'true'
         }
         'WECHAT_APP_SECRET' {
             return $Entries.Contains('WECHAT_AUTH_ENABLED') -and
@@ -372,6 +387,23 @@ try {
         (-not $entries.Contains('QWEN_API_KEY') -or
             [string]::IsNullOrWhiteSpace($entries['QWEN_API_KEY']))) {
         throw 'QWEN_ENABLED=true 时必须在同一私有文件中填写 QWEN_API_KEY。'
+    }
+    if ($entries.Contains('SUPPORT_FEEDBACK_ENABLED') -and
+        $entries['SUPPORT_FEEDBACK_ENABLED'] -eq 'true') {
+        if (-not $entries.Contains('DATABASE_ENABLED') -or
+            $entries['DATABASE_ENABLED'] -ne 'true') {
+            throw 'SUPPORT_FEEDBACK_ENABLED=true 时 DATABASE_ENABLED 必须在同一私有文件中明确设为 true。'
+        }
+        foreach ($requiredFeedbackValue in @(
+            'SUPPORT_FEEDBACK_ENCRYPTION_ACTIVE_VERSION',
+            'SUPPORT_FEEDBACK_ENCRYPTION_KEYS_JSON',
+            'SUPPORT_FEEDBACK_HMAC_ACTIVE_VERSION',
+            'SUPPORT_FEEDBACK_HMAC_KEYS_JSON'
+        )) {
+            if (-not (Test-ConfiguredValue -Entries $entries -Key $requiredFeedbackValue)) {
+                throw "SUPPORT_FEEDBACK_ENABLED=true 时必须在私有文件或受控进程环境中填写 $requiredFeedbackValue。"
+            }
+        }
     }
     $schemaTransitionMode = if ($entries.Contains('AUTH_SCHEMA_TRANSITION_MODE')) {
         [string]$entries['AUTH_SCHEMA_TRANSITION_MODE']

@@ -14,6 +14,16 @@ object RecommendationResponseValidator {
         }
         if (response.results.size > 3) return false
         if (response.notice != null && response.notice.length > 500) return false
+        if (!profileMatches(response.profile, context)) return false
+        if (!weatherApplicationMatches(response.weatherApplication, context.weatherContext)) return false
+        val aiPathAllowed = context.aiAssistanceEnabled &&
+            context.target == RecommendationTarget.MEAL &&
+            context.mealPeriod == MealPeriod.LUNCH &&
+            context.weatherContext.kind == WeatherContextKind.NONE
+        if (
+            !aiPathAllowed &&
+            (response.aiFallbackUsed || response.results.any(RecommendationResult::aiAssisted))
+        ) return false
 
         val resultTokens = mutableSetOf<String>()
         return response.results.withIndex().all { (index, result) ->
@@ -21,6 +31,75 @@ object RecommendationResponseValidator {
                 result.rank == index + 1 &&
                 isValid(result, response.dataRightsMode) &&
                 respectsRequestConstraints(result, context)
+        }
+    }
+
+    private fun profileMatches(
+        profile: RecommendationProfile,
+        context: RecommendationContext,
+    ): Boolean {
+        if (profile.target != context.target || profile.version.length > 80) return false
+        val expectedFamily = when (context.target) {
+            RecommendationTarget.MEAL -> when (context.mealPeriod) {
+                MealPeriod.BREAKFAST -> RecommendationProfileFamily.MEAL_BREAKFAST
+                MealPeriod.LUNCH -> RecommendationProfileFamily.MEAL_LUNCH
+                MealPeriod.DINNER -> RecommendationProfileFamily.MEAL_DINNER
+            }
+            RecommendationTarget.MILK_TEA -> RecommendationProfileFamily.MILK_TEA
+            RecommendationTarget.COFFEE -> RecommendationProfileFamily.COFFEE
+            RecommendationTarget.DESSERT -> RecommendationProfileFamily.DESSERT
+        }
+        val familyAllowed = profile.family == expectedFamily ||
+            (context.target == RecommendationTarget.MEAL &&
+                profile.family == RecommendationProfileFamily.MEAL_LEGACY &&
+                context.mealPeriod == MealPeriod.LUNCH &&
+                context.weatherContext.kind == WeatherContextKind.NONE)
+        if (!familyAllowed) return false
+        val expectedCapability = profile.family in setOf(
+            RecommendationProfileFamily.MILK_TEA,
+            RecommendationProfileFamily.COFFEE,
+            RecommendationProfileFamily.DESSERT,
+        )
+        if (profile.providerCapabilityRequired != expectedCapability) return false
+        val versionPrefix = when (profile.family) {
+            RecommendationProfileFamily.MEAL_LEGACY -> "meal-legacy"
+            RecommendationProfileFamily.MEAL_BREAKFAST -> "meal-breakfast"
+            RecommendationProfileFamily.MEAL_LUNCH -> "meal-lunch"
+            RecommendationProfileFamily.MEAL_DINNER -> "meal-dinner"
+            RecommendationProfileFamily.MILK_TEA -> "milk-tea"
+            RecommendationProfileFamily.COFFEE -> "coffee"
+            RecommendationProfileFamily.DESSERT -> "dessert"
+        }
+        return profile.version.matches(Regex("^${Regex.escape(versionPrefix)}-v[1-9]\\d*$"))
+    }
+
+    private fun weatherApplicationMatches(
+        application: WeatherApplication,
+        request: WeatherContextRequest,
+    ): Boolean {
+        if (application.version.length > 80) return false
+        return when (request.kind) {
+            WeatherContextKind.NONE ->
+                application.kind == WeatherApplicationKind.NONE &&
+                    application.preference == null &&
+                    application.queryModifier == null &&
+                    application.version.matches(Regex("^weather-none-v[1-9]\\d*$"))
+            WeatherContextKind.USER_REPORTED -> {
+                val expectedModifier = when (request.preference ?: return false) {
+                    UserReportedWeatherPreference.MINIMIZE_EXPOSURE ->
+                        WeatherQueryModifier.MINIMIZE_OUTDOOR_EXPOSURE
+                    UserReportedWeatherPreference.WARMING ->
+                        WeatherQueryModifier.PREFER_WARMING_OPTIONS
+                    UserReportedWeatherPreference.COOLING ->
+                        WeatherQueryModifier.PREFER_COOLING_OPTIONS
+                }
+                application.kind == WeatherApplicationKind.USER_REPORTED &&
+                    application.preference == request.preference &&
+                    application.queryModifier == expectedModifier &&
+                    application.version.matches(
+                        Regex("^user-reported-weather-v[1-9]\\d*$"),
+                    )
+            }
         }
     }
 

@@ -68,6 +68,93 @@ class RecommendationResponseValidatorTest {
     }
 
     @Test
+    fun `requires a target matching versioned profile for specialty responses`() {
+        val coffeeContext = context.copy(target = RecommendationTarget.COFFEE)
+        val coffeeProfile = RecommendationProfile(
+            target = RecommendationTarget.COFFEE,
+            family = RecommendationProfileFamily.COFFEE,
+            version = "coffee-v1",
+            providerCapabilityRequired = true,
+        )
+
+        assertTrue(
+            RecommendationResponseValidator.isValid(
+                response(result()).copy(profile = coffeeProfile),
+                coffeeContext,
+            ),
+        )
+        assertFalse(
+            RecommendationResponseValidator.isValid(response(result()), coffeeContext),
+        )
+        assertFalse(
+            RecommendationResponseValidator.isValid(
+                response(result()).copy(profile = coffeeProfile.copy(version = "meal-lunch-v1")),
+                coffeeContext,
+            ),
+        )
+    }
+
+    @Test
+    fun `legacy profile is accepted only for the lunch baseline`() {
+        assertTrue(isValid(result()))
+        for (period in listOf(MealPeriod.BREAKFAST, MealPeriod.DINNER)) {
+            assertFalse(
+                RecommendationResponseValidator.isValid(
+                    response(result()),
+                    context.copy(mealPeriod = period),
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun `rules only request rejects any AI usage claim`() {
+        assertFalse(
+            RecommendationResponseValidator.isValid(
+                response(result()).copy(aiFallbackUsed = true),
+                context,
+            ),
+        )
+        assertFalse(isValid(result().copy(aiAssisted = true)))
+    }
+
+    @Test
+    fun `requires exact user reported weather echo and query modifier`() {
+        val weatherContext = context.copy(
+            weatherContext = WeatherContextRequest(
+                kind = WeatherContextKind.USER_REPORTED,
+                preference = UserReportedWeatherPreference.COOLING,
+            ),
+        )
+        val response = response(result()).copy(
+            profile = RecommendationProfile(
+                target = RecommendationTarget.MEAL,
+                family = RecommendationProfileFamily.MEAL_LUNCH,
+                version = "meal-lunch-v1",
+                providerCapabilityRequired = false,
+            ),
+            weatherApplication = WeatherApplication(
+                kind = WeatherApplicationKind.USER_REPORTED,
+                version = "user-reported-weather-v1",
+                preference = UserReportedWeatherPreference.COOLING,
+                queryModifier = WeatherQueryModifier.PREFER_COOLING_OPTIONS,
+            ),
+        )
+
+        assertTrue(RecommendationResponseValidator.isValid(response, weatherContext))
+        assertFalse(
+            RecommendationResponseValidator.isValid(
+                response.copy(
+                    weatherApplication = response.weatherApplication.copy(
+                        queryModifier = WeatherQueryModifier.PREFER_WARMING_OPTIONS,
+                    ),
+                ),
+                weatherContext,
+            ),
+        )
+    }
+
+    @Test
     fun `accepts unknown well formed provider code without inferring its coordinate system`() {
         assertTrue(
             isValid(
@@ -145,7 +232,7 @@ class RecommendationResponseValidatorTest {
         ruleVersion = "rule-v1",
         promptVersion = "prompt-v1",
         modelVersion = "rule-fallback",
-        aiFallbackUsed = true,
+        aiFallbackUsed = false,
         results = listOf(result),
         notice = null,
     )

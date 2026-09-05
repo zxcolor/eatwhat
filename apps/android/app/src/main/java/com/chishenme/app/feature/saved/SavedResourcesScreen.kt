@@ -494,7 +494,7 @@ private fun RecommendationHistoryAction.label() = when (this) {
     RecommendationHistoryAction.FAVORITE_ADDED -> "加入了收藏"
     RecommendationHistoryAction.NAVIGATION_OPENED -> "打开了导航"
     RecommendationHistoryAction.PHONE_DIALER_OPENED -> "打开了拨号器"
-    RecommendationHistoryAction.REROLL_REQUESTED -> "换了一批推荐"
+    RecommendationHistoryAction.REROLL_REQUESTED -> "按相同条件重新请求了推荐"
 }
 
 private fun MealPeriod.label() = when (this) {

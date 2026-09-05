@@ -56,6 +56,24 @@ describe("application safety configuration", () => {
 		expect(configured.features.privateFeedbackEnabled).toBe(true);
 	});
 
+	it("keeps anonymous group recommendations disabled unless explicitly enabled", () => {
+		expect(
+			loadAppConfig({ NODE_ENV: "test" }).features.groupRecommendationsEnabled,
+		).toBe(false);
+		expect(
+			loadAppConfig({
+				NODE_ENV: "test",
+				GROUP_RECOMMENDATIONS_ENABLED: "true",
+			}).features.groupRecommendationsEnabled,
+		).toBe(true);
+		expect(() =>
+			loadAppConfig({
+				NODE_ENV: "test",
+				GROUP_RECOMMENDATIONS_ENABLED: "yes",
+			}),
+		).toThrow("GROUP_RECOMMENDATIONS_ENABLED");
+	});
+
 	it("rejects a worker-ready claim while the data-export capability is disabled", () => {
 		expect(() =>
 			loadAppConfig({

@@ -6,7 +6,11 @@ import com.chishenme.app.data.remote.DecisionMode
 import com.chishenme.app.data.remote.ExplorationMode
 import com.chishenme.app.data.remote.MealPeriod
 import com.chishenme.app.data.remote.RecommendationContext
+import com.chishenme.app.data.remote.RecommendationPreferenceVector
+import com.chishenme.app.data.remote.RecommendationTarget
 import com.chishenme.app.data.remote.TravelMode
+import com.chishenme.app.data.remote.WeatherContextKind
+import com.chishenme.app.data.remote.WeatherContextRequest
 import java.time.Clock
 import java.time.Instant
 
@@ -20,6 +24,10 @@ data class LocationChoice(
 data class DecisionInput(
     val location: LocationChoice?,
     val mealPeriod: MealPeriod,
+    /** Request-scoped only; DecisionHistoryEntry intentionally cannot represent it. */
+    val target: RecommendationTarget = RecommendationTarget.MEAL,
+    /** User-entered request context only; never a weather observation or persisted field. */
+    val weatherContext: WeatherContextRequest = WeatherContextRequest.None,
     val decisionMode: DecisionMode,
     val travelMode: TravelMode,
     val explorationMode: ExplorationMode,
@@ -60,22 +68,31 @@ class RecommendationRequestFactory(
     fun create(
         input: DecisionInput,
         aiAssistanceEnabled: Boolean = false,
+        preferenceVector: RecommendationPreferenceVector = RecommendationPreferenceVector.Default,
     ): RecommendationContext {
         val location = requireNotNull(input.location) { "Location must be validated before creating request" }
         return RecommendationContext(
             location = location.coordinate,
             locationLabel = location.label.take(80),
             mealPeriod = input.mealPeriod,
+            target = input.target,
+            weatherContext = input.weatherContext,
             decisionMode = input.decisionMode,
             travelMode = input.travelMode,
             explorationMode = input.explorationMode,
-            aiAssistanceEnabled = aiAssistanceEnabled,
+            // New specialty/weather modes stay on deterministic rule paths until
+            // the model contract explicitly supports their bounded semantics.
+            aiAssistanceEnabled = aiAssistanceEnabled &&
+                input.target == RecommendationTarget.MEAL &&
+                input.mealPeriod == MealPeriod.LUNCH &&
+                input.weatherContext.kind == WeatherContextKind.NONE,
             budgetMaxYuan = input.budgetMaxYuan,
             availableMinutes = input.availableMinutes,
             radiusMeters = input.radiusMeters,
             partySize = input.partySize,
             excludedCuisines = input.excludedCuisines.sorted(),
             preferredCuisines = input.preferredCuisines.sorted(),
+            preferenceVector = preferenceVector,
             requestTime = Instant.now(clock).toString(),
         )
     }

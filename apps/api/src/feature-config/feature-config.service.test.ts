@@ -4,12 +4,15 @@ import type { DataRightsPolicy } from "../config/data-rights-policy.js";
 import type { LocationSearchProvider } from "../location-search/location-search.provider.js";
 import type { PlaceKeywordSearchProvider } from "../place-search/place-keyword-search.provider.js";
 import type { PlaceProvider } from "../recommendations/domain/place-candidate.js";
+import type { RecommendationQueryPlan } from "../recommendations/domain/recommendation-query-plan.js";
 import type { SupportFeedbackService } from "../support-feedback/support-feedback.service.js";
 import { FeatureConfigService } from "./feature-config.service.js";
 
 const placeProvider = {
 	kind: "AMAP",
 	dataMode: "LIVE",
+	supportsQueryPlan: (plan: RecommendationQueryPlan) =>
+		plan.profile.target === "MEAL" && plan.weatherApplication.kind === "NONE",
 } as PlaceProvider;
 const locationSearchProvider = {
 	dataSource: "AMAP",
@@ -21,6 +24,7 @@ const placeSearchProvider = {
 } as PlaceKeywordSearchProvider;
 
 function config(input?: {
+	groupRecommendations?: boolean;
 	accounts?: boolean;
 	favorites?: boolean;
 	history?: boolean;
@@ -57,6 +61,7 @@ function config(input?: {
 		}),
 		features: Object.freeze({
 			...base.features,
+			groupRecommendationsEnabled: input?.groupRecommendations ?? false,
 			accountsEnabled,
 			favoritesEnabled: input?.favorites ?? false,
 			historyEnabled: input?.history ?? false,
@@ -112,13 +117,187 @@ describe("FeatureConfigService persistence capabilities", () => {
 
 		await expect(service.getPublicConfig()).resolves.toMatchObject({
 			favoritesEnabled: false,
+			serviceCapabilities: {
+				groupRecommendationsEnabled: false,
+			},
 			persistenceCapabilities: {
 				favoritesEnabled: false,
 				historyEnabled: false,
 				privateFeedbackEnabled: false,
 				savedResourceIdsEnabled: false,
 			},
+			specialtyCapabilities: {
+				breakfastProfileEnabled: true,
+				dinnerProfileEnabled: true,
+				milkTeaEnabled: false,
+				coffeeEnabled: false,
+				dessertEnabled: false,
+				userReportedWeatherEnabled: false,
+			},
 		});
+	});
+
+	it("derives specialty capabilities only from concrete query-plan support", async () => {
+		const fullyCapableProvider = {
+			kind: "AUTHORIZED_VENDOR",
+			dataMode: "LIVE",
+			supportsQueryPlan: vi.fn(() => true),
+		} as unknown as PlaceProvider;
+		const service = new FeatureConfigService(
+			config(),
+			fullyCapableProvider,
+			locationSearchProvider,
+			placeSearchProvider,
+			policy(),
+			supportFeedback(),
+		);
+
+		await expect(service.getPublicConfig()).resolves.toMatchObject({
+			specialtyCapabilities: {
+				breakfastProfileEnabled: true,
+				dinnerProfileEnabled: true,
+				milkTeaEnabled: true,
+				coffeeEnabled: true,
+				dessertEnabled: true,
+				userReportedWeatherEnabled: true,
+			},
+		});
+		expect(fullyCapableProvider.supportsQueryPlan).toHaveBeenCalled();
+	});
+
+	it("advertises group recommendations only behind both the switch and concrete core plan support", async () => {
+		const disabledByDefault = new FeatureConfigService(
+			config(),
+			placeProvider,
+			locationSearchProvider,
+			placeSearchProvider,
+			policy(),
+			supportFeedback(),
+		);
+		await expect(disabledByDefault.getPublicConfig()).resolves.toMatchObject({
+			serviceCapabilities: { groupRecommendationsEnabled: false },
+		});
+
+		const enabled = new FeatureConfigService(
+			config({ groupRecommendations: true }),
+			placeProvider,
+			locationSearchProvider,
+			placeSearchProvider,
+			policy(),
+			supportFeedback(),
+		);
+		await expect(enabled.getPublicConfig()).resolves.toMatchObject({
+			serviceCapabilities: {
+				recommendationsEnabled: true,
+				groupRecommendationsEnabled: true,
+			},
+		});
+
+		const unsupportedProvider = {
+			kind: "AUTHORIZED_VENDOR",
+			dataMode: "LIVE",
+			supportsQueryPlan: vi.fn(() => false),
+		} as unknown as PlaceProvider;
+		const unsupported = new FeatureConfigService(
+			config({ groupRecommendations: true }),
+			unsupportedProvider,
+			locationSearchProvider,
+			placeSearchProvider,
+			policy(),
+			supportFeedback(),
+		);
+		await expect(unsupported.getPublicConfig()).resolves.toMatchObject({
+			serviceCapabilities: {
+				recommendationsEnabled: false,
+				groupRecommendationsEnabled: false,
+			},
+		});
+
+		let capabilityProbeCount = 0;
+		const independentlyFailingProvider = {
+			kind: "AUTHORIZED_VENDOR",
+			dataMode: "LIVE",
+			supportsQueryPlan: vi.fn(() => {
+				capabilityProbeCount += 1;
+				if (capabilityProbeCount === 1) return true;
+				throw new Error("private second probe failure");
+			}),
+		} as unknown as PlaceProvider;
+		const independentlyFailed = new FeatureConfigService(
+			config({ groupRecommendations: true }),
+			independentlyFailingProvider,
+			locationSearchProvider,
+			placeSearchProvider,
+			policy(),
+			supportFeedback(),
+		);
+		const independentlyFailedResult =
+			await independentlyFailed.getPublicConfig();
+		expect(independentlyFailedResult.serviceCapabilities).toMatchObject({
+			recommendationsEnabled: true,
+			groupRecommendationsEnabled: false,
+		});
+		expect(JSON.stringify(independentlyFailedResult)).not.toContain(
+			"private second probe failure",
+		);
+	});
+
+	it("fails adapter capability errors closed without exposing the failure", async () => {
+		const failingProvider = {
+			kind: "DEMO",
+			dataMode: "DEMO",
+			supportsQueryPlan: vi.fn(() => {
+				throw new Error("private capability failure");
+			}),
+		} as unknown as PlaceProvider;
+		const service = new FeatureConfigService(
+			config(),
+			failingProvider,
+			locationSearchProvider,
+			placeSearchProvider,
+			policy(),
+			supportFeedback(),
+		);
+
+		const result = await service.getPublicConfig();
+		expect(result.serviceCapabilities.recommendationsEnabled).toBe(false);
+		expect(result.specialtyCapabilities).toEqual({
+			breakfastProfileEnabled: false,
+			dinnerProfileEnabled: false,
+			milkTeaEnabled: false,
+			coffeeEnabled: false,
+			dessertEnabled: false,
+			userReportedWeatherEnabled: false,
+		});
+		expect(JSON.stringify(result)).not.toContain("private capability failure");
+	});
+
+	it("keeps an unavailable adapter closed even when it understands meal plans", async () => {
+		const unavailableProvider = {
+			kind: "UNAVAILABLE",
+			dataMode: "LIVE",
+			supportsQueryPlan: vi.fn(() => true),
+		} as unknown as PlaceProvider;
+		const service = new FeatureConfigService(
+			config(),
+			unavailableProvider,
+			locationSearchProvider,
+			placeSearchProvider,
+			policy(),
+			supportFeedback(),
+		);
+
+		const result = await service.getPublicConfig();
+		expect(result.serviceCapabilities.recommendationsEnabled).toBe(false);
+		expect(result.specialtyCapabilities).toEqual({
+			breakfastProfileEnabled: false,
+			dinnerProfileEnabled: false,
+			milkTeaEnabled: false,
+			coffeeEnabled: false,
+			dessertEnabled: false,
+			userReportedWeatherEnabled: false,
+		});
+		expect(unavailableProvider.supportsQueryPlan).not.toHaveBeenCalled();
 	});
 
 	it("advertises only individually deployed and licensed capabilities", async () => {
@@ -265,7 +444,9 @@ describe("FeatureConfigService persistence capabilities", () => {
 		);
 		const failedResult = await failedReadiness.getPublicConfig();
 		expect(failedResult.supportFeedbackEnabled).toBe(false);
-		expect(JSON.stringify(failedResult)).not.toContain("private readiness failure");
+		expect(JSON.stringify(failedResult)).not.toContain(
+			"private readiness failure",
+		);
 	});
 
 	it("advertises only the three actually selected provider capabilities", async () => {

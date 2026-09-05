@@ -4,4 +4,9 @@
     <color name="launcher_page">#F5F6F7</color>
     <color name="launcher_page_dark">#292A2D</color>
     <color name="launcher_mark">#FFFFFF</color>
+    <color name="widget_surface">#F5F6F7</color>
+    <color name="widget_outline">#E1E2E6</color>
+    <color name="widget_ink">#25262A</color>
+    <color name="widget_action">#C02A6D</color>
+    <color name="widget_on_action">#FFFFFF</color>
 </resources>

@@ -22,6 +22,7 @@ class RuntimeAppVersionInterceptorPolicyTest {
         assertFalse(runtimeRequestAllowed("GET", "/v1/account", gate.currentState))
         assertFalse(runtimeRequestAllowed("POST", "/v1/account", gate.currentState))
         assertFalse(runtimeRequestAllowed("POST", "/v1/recommendations", gate.currentState))
+        assertFalse(runtimeRequestAllowed("POST", "/v1/group-recommendations", gate.currentState))
         assertFalse(runtimeRequestAllowed("POST", "/v1/unsupported-write", gate.currentState))
         assertFalse(runtimeRequestAllowed("POST", "/v1/support-feedback", gate.currentState))
         assertFalse(runtimeRequestAllowed("POST", "/v1/auth/login", gate.currentState))
@@ -35,6 +36,7 @@ class RuntimeAppVersionInterceptorPolicyTest {
         gate.markConfigurationUntrusted(1)
         gate.markConfigurationUnavailable(1)
         assertTrue(runtimeRequestAllowed("POST", "/v1/recommendations", gate.currentState))
+        assertFalse(runtimeRequestAllowed("POST", "/v1/group-recommendations", gate.currentState))
         assertFalse(runtimeRequestAllowed("GET", "/v1/recommendations", gate.currentState))
         assertFalse(runtimeRequestAllowed("POST", "/v1/unsupported-write", gate.currentState))
 
@@ -43,5 +45,20 @@ class RuntimeAppVersionInterceptorPolicyTest {
         assertFalse(runtimeRequestAllowed("POST", "/v1/recommendations", gate.currentState))
         assertFalse(runtimeRequestAllowed("POST", "/v1/auth/login", gate.currentState))
         assertTrue(runtimeRequestAllowed("GET", "/v1/config", gate.currentState))
+    }
+
+    @Test
+    fun `group route is available only under trusted compatible remote access`() {
+        val gate = RuntimeAppVersionGate("1.0.0")
+        gate.markConfigurationUntrusted(1)
+        gate.acceptTrustedConfiguration(1, "1.0.0")
+
+        assertTrue(runtimeRequestAllowed("POST", "/v1/group-recommendations", gate.currentState))
+
+        gate.markConfigurationUntrusted(2)
+        gate.markConfigurationUnavailable(2)
+
+        assertFalse(runtimeRequestAllowed("POST", "/v1/group-recommendations", gate.currentState))
+        assertTrue(runtimeRequestAllowed("POST", "/v1/recommendations", gate.currentState))
     }
 }

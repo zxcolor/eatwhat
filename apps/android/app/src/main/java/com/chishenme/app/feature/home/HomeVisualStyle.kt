@@ -121,7 +121,7 @@ internal fun HomeHeroCard() {
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
-                        "从位置和偏好出发，只给真正有用的答案。",
+                        "从位置和偏好出发，帮你收窄到少量候选。",
                         color = Color.White.copy(alpha = 0.78f),
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -132,9 +132,9 @@ internal fun HomeHeroCard() {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                HomeMetric("30 秒", "完成决定", Modifier.weight(1f))
-                HomeMetric("1 + 2", "主推与备选", Modifier.weight(1f))
-                HomeMetric("可解释", "推荐理由", Modifier.weight(1f))
+                HomeMetric("少步骤", "快速收窄", Modifier.weight(1f))
+                HomeMetric("最多 3 个", "候选展示", Modifier.weight(1f))
+                HomeMetric("可核对", "条件理由", Modifier.weight(1f))
             }
         }
     }

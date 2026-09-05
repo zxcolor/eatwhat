@@ -596,7 +596,12 @@ class MainActivityRuntimeVersionRaiseTest {
                   "minimumSupportedVersion": "$minimumSupportedVersion",
                   "ruleVersion": "rule-runtime-version-v1",
                   "promptVersion": "prompt-disabled",
-                  "modelVersion": "rule-runtime-version-v1"
+                  "modelVersion": "rule-runtime-version-v1",
+                  "serviceCapabilities": {
+                    "recommendationsEnabled": true,
+                    "locationSearchEnabled": true,
+                    "placeSearchEnabled": true
+                  }
                 }
             """.trimIndent(),
         )

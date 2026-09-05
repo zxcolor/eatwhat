@@ -67,7 +67,7 @@ services:
       QWEN_API_KEY: ${QWEN_API_KEY:-}
       QWEN_MODEL: ${QWEN_MODEL:-qwen3.7-flash-2026-07-15}
       QWEN_TIMEOUT_MS: ${QWEN_TIMEOUT_MS:-2500}
-      RULE_VERSION: ${RULE_VERSION:-recommendation-rules-v1}
+      RULE_VERSION: ${RULE_VERSION:-recommendation-rules-v2}
       PROMPT_VERSION: ${PROMPT_VERSION:-intent-prompt-v1}
       MINIMUM_SUPPORTED_VERSION: ${MINIMUM_SUPPORTED_VERSION:-0.1.0}
       ACCOUNTS_ENABLED: ${ACCOUNTS_ENABLED:-false}

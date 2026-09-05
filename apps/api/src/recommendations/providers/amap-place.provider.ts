@@ -15,6 +15,7 @@ import type {
 	PlaceCandidate,
 	PlaceProvider,
 } from "../domain/place-candidate.js";
+import type { RecommendationQueryPlan } from "../domain/recommendation-query-plan.js";
 
 export const AMAP_FETCH = Symbol("AMAP_FETCH");
 export const AMAP_RESPONSE_MAX_BYTES = 512 * 1_024;
@@ -46,6 +47,7 @@ interface AmapBusiness {
 
 export type PlaceProviderFailureReason =
 	| "DISABLED"
+	| "UNSUPPORTED_QUERY_PLAN"
 	| "TIMEOUT"
 	| "UPSTREAM_HTTP"
 	| "UPSTREAM_REJECTED"
@@ -311,10 +313,26 @@ export class AmapPlaceProvider implements PlaceProvider {
 		@Inject(AMAP_FETCH) private readonly fetchImpl: typeof fetch,
 	) {}
 
+	supportsQueryPlan(plan: RecommendationQueryPlan): boolean {
+		return (
+			!plan.providerCapabilityRequired &&
+			!plan.profile.providerCapabilityRequired &&
+			plan.profile.target === "MEAL" &&
+			(plan.profile.version === "meal-breakfast-v1" ||
+				plan.profile.version === "meal-lunch-v1" ||
+				plan.profile.version === "meal-dinner-v1") &&
+			plan.weatherApplication.kind === "NONE" &&
+			plan.weatherApplication.version === "weather-none-v1"
+		);
+	}
+
 	async search(
 		context: RecommendationContext,
-		mealTypes: readonly string[],
+		plan: RecommendationQueryPlan,
 	): Promise<readonly PlaceCandidate[]> {
+		if (!this.supportsQueryPlan(plan)) {
+			throw new PlaceProviderUnavailableError("UNSUPPORTED_QUERY_PLAN");
+		}
 		if (!this.config.amap.enabled || this.config.amap.apiKey === null) {
 			throw new PlaceProviderUnavailableError("DISABLED");
 		}
@@ -340,7 +358,7 @@ export class AmapPlaceProvider implements PlaceProvider {
 		// is confirmed in writing.
 		endpoint.searchParams.set("show_fields", "business");
 		endpoint.searchParams.set("output", "json");
-		const keywords = safeMealKeywords(mealTypes);
+		const keywords = safeMealKeywords(plan.queryTerms);
 		if (keywords !== null) endpoint.searchParams.set("keywords", keywords);
 		applyAmapWebServiceSignature(endpoint, this.config.amap.signingPrivateKey);
 

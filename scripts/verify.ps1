@@ -150,6 +150,7 @@ try {
         NODE_ENV = 'development'
         AMAP_ENABLED = 'true'
         AMAP_WEB_SERVICE_KEY = ''
+        GROUP_RECOMMENDATIONS_ENABLED = 'true'
     }
     $runtimeFixture = New-RuntimeChildEnvironment -Entries $isolationFixture
     $buildFixture = New-MinimalChildEnvironment
@@ -162,6 +163,10 @@ try {
     }
     if ($buildFixture.Contains('AMAP_WEB_SERVICE_KEY')) {
         throw '本机启动器把运行时高德密钥泄漏给了构建进程。'
+    }
+    if ($runtimeFixture['GROUP_RECOMMENDATIONS_ENABLED'] -cne 'true' -or
+        $buildFixture.Contains('GROUP_RECOMMENDATIONS_ENABLED')) {
+        throw '本机启动器没有把群组能力开关只注入运行进程。'
     }
 } finally {
     $env:CHISHENME_PARENT_SECRET_DECOY = $previousDecoySecret
@@ -324,6 +329,121 @@ try {
     }
 }
 
+Write-Host '== Local API launcher: support feedback secret isolation =='
+$feedbackLauncherFixturePath = Join-Path $launcherFixtureTempBase (
+    'chishenme-support-feedback-' + [Guid]::NewGuid().ToString('N') + '.env'
+)
+$feedbackEncryptionBytes = New-Object byte[] 32
+$feedbackHmacBytes = New-Object byte[] 32
+$feedbackRandom = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+try {
+    $feedbackRandom.GetBytes($feedbackEncryptionBytes)
+    $feedbackEncryptionKey = [Convert]::ToBase64String($feedbackEncryptionBytes)
+    do {
+        $feedbackRandom.GetBytes($feedbackHmacBytes)
+        $feedbackHmacKey = [Convert]::ToBase64String($feedbackHmacBytes)
+    } while ($feedbackHmacKey -ceq $feedbackEncryptionKey)
+
+    [System.IO.File]::WriteAllLines(
+        $feedbackLauncherFixturePath,
+        @(
+            'NODE_ENV=development',
+            'DATABASE_ENABLED=true',
+            'DATABASE_URL=postgresql://fixture:fixture@localhost:5432/fixture',
+            'SUPPORT_FEEDBACK_ENABLED=true',
+            'SUPPORT_FEEDBACK_ENCRYPTION_ACTIVE_VERSION=fixture-enc-v1',
+            ('SUPPORT_FEEDBACK_ENCRYPTION_KEYS_JSON={"fixture-enc-v1":"' +
+                $feedbackEncryptionKey + '"}'),
+            'SUPPORT_FEEDBACK_HMAC_ACTIVE_VERSION=fixture-hmac-v1',
+            ('SUPPORT_FEEDBACK_HMAC_KEYS_JSON={"fixture-hmac-v1":"' +
+                $feedbackHmacKey + '"}')
+        ),
+        [System.Text.UTF8Encoding]::new($false)
+    )
+    & (Join-Path $PSScriptRoot 'start-api-local.ps1') `
+        -EnvFile $feedbackLauncherFixturePath `
+        -ValidateOnly
+
+    $feedbackFixtureEntries = [ordered]@{}
+    $feedbackFixtureLineNumber = 0
+    foreach ($feedbackFixtureLine in [System.IO.File]::ReadLines($feedbackLauncherFixturePath)) {
+        $feedbackFixtureLineNumber += 1
+        $feedbackFixtureEntry = ConvertFrom-PrivateEnvLine `
+            -Line $feedbackFixtureLine `
+            -LineNumber $feedbackFixtureLineNumber
+        if ($null -ne $feedbackFixtureEntry) {
+            $feedbackFixtureEntries[$feedbackFixtureEntry.Key] = $feedbackFixtureEntry.Value
+        }
+    }
+    $feedbackRuntimeFixture = New-RuntimeChildEnvironment -Entries $feedbackFixtureEntries
+    foreach ($requiredFeedbackRuntimeKey in @(
+        'SUPPORT_FEEDBACK_ENABLED',
+        'SUPPORT_FEEDBACK_ENCRYPTION_ACTIVE_VERSION',
+        'SUPPORT_FEEDBACK_ENCRYPTION_KEYS_JSON',
+        'SUPPORT_FEEDBACK_HMAC_ACTIVE_VERSION',
+        'SUPPORT_FEEDBACK_HMAC_KEYS_JSON'
+    )) {
+        if (-not $feedbackRuntimeFixture.Contains($requiredFeedbackRuntimeKey)) {
+            throw "反馈启动器夹具遗漏了 $requiredFeedbackRuntimeKey。"
+        }
+    }
+    $feedbackBuildFixture = New-MinimalChildEnvironment
+    if ($feedbackBuildFixture.Contains('SUPPORT_FEEDBACK_ENCRYPTION_KEYS_JSON') -or
+        $feedbackBuildFixture.Contains('SUPPORT_FEEDBACK_HMAC_KEYS_JSON')) {
+        throw '本机启动器把反馈密钥泄漏给了构建进程。'
+    }
+
+    $feedbackFixtureEntries['SUPPORT_FEEDBACK_ENABLED'] = 'false'
+    $disabledFeedbackRuntimeFixture = New-RuntimeChildEnvironment -Entries $feedbackFixtureEntries
+    if ($disabledFeedbackRuntimeFixture.Contains('SUPPORT_FEEDBACK_ENCRYPTION_KEYS_JSON') -or
+        $disabledFeedbackRuntimeFixture.Contains('SUPPORT_FEEDBACK_HMAC_KEYS_JSON')) {
+        throw '反馈关闭后本机启动器仍向运行进程注入反馈密钥。'
+    }
+
+    $feedbackFixtureEntries['SUPPORT_FEEDBACK_ENABLED'] = 'true'
+    $feedbackFixtureEntries['DATABASE_ENABLED'] = 'false'
+    [System.IO.File]::WriteAllLines(
+        $feedbackLauncherFixturePath,
+        @($feedbackFixtureEntries.Keys | ForEach-Object {
+            "$_=$($feedbackFixtureEntries[$_])"
+        }),
+        [System.Text.UTF8Encoding]::new($false)
+    )
+    $feedbackWithoutDatabaseRejected = $false
+    try {
+        & (Join-Path $PSScriptRoot 'start-api-local.ps1') `
+            -EnvFile $feedbackLauncherFixturePath `
+            -ValidateOnly
+    } catch {
+        if ($_.Exception.Message -notmatch
+            'SUPPORT_FEEDBACK_ENABLED=true 时 DATABASE_ENABLED 必须') {
+            throw
+        }
+        $feedbackWithoutDatabaseRejected = $true
+    }
+    if (-not $feedbackWithoutDatabaseRejected) {
+        throw '本机启动器错误接受了没有 PostgreSQL 的反馈服务。'
+    }
+} finally {
+    [Array]::Clear($feedbackEncryptionBytes, 0, $feedbackEncryptionBytes.Length)
+    [Array]::Clear($feedbackHmacBytes, 0, $feedbackHmacBytes.Length)
+    $feedbackRandom.Dispose()
+    $feedbackEncryptionKey = $null
+    $feedbackHmacKey = $null
+    $resolvedFeedbackLauncherFixturePath =
+        [System.IO.Path]::GetFullPath($feedbackLauncherFixturePath)
+    if (-not $resolvedFeedbackLauncherFixturePath.StartsWith(
+        $launcherFixtureTempBase,
+        [System.StringComparison]::OrdinalIgnoreCase
+    ) -or [System.IO.Path]::GetFileName($resolvedFeedbackLauncherFixturePath) -notlike
+        'chishenme-support-feedback-*.env') {
+        throw '反馈启动器夹具临时文件越界，拒绝清理。'
+    }
+    if ([System.IO.File]::Exists($resolvedFeedbackLauncherFixturePath)) {
+        [System.IO.File]::Delete($resolvedFeedbackLauncherFixturePath)
+    }
+}
+
 Write-Host '== Credentials: repository and Android secret boundary =='
 foreach ($ignoreFile in @('.gitignore', '.dockerignore')) {
     $ignoreText = [System.IO.File]::ReadAllText((Join-Path $workspaceRoot $ignoreFile))
@@ -460,7 +580,9 @@ $androidForbiddenSecretIdentifier = @(
             'ALIBABA_CLOUD_ACCESS_KEY_ID',
             'ALIBABA_CLOUD_ACCESS_KEY_SECRET',
             'AUTH_HASH_KEYS_JSON',
-            'AUTH_OTP_PEPPER_KEYS_JSON'
+            'AUTH_OTP_PEPPER_KEYS_JSON',
+            'SUPPORT_FEEDBACK_ENCRYPTION_KEYS_JSON',
+            'SUPPORT_FEEDBACK_HMAC_KEYS_JSON'
         )
 )
 if ($androidForbiddenSecretIdentifier.Count -gt 0) {
@@ -1044,6 +1166,8 @@ try {
                     'ALIBABA_CLOUD_ACCESS_KEY_SECRET',
                     'AUTH_HASH_KEYS_JSON',
                     'AUTH_OTP_PEPPER_KEYS_JSON',
+                    'SUPPORT_FEEDBACK_ENCRYPTION_KEYS_JSON',
+                    'SUPPORT_FEEDBACK_HMAC_KEYS_JSON',
                     '-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----',
                     '\bLTAI[A-Za-z0-9]{16,32}\b',
                     'com[\./]alicom[\./]fusion',
@@ -1239,7 +1363,9 @@ try {
         'com.chishenme.app.MainActivityConfigUnavailableTest',
         'com.chishenme.app.MainActivityRuntimeVersionRaiseTest',
         'com.chishenme.app.MainActivityAuthLocalFixtureTest',
-        'com.chishenme.app.MainActivityAmapLiveFixtureTest'
+        'com.chishenme.app.MainActivityAmapLiveFixtureTest',
+        'com.chishenme.app.MainActivitySupportFeedbackLocalFixtureTest',
+        'com.chishenme.app.MainActivityGroupDecisionLocalFixtureTest'
     )
     Assert-ApkDexClasses -Label 'Alpha' -Path $alphaApkPath -RequiredClasses @(
         'com.chishenme.app.ChiShenMeApplication',

@@ -111,8 +111,14 @@ class MainActivityAmapLiveFixtureTest {
                 .performClick()
 
             awaitText(RESTAURANT_NAME)
+            composeRule.onNodeWithText("本次用餐候选").assertIsDisplayed()
+            assertFalse("实时展示模式不得声称已替用户选定", hasUiText("这顿就吃它"))
             scrollResultsTo(RESTAURANT_NAME)
             composeRule.onNodeWithText(RESTAURANT_NAME).assertIsDisplayed()
+            scrollResultsTo("本次共 1 个候选")
+            composeRule.onNodeWithText("本次共 1 个候选").assertIsDisplayed()
+            assertFalse("实时展示计数不得称为推荐", hasUiText("本次共 1 条推荐"))
+            assertFalse("规则请求不得显示 AI 推荐标记", hasUiText("AI 辅助推荐"))
             scrollResultsTo("高德地图实时数据", substring = true)
             composeRule.onAllNodesWithText("高德地图实时数据", substring = true)[0]
                 .assertIsDisplayed()
@@ -222,7 +228,12 @@ class MainActivityAmapLiveFixtureTest {
           "minimumSupportedVersion":"0.1.1",
           "ruleVersion":"rule-amap-device-fixture-v1",
           "promptVersion":"prompt-disabled",
-          "modelVersion":"rule-amap-device-fixture-v1"
+          "modelVersion":"rule-amap-device-fixture-v1",
+          "serviceCapabilities":{
+            "recommendationsEnabled":true,
+            "locationSearchEnabled":true,
+            "placeSearchEnabled":true
+          }
         }
     """.trimIndent()
 

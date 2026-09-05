@@ -20,6 +20,7 @@ class FeatureConfigServiceCapabilitiesTest {
         assertFalse(capabilities.recommendationsEnabled)
         assertFalse(capabilities.locationSearchEnabled)
         assertFalse(capabilities.placeSearchEnabled)
+        assertFalse(capabilities.groupRecommendationsEnabled)
     }
 
     @Test
@@ -30,6 +31,7 @@ class FeatureConfigServiceCapabilitiesTest {
         assertFalse(capabilities.recommendationsEnabled)
         assertFalse(capabilities.locationSearchEnabled)
         assertFalse(capabilities.placeSearchEnabled)
+        assertFalse(capabilities.groupRecommendationsEnabled)
     }
 
     @Test
@@ -39,7 +41,8 @@ class FeatureConfigServiceCapabilitiesTest {
                 """{
                   "recommendationsEnabled": true,
                   "locationSearchEnabled": false,
-                  "placeSearchEnabled": true
+                  "placeSearchEnabled": true,
+                  "groupRecommendationsEnabled": true
                 }""".trimIndent(),
             ),
         )
@@ -48,6 +51,26 @@ class FeatureConfigServiceCapabilitiesTest {
         assertTrue(capabilities.recommendationsEnabled)
         assertFalse(capabilities.locationSearchEnabled)
         assertTrue(capabilities.placeSearchEnabled)
+        assertTrue(capabilities.groupRecommendationsEnabled)
+    }
+
+    @Test
+    fun `older service object without group field keeps only group closed`() {
+        val config = json.decodeFromString<FeatureConfig>(
+            featureConfigJson(
+                """{
+                  "recommendationsEnabled": true,
+                  "locationSearchEnabled": true,
+                  "placeSearchEnabled": true
+                }""".trimIndent(),
+            ),
+        )
+
+        val capabilities = config.effectiveServiceCapabilities()
+        assertTrue(capabilities.recommendationsEnabled)
+        assertTrue(capabilities.locationSearchEnabled)
+        assertTrue(capabilities.placeSearchEnabled)
+        assertFalse(capabilities.groupRecommendationsEnabled)
     }
 
     private fun featureConfigJson(serviceCapabilities: String?): String {

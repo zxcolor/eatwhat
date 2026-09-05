@@ -113,7 +113,7 @@ describe("AMap LIVE_DISPLAY_ONLY failure boundary", () => {
 				sourceAttribution: "高德地图实时数据",
 				location: expect.objectContaining({ crs: "GCJ02" }),
 			});
-			expect(recommendation.notice).toContain("不保存外部餐厅数据");
+			expect(recommendation.notice).toContain("不保存外部餐饮地点数据");
 
 			const eventResponse = await fetch(`${baseUrl}/v1/recommendation-events`, {
 				method: "POST",

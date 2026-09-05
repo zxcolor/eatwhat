@@ -289,7 +289,7 @@ Key 能返回数据不等于数据使用和商业授权已经完整解决；自�
 - 宝塔 Nginx 配置检查和 reload 成功，HTTPS 证书有效；
 - 公网只暴露预期的 80/443，SSH 按管理策略限制来源；
 - `/health`、`/health/ready` 与 `/v1/config` 正常，最低版本门禁符合 Alpha；
-- `AMAP_ENABLED=true` 时真实地点搜索与推荐已通过；详情和“换一批”仍待专项验收；
+- `AMAP_ENABLED=true` 时真实地点搜索与推荐已通过；详情和“按相同条件重新请求（结果可能相同）”仍待专项验收；
 - `ALLOW_DEMO_DATA=false`，生产响应不出现 DEMO 来源；
 - `LIVE_DISPLAY_ONLY` 不产生自有评分或重排；
 - 高德凭据、坐标和完整供应商请求 URL 不进入日志；

@@ -1,8 +1,9 @@
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import type {
-	PlaceSearchRequest,
-	RecommendationContext,
+import {
+	DEFAULT_RECOMMENDATION_PREFERENCE_VECTOR,
+	type PlaceSearchRequest,
+	type RecommendationContext,
 } from "@chi-shen-me/contracts";
 import { loadAppConfig } from "./config/app-config.js";
 import { LocationSearchProviderUnavailableError } from "./location-search/location-search.provider.js";
@@ -10,6 +11,7 @@ import { AmapLocationSearchProvider } from "./location-search/providers/amap-loc
 import { PlaceKeywordSearchProviderUnavailableError } from "./place-search/place-keyword-search.provider.js";
 import { AmapPlaceKeywordSearchProvider } from "./place-search/providers/amap-place-keyword-search.provider.js";
 import { getAmapFailureDiagnostic } from "./providers/amap-response-status.js";
+import { buildRecommendationQueryPlan } from "./recommendations/domain/recommendation-query-plan.js";
 import {
 	AmapPlaceProvider,
 	PlaceProviderUnavailableError,
@@ -60,6 +62,8 @@ const recommendationContext: RecommendationContext = Object.freeze({
 		crs: "GCJ02" as const,
 	}),
 	mealPeriod: "LUNCH" as const,
+	target: "MEAL" as const,
+	weatherContext: Object.freeze({ kind: "NONE" as const }),
 	decisionMode: "QUICK" as const,
 	travelMode: "WALK" as const,
 	explorationMode: "BALANCED" as const,
@@ -70,6 +74,7 @@ const recommendationContext: RecommendationContext = Object.freeze({
 	partySize: 1,
 	excludedCuisines: [],
 	preferredCuisines: [],
+	preferenceVector: { ...DEFAULT_RECOMMENDATION_PREFERENCE_VECTOR },
 });
 
 const placeSearchRequest: PlaceSearchRequest = Object.freeze({
@@ -260,7 +265,7 @@ export async function runAmapLiveSmoke(
 			async (fetchImpl) =>
 				await new AmapPlaceProvider(config, fetchImpl).search(
 					recommendationContext,
-					["午餐"],
+					buildRecommendationQueryPlan(recommendationContext),
 				),
 		),
 	);

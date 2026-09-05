@@ -16,6 +16,7 @@ import com.chishenme.app.data.remote.FeatureConfig
 import com.chishenme.app.data.remote.LocationSearchApi
 import com.chishenme.app.data.remote.LocationSearchRequest
 import com.chishenme.app.data.remote.LocationSearchResponse
+import com.chishenme.app.data.remote.MealPeriod
 import com.chishenme.app.data.remote.OpenStatus
 import com.chishenme.app.data.remote.RecommendationApi
 import com.chishenme.app.data.remote.RecommendationActions
@@ -23,10 +24,20 @@ import com.chishenme.app.data.remote.RecommendationContext
 import com.chishenme.app.data.remote.RecommendationDataMode
 import com.chishenme.app.data.remote.RecommendationEvent
 import com.chishenme.app.data.remote.RecommendationReason
+import com.chishenme.app.data.remote.RecommendationProfile
+import com.chishenme.app.data.remote.RecommendationProfileFamily
 import com.chishenme.app.data.remote.RecommendationResponse
 import com.chishenme.app.data.remote.RecommendationResult
+import com.chishenme.app.data.remote.RecommendationTarget
 import com.chishenme.app.data.remote.ReasonCode
 import com.chishenme.app.data.remote.ServiceCapabilities
+import com.chishenme.app.data.remote.SpecialtyCapabilities
+import com.chishenme.app.data.remote.UserReportedWeatherPreference
+import com.chishenme.app.data.remote.WeatherApplication
+import com.chishenme.app.data.remote.WeatherApplicationKind
+import com.chishenme.app.data.remote.WeatherContextKind
+import com.chishenme.app.data.remote.WeatherContextRequest
+import com.chishenme.app.data.remote.WeatherQueryModifier
 import com.chishenme.app.domain.BuiltInQuickLocations
 import com.chishenme.app.feature.config.RemoteFeatureConfigState
 import com.chishenme.app.feature.config.RuntimeAppVersionGate
@@ -59,6 +70,197 @@ import retrofit2.Response
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class DecisionFeatureConfigRefreshLifecycleTest {
+    @Test
+    fun `missing specialty capability object keeps every post baseline setter closed`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val api = SpecialtyRecommendationApi(currentFeatureConfig())
+            val viewModel = viewModel(api)
+            viewModel.startConsentSession()
+            advanceUntilIdle()
+
+            viewModel.setMealPeriod(com.chishenme.app.data.remote.MealPeriod.BREAKFAST)
+            viewModel.setRecommendationTarget(RecommendationTarget.COFFEE)
+            viewModel.setUserReportedWeather(UserReportedWeatherPreference.WARMING)
+
+            val input = viewModel.uiState.value.input
+            assertEquals(com.chishenme.app.data.remote.MealPeriod.LUNCH, input.mealPeriod)
+            assertEquals(RecommendationTarget.MEAL, input.target)
+            assertEquals(WeatherContextRequest.None, input.weatherContext)
+            assertEquals(0, api.recommendCalls)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `trusted specialty config permits bounded request and refresh revokes the draft`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val api = SpecialtyRecommendationApi(
+                currentFeatureConfig().copy(
+                    specialtyCapabilities = SpecialtyCapabilities(
+                        breakfastProfileEnabled = true,
+                        dinnerProfileEnabled = true,
+                        milkTeaEnabled = true,
+                        coffeeEnabled = true,
+                        dessertEnabled = true,
+                        userReportedWeatherEnabled = true,
+                    ),
+                ),
+            )
+            val viewModel = viewModel(api)
+            viewModel.startConsentSession()
+            advanceUntilIdle()
+            viewModel.setLocation(BuiltInQuickLocations.choices.first())
+            viewModel.setMealPeriod(com.chishenme.app.data.remote.MealPeriod.DINNER)
+            viewModel.setRecommendationTarget(RecommendationTarget.COFFEE)
+            viewModel.setUserReportedWeather(UserReportedWeatherPreference.WARMING)
+
+            assertTrue(viewModel.recommend())
+            advanceUntilIdle()
+
+            assertEquals(1, api.recommendCalls)
+            val request = requireNotNull(api.lastRecommendation)
+            assertEquals(com.chishenme.app.data.remote.MealPeriod.DINNER, request.mealPeriod)
+            assertEquals(RecommendationTarget.COFFEE, request.target)
+            assertEquals(UserReportedWeatherPreference.WARMING, request.weatherContext.preference)
+            assertFalse(request.aiAssistanceEnabled)
+            assertTrue(viewModel.uiState.value.loadState is RecommendationLoadState.Ready)
+
+            viewModel.startConsentSession()
+
+            val reset = viewModel.uiState.value.input
+            assertEquals(com.chishenme.app.data.remote.MealPeriod.LUNCH, reset.mealPeriod)
+            assertEquals(RecommendationTarget.MEAL, reset.target)
+            assertEquals(WeatherContextRequest.None, reset.weatherContext)
+            assertEquals(RecommendationLoadState.Idle, viewModel.uiState.value.loadState)
+
+            advanceUntilIdle()
+            viewModel.retry()
+            advanceUntilIdle()
+
+            assertEquals(2, api.recommendCalls)
+            val retried = requireNotNull(api.lastRecommendation)
+            assertEquals(MealPeriod.LUNCH, retried.mealPeriod)
+            assertEquals(RecommendationTarget.MEAL, retried.target)
+            assertEquals(WeatherContextRequest.None, retried.weatherContext)
+        } finally {
+            advanceUntilIdle()
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `each vertical capability authorizes only its matching target`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val cases = listOf(
+                Triple(RecommendationTarget.MILK_TEA, RecommendationTarget.COFFEE, "milkTeaEnabled"),
+                Triple(RecommendationTarget.COFFEE, RecommendationTarget.DESSERT, "coffeeEnabled"),
+                Triple(RecommendationTarget.DESSERT, RecommendationTarget.MILK_TEA, "dessertEnabled"),
+            )
+            for ((enabledTarget, blockedTarget, field) in cases) {
+                val capabilities = when (field) {
+                    "milkTeaEnabled" -> SpecialtyCapabilities.Disabled.copy(milkTeaEnabled = true)
+                    "coffeeEnabled" -> SpecialtyCapabilities.Disabled.copy(coffeeEnabled = true)
+                    "dessertEnabled" -> SpecialtyCapabilities.Disabled.copy(dessertEnabled = true)
+                    else -> error("unknown target capability")
+                }
+                val api = SpecialtyRecommendationApi(
+                    currentFeatureConfig().copy(specialtyCapabilities = capabilities),
+                )
+                val viewModel = viewModel(api)
+                viewModel.startConsentSession()
+                advanceUntilIdle()
+
+                viewModel.setRecommendationTarget(blockedTarget)
+                assertEquals(RecommendationTarget.MEAL, viewModel.uiState.value.input.target)
+                viewModel.setRecommendationTarget(enabledTarget)
+                assertEquals(enabledTarget, viewModel.uiState.value.input.target)
+                viewModel.setLocation(BuiltInQuickLocations.choices.first())
+                assertTrue(viewModel.recommend())
+                advanceUntilIdle()
+
+                assertEquals(1, api.recommendCalls)
+                assertEquals(enabledTarget, requireNotNull(api.lastRecommendation).target)
+            }
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `breakfast and dinner capabilities are independently gated`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            for ((enabledPeriod, blockedPeriod, capabilities) in listOf(
+                Triple(
+                    MealPeriod.BREAKFAST,
+                    MealPeriod.DINNER,
+                    SpecialtyCapabilities.Disabled.copy(breakfastProfileEnabled = true),
+                ),
+                Triple(
+                    MealPeriod.DINNER,
+                    MealPeriod.BREAKFAST,
+                    SpecialtyCapabilities.Disabled.copy(dinnerProfileEnabled = true),
+                ),
+            )) {
+                val api = SpecialtyRecommendationApi(
+                    currentFeatureConfig().copy(specialtyCapabilities = capabilities),
+                )
+                val viewModel = viewModel(api)
+                viewModel.startConsentSession()
+                advanceUntilIdle()
+
+                viewModel.setMealPeriod(blockedPeriod)
+                assertEquals(MealPeriod.LUNCH, viewModel.uiState.value.input.mealPeriod)
+                viewModel.setMealPeriod(enabledPeriod)
+                assertEquals(enabledPeriod, viewModel.uiState.value.input.mealPeriod)
+                viewModel.setLocation(BuiltInQuickLocations.choices.first())
+                assertTrue(viewModel.recommend())
+                advanceUntilIdle()
+
+                assertEquals(1, api.recommendCalls)
+                assertEquals(enabledPeriod, requireNotNull(api.lastRecommendation).mealPeriod)
+            }
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `weather capability accepts each bounded preference without opening target gates`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val api = SpecialtyRecommendationApi(
+                currentFeatureConfig().copy(
+                    specialtyCapabilities = SpecialtyCapabilities.Disabled.copy(
+                        userReportedWeatherEnabled = true,
+                    ),
+                ),
+            )
+            val viewModel = viewModel(api)
+            viewModel.startConsentSession()
+            advanceUntilIdle()
+            viewModel.setRecommendationTarget(RecommendationTarget.COFFEE)
+            assertEquals(RecommendationTarget.MEAL, viewModel.uiState.value.input.target)
+            viewModel.setLocation(BuiltInQuickLocations.choices.first())
+
+            for (preference in UserReportedWeatherPreference.entries) {
+                viewModel.setUserReportedWeather(preference)
+                assertEquals(preference, viewModel.uiState.value.input.weatherContext.preference)
+                assertTrue(viewModel.recommend())
+                advanceUntilIdle()
+                assertEquals(preference, requireNotNull(api.lastRecommendation).weatherContext.preference)
+            }
+
+            assertEquals(UserReportedWeatherPreference.entries.size, api.recommendCalls)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
     @Test
     fun `closed recommendation capability blocks transport after trusted config`() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
@@ -515,6 +717,83 @@ private class ImmediateRecommendationApi : RecommendationApi {
     }
 }
 
+private class SpecialtyRecommendationApi(
+    private val config: FeatureConfig,
+) : RecommendationApi {
+    var recommendCalls = 0
+    var lastRecommendation: RecommendationContext? = null
+
+    override suspend fun featureConfig(): FeatureConfig = config
+
+    override suspend fun recommend(context: RecommendationContext): RecommendationResponse {
+        recommendCalls += 1
+        lastRecommendation = context
+        val profile = when (context.target) {
+            RecommendationTarget.MEAL -> RecommendationProfile(
+                target = RecommendationTarget.MEAL,
+                family = when (context.mealPeriod) {
+                    com.chishenme.app.data.remote.MealPeriod.BREAKFAST ->
+                        RecommendationProfileFamily.MEAL_BREAKFAST
+                    com.chishenme.app.data.remote.MealPeriod.LUNCH ->
+                        RecommendationProfileFamily.MEAL_LUNCH
+                    com.chishenme.app.data.remote.MealPeriod.DINNER ->
+                        RecommendationProfileFamily.MEAL_DINNER
+                },
+                version = when (context.mealPeriod) {
+                    com.chishenme.app.data.remote.MealPeriod.BREAKFAST -> "meal-breakfast-v1"
+                    com.chishenme.app.data.remote.MealPeriod.LUNCH -> "meal-lunch-v1"
+                    com.chishenme.app.data.remote.MealPeriod.DINNER -> "meal-dinner-v1"
+                },
+                providerCapabilityRequired = false,
+            )
+            RecommendationTarget.MILK_TEA -> RecommendationProfile(
+                target = RecommendationTarget.MILK_TEA,
+                family = RecommendationProfileFamily.MILK_TEA,
+                version = "milk-tea-v1",
+                providerCapabilityRequired = true,
+            )
+            RecommendationTarget.COFFEE -> RecommendationProfile(
+                target = RecommendationTarget.COFFEE,
+                family = RecommendationProfileFamily.COFFEE,
+                version = "coffee-v1",
+                providerCapabilityRequired = true,
+            )
+            RecommendationTarget.DESSERT -> RecommendationProfile(
+                target = RecommendationTarget.DESSERT,
+                family = RecommendationProfileFamily.DESSERT,
+                version = "dessert-v1",
+                providerCapabilityRequired = true,
+            )
+        }
+        val weather = when (context.weatherContext.kind) {
+            WeatherContextKind.NONE -> WeatherApplication.None
+            WeatherContextKind.USER_REPORTED -> {
+                val preference = requireNotNull(context.weatherContext.preference)
+                WeatherApplication(
+                    kind = WeatherApplicationKind.USER_REPORTED,
+                    version = "user-reported-weather-v1",
+                    preference = preference,
+                    queryModifier = when (preference) {
+                        UserReportedWeatherPreference.MINIMIZE_EXPOSURE ->
+                            WeatherQueryModifier.MINIMIZE_OUTDOOR_EXPOSURE
+                        UserReportedWeatherPreference.WARMING ->
+                            WeatherQueryModifier.PREFER_WARMING_OPTIONS
+                        UserReportedWeatherPreference.COOLING ->
+                            WeatherQueryModifier.PREFER_COOLING_OPTIONS
+                    },
+                )
+            }
+        }
+        return currentRecommendationResponse().copy(
+            profile = profile,
+            weatherApplication = weather,
+        )
+    }
+
+    override suspend fun recordEvent(event: RecommendationEvent): Response<Unit> =
+        Response.success(Unit)
+}
+
 private class LateRecommendationApi : RecommendationApi {
     val recommendationStarted = CompletableDeferred<Unit>()
     private var recommendationContinuation: Continuation<RecommendationResponse>? = null
@@ -638,7 +917,7 @@ private fun currentRecommendationResponse() = RecommendationResponse(
     ruleVersion = "rule-v1",
     promptVersion = "prompt-v1",
     modelVersion = "rule-fallback",
-    aiFallbackUsed = true,
+    aiFallbackUsed = false,
     results = listOf(
         RecommendationResult(
             provider = "DEMO",

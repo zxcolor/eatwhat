@@ -69,6 +69,7 @@ describe("public readiness failure boundary", () => {
 		expect(body).toMatchObject({
 			serviceCapabilities: {
 				recommendationsEnabled: false,
+				groupRecommendationsEnabled: false,
 				locationSearchEnabled: false,
 				placeSearchEnabled: false,
 			},

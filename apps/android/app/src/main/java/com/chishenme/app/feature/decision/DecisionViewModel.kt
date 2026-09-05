@@ -21,15 +21,21 @@ import com.chishenme.app.data.remote.RecommendationEventType
 import com.chishenme.app.data.remote.RecommendationContext
 import com.chishenme.app.data.remote.RecommendationResponse
 import com.chishenme.app.data.remote.RecommendationResult
+import com.chishenme.app.data.remote.RecommendationTarget
 import com.chishenme.app.data.remote.TravelMode
+import com.chishenme.app.data.remote.UserReportedWeatherPreference
+import com.chishenme.app.data.remote.WeatherContextKind
+import com.chishenme.app.data.remote.WeatherContextRequest
 import com.chishenme.app.data.remote.effectiveServiceCapabilities
+import com.chishenme.app.data.remote.effectiveSpecialtyCapabilities
 import com.chishenme.app.domain.DecisionInput
 import com.chishenme.app.domain.DecisionInputValidator
+import com.chishenme.app.domain.DecisionScenario
 import com.chishenme.app.domain.InputValidation
 import com.chishenme.app.domain.LocationChoice
 import com.chishenme.app.domain.LocationSearchSelectionMapper
-import com.chishenme.app.domain.MealPeriodResolver
 import com.chishenme.app.domain.RecommendationRequestFactory
+import com.chishenme.app.domain.applyScenario
 import com.chishenme.app.feature.config.RemoteFeatureConfigState
 import com.chishenme.app.feature.config.RuntimeAppVersionGate
 import com.chishenme.app.feature.config.configOrNull
@@ -93,6 +99,7 @@ sealed interface LocationSearchUiState {
 
 data class DecisionUiState(
     val input: DecisionInput = defaultDecisionInput(),
+    val activeScenario: DecisionScenario? = null,
     val loadState: RecommendationLoadState = RecommendationLoadState.Idle,
     val formError: String? = null,
     val transientMessage: String? = null,
@@ -116,7 +123,11 @@ internal fun DecisionUiState.afterLocationRequestCancellation(): DecisionUiState
 
 private fun defaultDecisionInput() = DecisionInput(
     location = null,
-    mealPeriod = MealPeriodResolver.current(),
+    // Breakfast and dinner now use separately versioned server profiles. Until
+    // a trusted config explicitly enables them, start from the lunch baseline.
+    mealPeriod = MealPeriod.LUNCH,
+    target = RecommendationTarget.MEAL,
+    weatherContext = WeatherContextRequest.None,
     decisionMode = DecisionMode.QUICK,
     travelMode = TravelMode.WALK,
     explorationMode = ExplorationMode.BALANCED,
@@ -171,12 +182,18 @@ class DecisionViewModel @Inject constructor(
         locationSearchJob?.cancel()
         locationSearchJob = null
         selectedResultToken = null
+        lastSubmittedInput = null
         // A foreground refresh must revoke every remotely controlled capability
         // and every response issued under the prior configuration before network
-        // work begins. The decision form stays intact, so a new guest decision
-        // remains available even when the refresh later fails closed.
+        // work begins. Baseline location/budget constraints stay intact, while
+        // versioned meal/target/weather fields reset until new authority arrives.
         _uiState.update {
             it.copy(
+                input = it.input.copy(
+                    mealPeriod = MealPeriod.LUNCH,
+                    target = RecommendationTarget.MEAL,
+                    weatherContext = WeatherContextRequest.None,
+                ),
                 loadState = RecommendationLoadState.Idle,
                 remoteFeatureConfig = RemoteFeatureConfigState.Loading(generation),
                 locationChooserOpen = false,
@@ -263,13 +280,74 @@ class DecisionViewModel @Inject constructor(
 
     fun setDecisionMode(value: DecisionMode) = updateInput { copy(decisionMode = value) }
 
-    fun setMealPeriod(value: MealPeriod) = updateInput {
+    fun applyScenario(value: DecisionScenario) {
+        _uiState.update { state ->
+            state.copy(
+                input = state.input.applyScenario(value),
+                activeScenario = value,
+                formError = null,
+            )
+        }
+    }
+
+    fun setMealPeriod(value: MealPeriod) {
+        val enabled = when (value) {
+            MealPeriod.LUNCH -> true
+            MealPeriod.BREAKFAST ->
+                trustedSpecialtyCapabilities()?.breakfastProfileEnabled == true
+            MealPeriod.DINNER ->
+                trustedSpecialtyCapabilities()?.dinnerProfileEnabled == true
+        }
+        if (!enabled) {
+            _uiState.update {
+                it.copy(formError = "该餐段专项当前未开放，请先选择午餐")
+            }
+            return
+        }
+        updateInput {
         val defaultRadius = when (value) {
             MealPeriod.BREAKFAST -> 1_000
             MealPeriod.LUNCH -> 1_500
             MealPeriod.DINNER -> 3_000
         }
         copy(mealPeriod = value, radiusMeters = defaultRadius)
+        }
+    }
+
+    fun setRecommendationTarget(value: RecommendationTarget) {
+        if (value == RecommendationTarget.MEAL) {
+            updateInput { copy(target = value) }
+            return
+        }
+        val enabled = trustedSpecialtyCapabilities()?.enables(value) == true
+        if (!enabled) {
+            _uiState.update {
+                it.copy(formError = "该专项推荐当前未开放，请先使用普通用餐模式")
+            }
+            return
+        }
+        updateInput { copy(target = value) }
+    }
+
+    fun setUserReportedWeather(value: UserReportedWeatherPreference?) {
+        if (value == null) {
+            updateInput { copy(weatherContext = WeatherContextRequest.None) }
+            return
+        }
+        if (trustedSpecialtyCapabilities()?.userReportedWeatherEnabled != true) {
+            _uiState.update {
+                it.copy(formError = "手动体感推荐当前未开放")
+            }
+            return
+        }
+        updateInput {
+            copy(
+                weatherContext = WeatherContextRequest(
+                    kind = WeatherContextKind.USER_REPORTED,
+                    preference = value,
+                ),
+            )
+        }
     }
 
     fun setBudget(value: Int?) = updateInput { copy(budgetMaxYuan = value) }
@@ -572,6 +650,15 @@ class DecisionViewModel @Inject constructor(
             }
             return false
         }
+        if (!specialtyInputAuthorized(input, accessLease.trustedCompatibleConfiguration)) {
+            _uiState.update {
+                it.copy(
+                    loadState = RecommendationLoadState.Idle,
+                    formError = "专项推荐能力已关闭，请重新选择普通用餐模式",
+                )
+            }
+            return false
+        }
         val generation = ++recommendationGeneration
         val requestConfigurationGeneration = accessLease.configurationGeneration
         recommendationJob?.cancel()
@@ -580,7 +667,8 @@ class DecisionViewModel @Inject constructor(
         recommendationJob = viewModelScope.launch {
             val aiAssistanceEnabled =
                 preferences.aiAssistanceEnabled.first() && _uiState.value.featureConfig?.aiEnabled == true
-            val request = requestFactory.create(input, aiAssistanceEnabled)
+            val preferenceVector = preferences.recommendationPreferenceVector.first()
+            val request = requestFactory.create(input, aiAssistanceEnabled, preferenceVector)
             when (val outcome = repository.recommend(request)) {
                 is RecommendationOutcome.Success -> {
                     currentCoroutineContext().ensureActive()
@@ -688,12 +776,46 @@ class DecisionViewModel @Inject constructor(
     }
 
     private fun updateInput(transform: DecisionInput.() -> DecisionInput) {
-        _uiState.update { state -> state.copy(input = state.input.transform(), formError = null) }
+        _uiState.update { state ->
+            state.copy(
+                input = state.input.transform(),
+                activeScenario = null,
+                formError = null,
+            )
+        }
     }
 
     private fun currentRemoteAccessLease(): RuntimeAppVersionGate.RemoteAccessLease? {
         val ready = _uiState.value.remoteFeatureConfig as? RemoteFeatureConfigState.Ready ?: return null
         return runtimeAppVersionGate.acquireRemoteAccessLease(ready.generation)
+    }
+
+    private fun trustedSpecialtyCapabilities() =
+        (_uiState.value.remoteFeatureConfig as? RemoteFeatureConfigState.Ready)
+            ?.takeIf { ready ->
+                runtimeAppVersionGate.acquireRemoteAccessLease(ready.generation) != null
+            }
+            ?.config
+            ?.effectiveSpecialtyCapabilities()
+
+    private fun specialtyInputAuthorized(
+        input: DecisionInput,
+        trustedCompatibleConfiguration: Boolean,
+    ): Boolean {
+        val usesSpecialtyTarget = input.target != RecommendationTarget.MEAL
+        val usesSpecialtyMealProfile = input.mealPeriod != MealPeriod.LUNCH
+        val usesUserReportedWeather = input.weatherContext.kind == WeatherContextKind.USER_REPORTED
+        if (!usesSpecialtyTarget && !usesSpecialtyMealProfile && !usesUserReportedWeather) return true
+        if (!trustedCompatibleConfiguration) return false
+        val capabilities = trustedSpecialtyCapabilities() ?: return false
+        val mealProfileEnabled = when (input.mealPeriod) {
+            MealPeriod.BREAKFAST -> capabilities.breakfastProfileEnabled
+            MealPeriod.LUNCH -> true
+            MealPeriod.DINNER -> capabilities.dinnerProfileEnabled
+        }
+        return mealProfileEnabled &&
+            capabilities.enables(input.target) &&
+            (!usesUserReportedWeather || capabilities.userReportedWeatherEnabled)
     }
 
     private fun recommendationAccessIsCurrent(

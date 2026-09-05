@@ -3,6 +3,7 @@ package com.chishenme.app.feature.results
 import com.chishenme.app.data.remote.Confidence
 import com.chishenme.app.data.remote.Coordinate
 import com.chishenme.app.data.remote.CoordinateReferenceSystem
+import com.chishenme.app.data.remote.DataRightsMode
 import com.chishenme.app.data.remote.DecisionMode
 import com.chishenme.app.data.remote.ExplorationMode
 import com.chishenme.app.data.remote.MealPeriod
@@ -57,7 +58,10 @@ class NearbyOrientationProjectionTest {
         assertTrue(projection.originUsable)
         assertTrue(projection.points.isEmpty())
         assertEquals(3, projection.skippedCount)
-        assertTrue(projection.accessibilitySummary().contains("列表仍可使用"))
+        assertTrue(
+            projection.accessibilitySummary(DataRightsMode.LIVE_DISPLAY_ONLY)
+                .contains("列表仍可使用"),
+        )
     }
 
     @Test
@@ -101,8 +105,11 @@ class NearbyOrientationProjectionTest {
                 ),
             ),
         )
-        val outboundText = projection.toString() + projection.accessibilitySummary() +
-            projection.points.joinToString { it.accessibilityDescription() }
+        val outboundText = projection.toString() +
+            projection.accessibilitySummary(DataRightsMode.LICENSED_ENRICHMENT) +
+            projection.points.joinToString {
+                it.accessibilityDescription(DataRightsMode.LICENSED_ENRICHMENT)
+            }
 
         assertFalse(outboundText.contains(token))
         assertFalse(outboundText.contains(latitude.toString()))
@@ -110,6 +117,25 @@ class NearbyOrientationProjectionTest {
         assertFalse(outboundText.contains("WGS84"))
         assertFalse(outboundText.contains("resultToken"))
         assertTrue(outboundText.contains("第 1 名"))
+    }
+
+    @Test
+    fun liveDisplayAccessibilityDescribesProviderOrderWithoutRankingClaims() {
+        val projection = NearbyOrientationProjector.project(
+            context(CoordinateReferenceSystem.WGS84),
+            listOf(
+                result(1, Coordinate(39.901, 116.4, crs = CoordinateReferenceSystem.WGS84)),
+                result(2, Coordinate(39.902, 116.4, crs = CoordinateReferenceSystem.WGS84)),
+            ),
+        )
+
+        val summary = projection.accessibilitySummary(DataRightsMode.LIVE_DISPLAY_ONLY)
+
+        assertTrue(summary.contains("数据源顺序第 1 个，首个候选"))
+        assertTrue(summary.contains("数据源顺序第 2 个，其他候选"))
+        assertFalse(summary.contains("主推荐"))
+        assertFalse(summary.contains("备选"))
+        assertFalse(summary.contains("第 1 名"))
     }
 
     @Test
@@ -125,8 +151,9 @@ class NearbyOrientationProjectionTest {
         assertFalse(projection.originUsable)
         assertTrue(projection.points.isEmpty())
         assertEquals(1, projection.skippedCount)
-        assertTrue(projection.accessibilitySummary().contains("起点信息异常"))
-        assertFalse(projection.accessibilitySummary().contains("95.0"))
+        val summary = projection.accessibilitySummary(DataRightsMode.LIVE_DISPLAY_ONLY)
+        assertTrue(summary.contains("起点信息异常"))
+        assertFalse(summary.contains("95.0"))
     }
 
     private fun context(

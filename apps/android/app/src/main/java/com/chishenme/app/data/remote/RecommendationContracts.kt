@@ -6,6 +6,32 @@ import kotlinx.serialization.Serializable
 enum class MealPeriod { BREAKFAST, LUNCH, DINNER }
 
 @Serializable
+enum class RecommendationTarget { MEAL, MILK_TEA, COFFEE, DESSERT }
+
+@Serializable
+enum class WeatherContextKind { NONE, USER_REPORTED }
+
+@Serializable
+enum class UserReportedWeatherPreference { MINIMIZE_EXPOSURE, WARMING, COOLING }
+
+@Serializable
+data class WeatherContextRequest(
+    val kind: WeatherContextKind = WeatherContextKind.NONE,
+    val preference: UserReportedWeatherPreference? = null,
+) {
+    init {
+        require(
+            (kind == WeatherContextKind.NONE && preference == null) ||
+                (kind == WeatherContextKind.USER_REPORTED && preference != null),
+        ) { "User-reported weather requires exactly one bounded preference" }
+    }
+
+    companion object {
+        val None = WeatherContextRequest()
+    }
+}
+
+@Serializable
 enum class DecisionMode { QUICK, GUIDED }
 
 @Serializable
@@ -58,11 +84,37 @@ data class Coordinate(
     val crs: CoordinateReferenceSystem,
 )
 
+/**
+ * Local user controls for the existing transparent score dimensions.
+ * Values are percentages: 100 preserves the established contribution and 0
+ * ignores that soft-score dimension. They never weaken hard safety filters.
+ */
+@Serializable
+data class RecommendationPreferenceVector(
+    val quality: Int = 100,
+    val time: Int = 100,
+    val budget: Int = 100,
+    val mealMatch: Int = 100,
+    val diversity: Int = 100,
+) {
+    init {
+        require(listOf(quality, time, budget, mealMatch, diversity).all { it in 0..100 }) {
+            "Recommendation preference weights must be between 0 and 100"
+        }
+    }
+
+    companion object {
+        val Default = RecommendationPreferenceVector()
+    }
+}
+
 @Serializable
 data class RecommendationContext(
     val location: Coordinate,
     val locationLabel: String? = null,
     val mealPeriod: MealPeriod,
+    val target: RecommendationTarget = RecommendationTarget.MEAL,
+    val weatherContext: WeatherContextRequest = WeatherContextRequest.None,
     val decisionMode: DecisionMode = DecisionMode.QUICK,
     val travelMode: TravelMode = TravelMode.WALK,
     val explorationMode: ExplorationMode = ExplorationMode.BALANCED,
@@ -73,6 +125,7 @@ data class RecommendationContext(
     val partySize: Int = 1,
     val excludedCuisines: List<String> = emptyList(),
     val preferredCuisines: List<String> = emptyList(),
+    val preferenceVector: RecommendationPreferenceVector = RecommendationPreferenceVector.Default,
     val requestTime: String? = null,
 )
 
@@ -90,6 +143,60 @@ enum class ReasonCode {
     MEAL_FIT,
     QUALITY_SIGNAL,
     DIVERSITY,
+}
+
+@Serializable
+enum class RecommendationProfileFamily {
+    MEAL_LEGACY,
+    MEAL_BREAKFAST,
+    MEAL_LUNCH,
+    MEAL_DINNER,
+    MILK_TEA,
+    COFFEE,
+    DESSERT,
+}
+
+@Serializable
+data class RecommendationProfile(
+    val target: RecommendationTarget,
+    val family: RecommendationProfileFamily,
+    val version: String,
+    val providerCapabilityRequired: Boolean,
+) {
+    companion object {
+        val Legacy = RecommendationProfile(
+            target = RecommendationTarget.MEAL,
+            family = RecommendationProfileFamily.MEAL_LEGACY,
+            version = "meal-legacy-v1",
+            providerCapabilityRequired = false,
+        )
+    }
+}
+
+@Serializable
+enum class WeatherApplicationKind { NONE, USER_REPORTED }
+
+@Serializable
+enum class WeatherQueryModifier {
+    MINIMIZE_OUTDOOR_EXPOSURE,
+    PREFER_WARMING_OPTIONS,
+    PREFER_COOLING_OPTIONS,
+}
+
+@Serializable
+data class WeatherApplication(
+    val kind: WeatherApplicationKind,
+    val version: String,
+    val preference: UserReportedWeatherPreference? = null,
+    val queryModifier: WeatherQueryModifier?,
+) {
+    companion object {
+        val None = WeatherApplication(
+            kind = WeatherApplicationKind.NONE,
+            version = "weather-none-v1",
+            queryModifier = null,
+        )
+    }
 }
 
 @Serializable
@@ -133,6 +240,10 @@ data class RecommendationResponse(
     val promptVersion: String,
     val modelVersion: String,
     val aiFallbackUsed: Boolean,
+    /** Missing on an older v1 response is parsed only as the legacy meal profile. */
+    val profile: RecommendationProfile = RecommendationProfile.Legacy,
+    /** Missing on an older v1 response is parsed only as no weather application. */
+    val weatherApplication: WeatherApplication = WeatherApplication.None,
     val results: List<RecommendationResult>,
     val notice: String?,
 )
@@ -173,13 +284,45 @@ data class FeatureConfig(
     /** Missing on older v1 services means every persistence capability is disabled. */
     val persistenceCapabilities: PersistenceCapabilities? = null,
     val authCapabilities: AuthCapabilities? = null,
+    /** Missing as a whole means every post-1.1 target/profile capability is disabled. */
+    val specialtyCapabilities: SpecialtyCapabilities? = null,
 )
+
+@Serializable
+data class SpecialtyCapabilities(
+    val breakfastProfileEnabled: Boolean,
+    val dinnerProfileEnabled: Boolean,
+    val milkTeaEnabled: Boolean,
+    val coffeeEnabled: Boolean,
+    val dessertEnabled: Boolean,
+    val userReportedWeatherEnabled: Boolean,
+) {
+    companion object {
+        val Disabled = SpecialtyCapabilities(
+            breakfastProfileEnabled = false,
+            dinnerProfileEnabled = false,
+            milkTeaEnabled = false,
+            coffeeEnabled = false,
+            dessertEnabled = false,
+            userReportedWeatherEnabled = false,
+        )
+    }
+
+    fun enables(target: RecommendationTarget): Boolean = when (target) {
+        RecommendationTarget.MEAL -> true
+        RecommendationTarget.MILK_TEA -> milkTeaEnabled
+        RecommendationTarget.COFFEE -> coffeeEnabled
+        RecommendationTarget.DESSERT -> dessertEnabled
+    }
+}
 
 @Serializable
 data class ServiceCapabilities(
     val recommendationsEnabled: Boolean = false,
     val locationSearchEnabled: Boolean = false,
     val placeSearchEnabled: Boolean = false,
+    /** Missing on older v1 config responses keeps the 2.x group path closed. */
+    val groupRecommendationsEnabled: Boolean = false,
 ) {
     companion object {
         val Disabled = ServiceCapabilities()
@@ -191,3 +334,10 @@ fun FeatureConfig.effectiveServiceCapabilities(): ServiceCapabilities =
 
 fun FeatureConfig.effectivePersistenceCapabilities(): PersistenceCapabilities =
     persistenceCapabilities ?: PersistenceCapabilities.Disabled
+
+fun FeatureConfig.effectiveSpecialtyCapabilities(): SpecialtyCapabilities =
+    if (effectiveServiceCapabilities().recommendationsEnabled) {
+        specialtyCapabilities ?: SpecialtyCapabilities.Disabled
+    } else {
+        SpecialtyCapabilities.Disabled
+    }

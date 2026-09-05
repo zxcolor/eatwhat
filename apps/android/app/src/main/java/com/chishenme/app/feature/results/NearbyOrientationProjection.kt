@@ -1,6 +1,7 @@
 package com.chishenme.app.feature.results
 
 import com.chishenme.app.data.remote.Coordinate
+import com.chishenme.app.data.remote.DataRightsMode
 import com.chishenme.app.data.remote.RecommendationContext
 import com.chishenme.app.data.remote.RecommendationResult
 import com.chishenme.app.domain.CoordinateCrsTransform
@@ -37,10 +38,16 @@ internal data class NearbyOrientationPoint(
     val direction: NearbyDirection,
     val collisionOffsetApplied: Boolean,
 ) {
-    fun accessibilityDescription(): String {
-        val role = if (isPrimary) "主推荐" else "备选"
-        return "第 " + rank + " 名，" + role + "，" + restaurantName + "，" +
-            direction.displayName + "，" + distanceForSpeech(calculatedDistanceMeters)
+    fun accessibilityDescription(dataRightsMode: DataRightsMode): String {
+        val orderDescription = if (dataRightsMode == DataRightsMode.LIVE_DISPLAY_ONLY) {
+            val role = if (isPrimary) "首个候选" else "其他候选"
+            "数据源顺序第 " + rank + " 个，" + role
+        } else {
+            val role = if (isPrimary) "主推荐" else "备选"
+            "第 " + rank + " 名，" + role
+        }
+        return orderDescription + "，" + restaurantName + "，" + direction.displayName + "，" +
+            distanceForSpeech(calculatedDistanceMeters)
     }
 }
 
@@ -50,7 +57,7 @@ internal data class NearbyOrientationProjection(
     val originUsable: Boolean,
     val scaleMeters: Double,
 ) {
-    fun accessibilitySummary(): String = buildString {
+    fun accessibilitySummary(dataRightsMode: DataRightsMode): String = buildString {
         append("附近方位图，非道路导航图。")
         if (!originUsable) {
             append("本次起点信息异常，无法绘制；所有结果仍可在列表查看。")
@@ -61,7 +68,7 @@ internal data class NearbyOrientationProjection(
         } else {
             points.forEachIndexed { index, point ->
                 if (index > 0) append("；")
-                append(point.accessibilityDescription())
+                append(point.accessibilityDescription(dataRightsMode))
             }
             append("。")
         }

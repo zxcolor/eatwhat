@@ -19,6 +19,7 @@
 		"typecheck": "pnpm --filter @chi-shen-me/contracts build && tsc -p tsconfig.json --noEmit",
 		"test": "pnpm run test:unit && pnpm run test:runtime",
 		"test:unit": "vitest run",
+		"test:support-feedback-postgres": "node scripts/require-support-feedback-postgres-e2e.mjs && vitest run src/support-feedback/support-feedback.postgres.e2e.test.ts",
 		"test:runtime": "pnpm run build && node scripts/smoke-compiled.mjs",
 		"test:watch": "vitest"
 	},

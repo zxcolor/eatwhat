@@ -83,8 +83,11 @@ import com.chishenme.app.data.remote.Confidence
 import com.chishenme.app.data.remote.DataRightsMode
 import com.chishenme.app.data.remote.OpenStatus
 import com.chishenme.app.data.remote.RecommendationContext
+import com.chishenme.app.data.remote.RecommendationProfileFamily
 import com.chishenme.app.data.remote.RecommendationResponse
 import com.chishenme.app.data.remote.RecommendationResult
+import com.chishenme.app.data.remote.RecommendationTarget
+import com.chishenme.app.data.remote.WeatherApplicationKind
 import com.chishenme.app.domain.DecisionInput
 import com.chishenme.app.feature.decision.DecisionUiState
 import com.chishenme.app.feature.decision.RecommendationLoadState
@@ -124,7 +127,12 @@ internal fun recommendationResultsAccessPolicy(
 }
 
 internal const val GUEST_RULES_ONLY_NOTICE =
-    "远程配置暂不可用：本次仅展示不含 AI 的规则推荐。为保护数据，餐厅详情、导航、电话、复制地址及推荐事件均已关闭；“换一批”仍可使用。"
+    "远程配置暂不可用：本次仅展示不含 AI 的规则推荐。为保护数据，餐厅详情、导航、电话、复制地址及推荐事件均已关闭；仍可按相同条件重新请求，结果可能相同。"
+
+internal const val SAME_CONDITIONS_RETRY_DESCRIPTION =
+    "按相同条件重新请求，结果可能相同。"
+internal const val SAME_CONDITIONS_RETRY_ACTION = "按相同条件重新请求"
+internal const val ADJUST_CONDITIONS_ACTION = "返回调整条件"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -136,13 +144,16 @@ fun ResultsScreen(
     onOpenDetail: (RecommendationResult) -> Unit,
 ) {
     var showWhy by remember { mutableStateOf(false) }
+    val readyState = state.loadState as? RecommendationLoadState.Ready
+    val activeTarget = readyState?.context?.target ?: state.input.target
+    val activeDataRightsMode = readyState?.response?.dataRightsMode
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             AppTopBar(
-                title = "这顿就吃它",
-                subtitle = "最多 3 个可靠选择",
+                title = activeTarget.resultHeadline(activeDataRightsMode),
+                subtitle = "最多 3 个符合当前条件的候选",
                 onBack = onBack,
             )
         },
@@ -174,6 +185,7 @@ fun ResultsScreen(
                     accessPolicy = accessPolicy,
                     onWhy = { showWhy = true },
                     onReroll = onReroll,
+                    onAdjustConditions = onBack,
                     onSelect = onOpenDetail,
                     modifier = Modifier.padding(padding),
                 )
@@ -208,7 +220,7 @@ private fun LoadingContent(modifier: Modifier = Modifier) {
                 },
                 eyebrow = "正在生成本次答案",
                 title = "正在核对营业、预算和路程…",
-                description = "AI 不可用时会自动回退到规则推荐",
+                description = "将按本次目标与所选条件生成候选",
                 footer = {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -221,7 +233,7 @@ private fun LoadingContent(modifier: Modifier = Modifier) {
                             strokeWidth = 2.dp,
                         )
                         Text(
-                            "优先保留真正有用的结果",
+                            "正在核对候选信息",
                             color = Color.White.copy(alpha = 0.82f),
                             style = MaterialTheme.typography.labelMedium,
                         )
@@ -279,7 +291,7 @@ private fun ErrorContent(
             title = "这次没决定出来",
             body = message,
             modifier = Modifier.semantics {
-                liveRegion = LiveRegionMode.Polite
+                liveRegion = LiveRegionMode.Assertive
                 stateDescription = "推荐失败：$message"
             },
             icon = Icons.Rounded.Warning,
@@ -294,7 +306,7 @@ private fun ErrorContent(
                     icon = Icons.Rounded.Refresh,
                     onClick = onRetry,
                 )
-                TextButton(onClick = onBack) { Text("返回调整条件") }
+                TextButton(onClick = onBack) { Text(ADJUST_CONDITIONS_ACTION) }
             }
         }
     }
@@ -307,6 +319,7 @@ private fun ReadyContent(
     accessPolicy: RecommendationResultsAccessPolicy,
     onWhy: () -> Unit,
     onReroll: () -> Unit,
+    onAdjustConditions: () -> Unit,
     onSelect: (RecommendationResult) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -321,15 +334,30 @@ private fun ReadyContent(
             verticalArrangement = Arrangement.Center,
         ) {
             AppEmptyState(
-                title = "附近暂时没有可靠结果",
+                title = "附近暂时没有符合条件的候选",
                 body = response.notice ?: "试试扩大距离或取消部分排除条件",
                 modifier = Modifier.semantics {
                     liveRegion = LiveRegionMode.Polite
-                    stateDescription = "推荐完成，附近没有可靠结果"
+                    stateDescription = "推荐完成，附近没有符合条件的候选"
                 },
                 icon = Icons.Rounded.LocationOn,
             ) {
-                OutlinedButton(onClick = onReroll) { Text("再试一次") }
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = SAME_CONDITIONS_RETRY_DESCRIPTION,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedButton(onClick = onReroll) {
+                        Text(SAME_CONDITIONS_RETRY_ACTION)
+                    }
+                    TextButton(onClick = onAdjustConditions) {
+                        Text(ADJUST_CONDITIONS_ACTION)
+                    }
+                }
             }
         }
         return
@@ -375,8 +403,29 @@ private fun ReadyContent(
         item {
             ResultsHero(
                 resultCount = results.size,
+                dataRightsMode = response.dataRightsMode,
                 onWhy = onWhy,
             )
+        }
+
+        if (
+            response.profile.family != RecommendationProfileFamily.MEAL_LEGACY ||
+            response.weatherApplication.kind == WeatherApplicationKind.USER_REPORTED
+        ) {
+            item {
+                AppStatusBanner(
+                    title = "本次专项配置",
+                    body = buildString {
+                        append("目标：${context.target.displayName()}；")
+                        append("服务端回显 ${response.profile.displayName()}。")
+                        if (response.weatherApplication.kind == WeatherApplicationKind.USER_REPORTED) {
+                            append("已应用你本次主动选择的体感，不代表读取了天气观测。")
+                        }
+                    },
+                    tone = AppTone.INFO,
+                    icon = Icons.Rounded.Info,
+                )
+            }
         }
 
         accessPolicy.persistentNotice?.let { notice ->
@@ -403,6 +452,7 @@ private fun ReadyContent(
                 budgetMaxYuan = context.budgetMaxYuan,
                 visibleCount = filteredResults.size,
                 totalCount = results.size,
+                dataRightsMode = response.dataRightsMode,
                 onFilterChange = updateFilter,
             )
         }
@@ -410,6 +460,7 @@ private fun ReadyContent(
         if (filteredResults.isEmpty()) {
             item {
                 EmptyFilteredResults(
+                    dataRightsMode = response.dataRightsMode,
                     onClear = { updateFilter(RecommendationResultsFilterState()) },
                 )
             }
@@ -417,8 +468,18 @@ private fun ReadyContent(
             if (primaryResult != null) {
                 item {
                     AppSectionHeader(
-                        title = "主推荐",
-                        subtitle = "综合本次条件，先看这个",
+                        title = if (response.dataRightsMode == DataRightsMode.LIVE_DISPLAY_ONLY) {
+                            "首个候选"
+                        } else {
+                            "主推荐"
+                        },
+                        subtitle = if (
+                            response.dataRightsMode == DataRightsMode.LIVE_DISPLAY_ONLY
+                        ) {
+                            "按数据源原始顺序展示"
+                        } else {
+                            "综合本次条件，先看这个"
+                        },
                     )
                 }
                 item {
@@ -436,8 +497,16 @@ private fun ReadyContent(
             } else if (filter.isActive) {
                 item {
                     AppStatusBanner(
-                        title = "主推荐已被本地筛选隐藏",
-                        body = "主推荐未符合当前筛选；清除筛选即可重新查看。",
+                        title = if (response.dataRightsMode == DataRightsMode.LIVE_DISPLAY_ONLY) {
+                            "首个候选已被本地筛选隐藏"
+                        } else {
+                            "主推荐已被本地筛选隐藏"
+                        },
+                        body = if (response.dataRightsMode == DataRightsMode.LIVE_DISPLAY_ONLY) {
+                            "数据源顺序中的首个候选未符合当前筛选；清除筛选即可重新查看。"
+                        } else {
+                            "主推荐未符合当前筛选；清除筛选即可重新查看。"
+                        },
                         tone = AppTone.INFO,
                         icon = Icons.Rounded.Info,
                     )
@@ -447,12 +516,20 @@ private fun ReadyContent(
             if (alternatives.isNotEmpty()) {
                 item {
                     AppSectionHeader(
-                        title = if (primaryResult == null) {
+                        title = if (response.dataRightsMode == DataRightsMode.LIVE_DISPLAY_ONLY) {
+                            if (primaryResult != null) "其他候选" else "符合筛选的候选"
+                        } else if (primaryResult == null) {
                             "符合筛选的备选"
                         } else {
                             alternativeHeading(alternatives.size + 1)
                         },
-                        subtitle = "同样可靠，按原始排名展示",
+                        subtitle = if (
+                            response.dataRightsMode == DataRightsMode.LIVE_DISPLAY_ONLY
+                        ) {
+                            "保持数据源原始顺序"
+                        } else {
+                            "继续按综合结果顺序展示"
+                        },
                     )
                 }
             }
@@ -473,6 +550,7 @@ private fun ReadyContent(
                 NearbyOrientationMap(
                     context = context,
                     results = filteredResults,
+                    dataRightsMode = response.dataRightsMode,
                     detailActionsAvailable = accessPolicy.detailActionsAvailable,
                     onSelect = onSelect,
                     onShowList = { presentationName = ResultsPresentation.LIST.name },
@@ -495,13 +573,19 @@ private fun ReadyContent(
             AppCard {
                 AppSectionHeader(
                     title = "还想看看别的？",
-                    subtitle = "换一批会重新请求；近期反重复由服务端规则统一处理。",
+                    subtitle = SAME_CONDITIONS_RETRY_DESCRIPTION,
                 )
                 AppPrimaryButton(
-                    text = "换一批",
+                    text = SAME_CONDITIONS_RETRY_ACTION,
                     icon = Icons.Rounded.Refresh,
                     onClick = onReroll,
                 )
+                TextButton(
+                    onClick = onAdjustConditions,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(ADJUST_CONDITIONS_ACTION)
+                }
             }
             Spacer(Modifier.height(12.dp))
         }
@@ -511,16 +595,22 @@ private fun ReadyContent(
 @Composable
 private fun ResultsHero(
     resultCount: Int,
+    dataRightsMode: DataRightsMode,
     onWhy: () -> Unit,
 ) {
+    val liveDisplayOnly = dataRightsMode == DataRightsMode.LIVE_DISPLAY_ONLY
     AppHeroCard(
         modifier = Modifier.semantics {
             liveRegion = LiveRegionMode.Polite
             stateDescription = "推荐完成，找到 $resultCount 个结果"
         },
         eyebrow = "本次已筛出 $resultCount 个选择",
-        title = "推荐结果",
-        description = "主推荐与备选排名不会因本地筛选改变",
+        title = if (liveDisplayOnly) "本次候选" else "推荐结果",
+        description = if (liveDisplayOnly) {
+            "候选的数据源顺序不会因本地筛选改变"
+        } else {
+            "主推荐与备选排名不会因本地筛选改变"
+        },
         footer = {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -535,7 +625,11 @@ private fun ResultsHero(
                     border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
                 ) {
                     Text(
-                        text = "1 个主推 · 最多 2 个备选",
+                        text = if (liveDisplayOnly) {
+                            "$resultCount 个候选 · 保持数据源顺序"
+                        } else {
+                            "1 个主推 · 最多 2 个备选"
+                        },
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.SemiBold,
@@ -631,13 +725,19 @@ private fun ResultsLocalFilters(
     budgetMaxYuan: Int?,
     visibleCount: Int,
     totalCount: Int,
+    dataRightsMode: DataRightsMode,
     onFilterChange: (RecommendationResultsFilterState) -> Unit,
 ) {
     val palette = currentAppVisualPalette()
     AppCard {
         AppSectionHeader(
             title = "本次结果筛选",
-            subtitle = RecommendationResultsFilter.countSummary(visibleCount, totalCount, filter),
+            subtitle = RecommendationResultsFilter.countSummary(
+                visibleCount = visibleCount,
+                totalCount = totalCount,
+                filter = filter,
+                dataRightsMode = dataRightsMode,
+            ),
             trailing = if (filter.isActive) {
                 {
                     TextButton(onClick = { onFilterChange(RecommendationResultsFilterState()) }) {
@@ -711,10 +811,17 @@ private fun ResultsLocalFilters(
 }
 
 @Composable
-private fun EmptyFilteredResults(onClear: () -> Unit) {
+private fun EmptyFilteredResults(
+    dataRightsMode: DataRightsMode,
+    onClear: () -> Unit,
+) {
     AppEmptyState(
         title = "没有符合当前筛选的结果",
-        body = "原来的主推荐和备选仍在本次会话中，清除筛选即可恢复。",
+        body = if (dataRightsMode == DataRightsMode.LIVE_DISPLAY_ONLY) {
+            "原来的候选及数据源顺序仍在本次会话中，清除筛选即可恢复。"
+        } else {
+            "原来的主推荐和备选仍在本次会话中，清除筛选即可恢复。"
+        },
         modifier = Modifier.semantics {
             liveRegion = LiveRegionMode.Polite
             stateDescription = "当前筛选结果为空"
@@ -729,6 +836,7 @@ private fun EmptyFilteredResults(onClear: () -> Unit) {
 private fun NearbyOrientationMap(
     context: RecommendationContext,
     results: List<RecommendationResult>,
+    dataRightsMode: DataRightsMode,
     detailActionsAvailable: Boolean,
     onSelect: (RecommendationResult) -> Unit,
     onShowList: () -> Unit,
@@ -759,7 +867,7 @@ private fun NearbyOrientationMap(
                     modifier = Modifier
                         .matchParentSize()
                         .clearAndSetSemantics {
-                            contentDescription = projection.accessibilitySummary()
+                            contentDescription = projection.accessibilitySummary(dataRightsMode)
                         },
                 ) {
                     val center = Offset(size.width / 2f, size.height / 2f)
@@ -861,7 +969,7 @@ private fun NearbyOrientationMap(
                             contentColor = markerContentColor,
                             tonalElevation = 5.dp,
                             modifier = markerModifier.semantics(mergeDescendants = true) {
-                                contentDescription = point.accessibilityDescription()
+                                contentDescription = point.accessibilityDescription(dataRightsMode)
                                 role = Role.Button
                             },
                         ) {
@@ -874,7 +982,7 @@ private fun NearbyOrientationMap(
                             contentColor = markerContentColor,
                             tonalElevation = 5.dp,
                             modifier = markerModifier.clearAndSetSemantics {
-                                contentDescription = point.accessibilityDescription()
+                                contentDescription = point.accessibilityDescription(dataRightsMode)
                             },
                         ) {
                             OrientationMarkerLabel(point.rank)
@@ -885,7 +993,13 @@ private fun NearbyOrientationMap(
         }
 
         Text(
-            "外圈约 " + distanceLabel(projection.scaleMeters) + "；数字表示原推荐排名。",
+            "外圈约 " + distanceLabel(projection.scaleMeters) + if (
+                dataRightsMode == DataRightsMode.LIVE_DISPLAY_ONLY
+            ) {
+                "；数字表示数据源原始顺序。"
+            } else {
+                "；数字表示原推荐排名。"
+            },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -902,7 +1016,7 @@ private fun NearbyOrientationMap(
                             orientationDistanceLabel(point.calculatedDistanceMeters),
                         modifier = Modifier.weight(1f),
                     )
-                    Text(if (point.isPrimary) "主推荐" else "备选")
+                    Text(resultOrderLabel(point, dataRightsMode))
                 }
             } else {
                 Row(
@@ -915,7 +1029,7 @@ private fun NearbyOrientationMap(
                             orientationDistanceLabel(point.calculatedDistanceMeters),
                         modifier = Modifier.weight(1f),
                     )
-                    Text(if (point.isPrimary) "主推荐" else "备选")
+                    Text(resultOrderLabel(point, dataRightsMode))
                 }
             }
         }
@@ -945,6 +1059,15 @@ private fun OrientationMarkerLabel(rank: Int) {
             modifier = Modifier.clearAndSetSemantics { },
         )
     }
+}
+
+internal fun resultOrderLabel(
+    point: NearbyOrientationPoint,
+    dataRightsMode: DataRightsMode,
+): String = if (dataRightsMode == DataRightsMode.LIVE_DISPLAY_ONLY) {
+    if (point.isPrimary) "首个候选" else "数据源顺序第 ${point.rank} 个"
+} else {
+    if (point.isPrimary) "主推荐" else "备选"
 }
 
 @Composable
@@ -1086,7 +1209,17 @@ private fun RecommendationCardBody(
             border = BorderStroke(1.dp, palette.border.copy(alpha = 0.8f)),
         ) {
             Text(
-                text = if (primary) "主推荐 · 第 1 名" else "备选 · 第 ${result.rank} 名",
+                text = if (dataRightsMode == DataRightsMode.LIVE_DISPLAY_ONLY) {
+                    if (primary) {
+                        "首个候选 · 数据源顺序第 1 个"
+                    } else {
+                        "其他候选 · 数据源顺序第 ${result.rank} 个"
+                    }
+                } else if (primary) {
+                    "主推荐 · 第 1 名"
+                } else {
+                    "备选 · 第 ${result.rank} 名"
+                },
                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold,
@@ -1183,7 +1316,7 @@ private fun RecommendationCardBody(
         }
 
         if (result.aiAssisted) {
-            AppBadge(text = "AI 辅助推荐", tone = AppTone.SUCCESS)
+            AppBadge(text = aiAssistanceLabel(dataRightsMode), tone = AppTone.SUCCESS)
         }
 
         result.warnings.firstOrNull()?.let { warning ->
@@ -1273,7 +1406,15 @@ private fun WhyRecommendationDialog(
                 )
             }
         },
-        title = { Text("为什么推荐这些") },
+        title = {
+            Text(
+                if (response.dataRightsMode == DataRightsMode.LIVE_DISPLAY_ONLY) {
+                    "为什么显示这些候选"
+                } else {
+                    "为什么推荐这些"
+                },
+            )
+        },
         text = {
             Column(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -1317,6 +1458,17 @@ private fun WhyRecommendationDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                Text(
+                    "专项 ${response.profile.displayName()} · 目标 ${response.profile.target.displayName()}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (response.weatherApplication.kind == WeatherApplicationKind.USER_REPORTED) {
+                    Text(
+                        "手动体感已用于本次查询；应用未读取实时天气、温度或后台位置。",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
                 if (response.aiFallbackUsed) {
                     Text(
                         "本次 AI 不可用，已使用确定性规则回退。",
@@ -1330,6 +1482,52 @@ private fun WhyRecommendationDialog(
         confirmButton = { TextButton(onClick = onDismiss) { Text("知道了") } },
     )
 }
+
+internal fun RecommendationTarget?.resultHeadline(dataRightsMode: DataRightsMode?): String =
+    if (dataRightsMode == DataRightsMode.LICENSED_ENRICHMENT) {
+        when (this) {
+            RecommendationTarget.MILK_TEA -> "这杯奶茶就选它"
+            RecommendationTarget.COFFEE -> "这杯咖啡就选它"
+            RecommendationTarget.DESSERT -> "这份甜品就选它"
+            RecommendationTarget.MEAL,
+            null,
+            -> "这顿就吃它"
+        }
+    } else {
+        when (this) {
+            RecommendationTarget.MILK_TEA -> "本次奶茶候选"
+            RecommendationTarget.COFFEE -> "本次咖啡候选"
+            RecommendationTarget.DESSERT -> "本次甜品候选"
+            RecommendationTarget.MEAL,
+            null,
+            -> "本次用餐候选"
+        }
+    }
+
+internal fun aiAssistanceLabel(dataRightsMode: DataRightsMode): String =
+    if (dataRightsMode == DataRightsMode.LIVE_DISPLAY_ONLY) {
+        "AI 辅助理解条件"
+    } else {
+        "AI 辅助推荐"
+    }
+
+private fun RecommendationTarget.displayName(): String = when (this) {
+    RecommendationTarget.MEAL -> "普通用餐"
+    RecommendationTarget.MILK_TEA -> "奶茶"
+    RecommendationTarget.COFFEE -> "咖啡"
+    RecommendationTarget.DESSERT -> "甜品"
+}
+
+private fun com.chishenme.app.data.remote.RecommendationProfile.displayName(): String =
+    when (family) {
+        RecommendationProfileFamily.MEAL_LEGACY -> "兼容用餐规则 $version"
+        RecommendationProfileFamily.MEAL_BREAKFAST -> "早餐专项 $version"
+        RecommendationProfileFamily.MEAL_LUNCH -> "午餐专项 $version"
+        RecommendationProfileFamily.MEAL_DINNER -> "晚餐专项 $version"
+        RecommendationProfileFamily.MILK_TEA -> "奶茶专项 $version"
+        RecommendationProfileFamily.COFFEE -> "咖啡专项 $version"
+        RecommendationProfileFamily.DESSERT -> "甜品专项 $version"
+    }
 
 private fun com.chishenme.app.data.remote.MealPeriod.displayName() = when (this) {
     com.chishenme.app.data.remote.MealPeriod.BREAKFAST -> "早餐"
