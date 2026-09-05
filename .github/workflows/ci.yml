@@ -2262,6 +2262,22 @@ jobs:
               OR outcome.version IS NOT NULL OR outcome.value_json IS NOT NULL THEN
               RAISE EXCEPTION 'unverified minimum client version initial publish was accepted';
             END IF;
+            IF EXISTS (
+              SELECT 1 FROM public.admin_list_app_config_history(
+                repeat('13579bdf',8), 'ci-v1', repeat('55667788',8),
+                repeat('11223344',8), 'ci-config-bind-v1',
+                'clients.minimum-version', 20
+              )
+            ) OR EXISTS (
+              SELECT 1 FROM public.admin_list_sanitized_audit_events_v2(
+                repeat('13579bdf',8), 'ci-v1', repeat('55667788',8),
+                repeat('11223344',8), 'ci-config-bind-v1',
+                NULL::timestamptz, NULL::uuid, 101
+              ) AS audit
+              WHERE audit.config_key = 'clients.minimum-version'
+            ) THEN
+              RAISE EXCEPTION 'rejected minimum client version publish wrote configuration or audit';
+            END IF;
 
             SELECT * INTO outcome FROM public.admin_publish_app_config(
               repeat('13579bdf',8), 'ci-v1', repeat('55667788',8),
@@ -2297,7 +2313,16 @@ jobs:
             IF (SELECT count(*) FROM public.admin_list_active_app_config(
               repeat('13579bdf',8), 'ci-v1', repeat('55667788',8),
               repeat('11223344',8), 'ci-config-bind-v1'
-            )) <> 5 THEN
+            )) <> 4 OR (
+              SELECT array_agg(active.config_key ORDER BY active.config_key)
+              FROM public.admin_list_active_app_config(
+                repeat('13579bdf',8), 'ci-v1', repeat('55667788',8),
+                repeat('11223344',8), 'ci-config-bind-v1'
+              ) AS active
+            ) IS DISTINCT FROM ARRAY[
+              'coverage.default', 'features.ai-assistance',
+              'recommendations.prompt', 'recommendations.rules'
+            ]::text[] THEN
               RAISE EXCEPTION 'administrator active configuration list is incomplete';
             END IF;
 
@@ -2374,7 +2399,7 @@ jobs:
               WHERE audit.action IN (
                 'ADMIN_CONFIG_PUBLISHED', 'ADMIN_CONFIG_ROLLED_BACK'
               )
-            ) <> 7 OR NOT EXISTS (
+            ) <> 6 OR NOT EXISTS (
               SELECT 1
               FROM public.admin_list_sanitized_audit_events_v2(
                 repeat('13579bdf',8), 'ci-v1', repeat('55667788',8),
@@ -2422,6 +2447,13 @@ jobs:
           DO $ci_runtime$
           BEGIN
             IF (SELECT count(*) FROM public.runtime_list_active_app_config()) <> 4
+              OR (
+                SELECT array_agg(active.config_key ORDER BY active.config_key)
+                FROM public.runtime_list_active_app_config() AS active
+              ) IS DISTINCT FROM ARRAY[
+                'coverage.default', 'features.ai-assistance',
+                'recommendations.prompt', 'recommendations.rules'
+              ]::text[]
               OR NOT EXISTS (
                 SELECT 1 FROM public.runtime_list_active_app_config() AS active
                 WHERE active.config_key = 'features.ai-assistance'
@@ -2471,6 +2503,17 @@ jobs:
           psql -X -v ON_ERROR_STOP=1 <<'SQL'
           DO $ci_config_audit$
           BEGIN
+            IF (
+              SELECT array_agg(config.config_key || ':' || config.version::text
+                ORDER BY config.config_key, config.version)
+              FROM public.app_config_versions AS config
+            ) IS DISTINCT FROM ARRAY[
+              'coverage.default:1',
+              'features.ai-assistance:1', 'features.ai-assistance:2', 'features.ai-assistance:3',
+              'recommendations.prompt:1', 'recommendations.rules:1'
+            ]::text[] THEN
+              RAISE EXCEPTION 'configuration version ledger contains missing or unaccepted writes';
+            END IF;
             IF EXISTS (
               SELECT 1
               FROM public.admin_audit_log AS audit
@@ -2514,6 +2557,19 @@ jobs:
                 AND audit.context_json -> 'sourceVersion' = 'null'::jsonb
             ) <> 4 THEN
               RAISE EXCEPTION 'initial publish audit lineage is incomplete';
+            END IF;
+            IF (
+              SELECT array_agg(audit.context_json ->> 'configKey'
+                ORDER BY audit.context_json ->> 'configKey')
+              FROM public.admin_audit_log AS audit
+              WHERE audit.action_type = 'ADMIN_CONFIG_PUBLISHED'
+                AND audit.context_json -> 'newVersion' = '1'::jsonb
+                AND audit.context_json -> 'sourceVersion' = 'null'::jsonb
+            ) IS DISTINCT FROM ARRAY[
+              'coverage.default', 'features.ai-assistance',
+              'recommendations.prompt', 'recommendations.rules'
+            ]::text[] THEN
+              RAISE EXCEPTION 'initial publish audit keys do not match the accepted configuration keys';
             END IF;
             IF (
               SELECT count(*)
