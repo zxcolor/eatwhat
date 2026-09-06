@@ -207,15 +207,17 @@ fun SettingsScreen(
             }
 
             item { SettingsHeader("推荐透明度") }
-            item {
-                PreferenceVectorCard(
-                    vector = preferenceVector,
-                    stored = preferenceVectorStored,
-                    canAffectRanking = preferenceVectorCanAffectRanking,
-                    onChange = onPreferenceVectorChange,
-                    onReset = onResetPreferenceVector,
-                    onClear = onClearPreferenceVector,
-                )
+            if (preferenceVectorCanAffectRanking || preferenceVectorStored) {
+                item {
+                    PreferenceVectorCard(
+                        vector = preferenceVector,
+                        stored = preferenceVectorStored,
+                        canAffectRanking = preferenceVectorCanAffectRanking,
+                        onChange = onPreferenceVectorChange,
+                        onReset = onResetPreferenceVector,
+                        onClear = onClearPreferenceVector,
+                    )
+                }
             }
             item {
                 SettingsCard(
@@ -378,6 +380,16 @@ private fun PreferenceVectorCard(
     onReset: () -> Unit,
     onClear: () -> Unit,
 ) {
+    if (!canAffectRanking) {
+        SettingsCard(
+            icon = { Icon(AppIcons.Tune, null) },
+            title = "推荐偏好",
+            description = "当前不使用偏好排序，已保存的偏好仍保留在本机。",
+            action = { TextButton(onClick = onClear) { Text("清除本机偏好") } },
+        )
+        return
+    }
+
     var draft by remember { mutableStateOf(PreferenceVectorDraftState(vector)) }
     LaunchedEffect(vector, stored) {
         draft = draft.synchronize(persisted = vector, stored = stored)
@@ -402,13 +414,9 @@ private fun PreferenceVectorCard(
                     }
                 }
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("可控偏好向量", style = MaterialTheme.typography.titleMedium)
+                    Text("推荐偏好", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        if (canAffectRanking) {
-                            "仅调节经授权透明评分；不会改变停业、距离、预算和排除菜系等硬规则。"
-                        } else {
-                            "当前实时展示模式不会使用这些数值重排，也不会生成自有适合度。"
-                        },
+                        "仅调节经授权透明评分；不会改变停业、距离、预算和排除菜系等硬规则。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
