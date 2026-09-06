@@ -90,6 +90,7 @@ import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.chishenme.app.data.remote.DataRightsMode
 import com.chishenme.app.data.remote.DecisionMode
 import com.chishenme.app.data.remote.ExplorationMode
 import com.chishenme.app.data.remote.MealPeriod
@@ -151,6 +152,9 @@ fun HomeScreen(
         is RemoteFeatureConfigState.Incompatible,
         -> false
     }
+    val softPreferencesEnabled =
+        (state.remoteFeatureConfig as? RemoteFeatureConfigState.Ready)
+            ?.config?.dataRightsMode == DataRightsMode.LICENSED_ENRICHMENT
     val specialtyCapabilities =
         (state.remoteFeatureConfig as? RemoteFeatureConfigState.Ready)
             ?.config
@@ -468,6 +472,7 @@ fun HomeScreen(
                         availableMinutes = state.input.availableMinutes,
                         travelMode = state.input.travelMode,
                         explorationMode = state.input.explorationMode,
+                        showExplorationPreference = softPreferencesEnabled,
                     )
                 }
             } else {
@@ -504,17 +509,19 @@ fun HomeScreen(
                         onSelected = viewModel::setTravelMode,
                     )
                 }
-                item {
-                    OptionSection(
-                        title = "探索偏好",
-                        options = listOf(
-                            ExplorationMode.SAFE to "稳妥吃",
-                            ExplorationMode.BALANCED to "平衡",
-                            ExplorationMode.ADVENTUROUS to "换个口味",
-                        ),
-                        selected = state.input.explorationMode,
-                        onSelected = viewModel::setExplorationMode,
-                    )
+                if (softPreferencesEnabled) {
+                    item {
+                        OptionSection(
+                            title = "探索偏好",
+                            options = listOf(
+                                ExplorationMode.SAFE to "稳妥吃",
+                                ExplorationMode.BALANCED to "平衡",
+                                ExplorationMode.ADVENTUROUS to "换个口味",
+                            ),
+                            selected = state.input.explorationMode,
+                            onSelected = viewModel::setExplorationMode,
+                        )
+                    }
                 }
                 item {
                     OptionSection(
@@ -545,12 +552,14 @@ fun HomeScreen(
                         onChange = viewModel::setPartySize,
                     )
                 }
-                item {
-                    CuisineSection(
-                        title = "更想吃",
-                        selected = state.input.preferredCuisines,
-                        onToggle = { viewModel.toggleCuisine(it, preferred = true) },
-                    )
+                if (softPreferencesEnabled) {
+                    item {
+                        CuisineSection(
+                            title = "更想吃",
+                            selected = state.input.preferredCuisines,
+                            onToggle = { viewModel.toggleCuisine(it, preferred = true) },
+                        )
+                    }
                 }
                 item {
                     CuisineSection(
@@ -768,6 +777,7 @@ private fun QuickDecisionSummary(
     availableMinutes: Int,
     travelMode: TravelMode,
     explorationMode: ExplorationMode,
+    showExplorationPreference: Boolean,
 ) {
     val colors = currentHomeVisualColors()
     Card(
@@ -811,8 +821,8 @@ private fun QuickDecisionSummary(
             ) {
                 Text(
                     "人均 ${budgetMaxYuan?.let { "${it}元内" } ?: "不限"} · " +
-                        "$availableMinutes 分钟 · ${travelLabel(travelMode)} · " +
-                        explorationLabel(explorationMode),
+                        "$availableMinutes 分钟 · ${travelLabel(travelMode)}" +
+                        if (showExplorationPreference) " · ${explorationLabel(explorationMode)}" else "",
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Medium,

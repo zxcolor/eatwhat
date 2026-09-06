@@ -109,6 +109,10 @@ GET https://restapi.amap.com/v5/place/around?parameters
 | `output` | 搜索 2.0 当前仅支持 JSON | `json` | 正确 |
 | `sig` | 可选；Key 开启数字签名后必须传 | 有签名私钥时对所有 Web Service 请求统一生成 | 生产环境已硬性要求签名；私钥不进入 URL 或客户端 |
 
+当前三餐 query plan 将早餐、午餐或晚餐词放在首位，因此在高德单关键词检索中，`preferredCuisines` 不会替换餐段词。2026-09-06 重新核对的[搜索 POI 2.0 官方文档](https://developer.amap.com/api/webservice/guide/api-advanced/newpoisearch)仍规定单个关键词。本轮保留该检索约束与一次请求；Android 在实时展示模式下收起不影响当前候选检索和排序的软偏好控制，不把“取第一个菜系”伪装成完整支持多选，也不增加多次搜索或合并重排。
+
+菜系排除继续只依据当前结果的已有标签执行；`川湘菜` 同时匹配 `川湘菜`、`川菜`、`湘菜` 标签。没有标签或只有不相关标签时不推断菜系，且该匹配不代表过敏原、食材或宗教饮食认证。
+
 项目当前请求的等价示意如下。禁止把真实 Key、完整 URL 或精确坐标粘贴到工单、日志和截图中。
 
 ```text

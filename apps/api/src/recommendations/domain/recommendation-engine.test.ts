@@ -420,6 +420,54 @@ describe("rankCandidates", () => {
 		expect(results).toHaveLength(0);
 	});
 
+	describe.each(["LIVE_DISPLAY_ONLY", "LICENSED_ENRICHMENT"] as const)(
+		"grouped cuisine exclusions in %s",
+		(dataRightsMode) => {
+			it.each([
+				["combined category", ["川湘菜"]],
+				["Sichuan category", ["川菜"]],
+				["Hunan category", ["湘菜"]],
+				["nested Sichuan category", ["正餐", "四川菜(川菜)"]],
+				["nested Hunan category", ["正餐", " 湖南湘菜 "]],
+			])("excludes the %s", (_label, tags) => {
+				const results = rankCandidates({
+					context: context({ excludedCuisines: ["川湘菜"] }),
+					intent: intent(),
+					dataRightsMode,
+					candidates: [candidate({ tags })],
+				});
+
+				expect(results).toHaveLength(0);
+			});
+
+			it("keeps unrelated categories when the grouped cuisine is excluded", () => {
+				const results = rankCandidates({
+					context: context({ excludedCuisines: ["川湘菜"] }),
+					intent: intent(),
+					dataRightsMode,
+					candidates: [candidate({ tags: ["面食", "中式快餐"] })],
+				});
+
+				expect(results.map((result) => result.providerPlaceId)).toEqual([
+					"place-1",
+				]);
+			});
+
+			it("keeps child categories when the grouped cuisine is not excluded", () => {
+				const results = rankCandidates({
+					context: context({ excludedCuisines: ["火锅"] }),
+					intent: intent(),
+					dataRightsMode,
+					candidates: [candidate({ tags: ["川菜", "湘菜"] })],
+				});
+
+				expect(results.map((result) => result.providerPlaceId)).toEqual([
+					"place-1",
+				]);
+			});
+		},
+	);
+
 	it("accepts a valid nearby candidate at a Shanghai origin", () => {
 		const results = rankCandidates({
 			context: context({

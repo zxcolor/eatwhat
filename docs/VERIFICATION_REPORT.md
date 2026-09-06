@@ -1,8 +1,16 @@
 # 验证报告
 
-验证日期：2026-09-05（已完成功能 PR 整理）；2026-09-04（同设备匿名群组本地候选验证）；2026-08-22（模拟器历史验收）；2026-08-23（完整自动化、ECS 正式切换、真实高德与公网 HTTPS 验收）；2026-08-24（云端 Debug 默认与独立 Fixture 构建门禁）；2026-08-26（固定 Alpha signer 历史构建验证）；2026-08-28（PHONE_ONLY 短信认证改造中）
+验证日期：2026-09-06（核心流程质量本机与设备验证）；2026-09-05（已完成功能 PR 整理）；2026-09-04（同设备匿名群组本地候选验证）；2026-08-22（模拟器历史验收）；2026-08-23（完整自动化、ECS 正式切换、真实高德与公网 HTTPS 验收）；2026-08-24（云端 Debug 默认与独立 Fixture 构建门禁）；2026-08-26（固定 Alpha signer 历史构建验证）；2026-08-28（PHONE_ONLY 短信认证改造中）
 
 本报告记录当前仓库快照的本机自动化、Android 模拟器、ECS 回环与公网 HTTPS 验证。它不是公开发布批准，也不能替代供应商商业授权、Release 签名、法务审查、关闭 Wi-Fi 真机矩阵或 Alpha/Beta 指标。
+
+## 2026-09-06：核心推荐质量与有效控件收敛
+
+本轮只修正已有核心流程：排除 `川湘菜` 时同样排除已有 `川菜`、`湘菜` 标签的候选；Android 首页与设置页只在可信的 `LICENSED_ENRICHMENT` 配置下显示软偏好控制。实时模式保留预算、时间、距离、交通方式和排除菜系；已保存的本机偏好不会因模式变化被删除，用户仍可主动清除。未改请求契约、供应商单关键词查询、评分公式、生产配置或账号能力。
+
+新增排除回归在修复前复现 8 个失败；修复后引擎与服务层 48 个定向测试通过，API lint 与 typecheck 通过。完整 `scripts/verify.ps1 -AlphaApiBaseUrl 'https://api.unfinished-era.com/'` 于 08:01:26（北京时间）退出 `0`，Node 后台 52 项、契约 86 项、API 833 项成功；本机未配置 PostgreSQL 的 3 项集成用例仍由 GitHub PostgreSQL 作业补齐。Android 86 份测试报告合计 449 项，失败、错误和跳过均为 0；Debug Lint、Fixture/AppTest、Alpha 构建与签名、APK 边界均通过。两项 Alpha 公开 AppID 只从已有受控本地配置注入验证进程，未提交配置或签名材料。
+
+专用 API 36 模拟器以 `run-android-instrumentation.ps1 -ClassName 'com.chishenme.app.MainActivityAmapLiveFixtureTest' -InstrumentationArguments @{ amapLiveFixture = 'true' } -UseDeviceLocalApiFixture -Serial 'emulator-5562' -Install` 首轮通过 `OK (3 tests)` / `30.575s`，严格运行器退出码 `0`，无失败或跳过，端口映射恢复。新增场景验证 LIVE 与授权模式的首页控件和摘要，以及设置中的 `40 → LIVE 保留 → 授权仍为 40 → LIVE 主动清除 → 授权默认 100`。设备内配置只使用合成响应，没有访问真实供应商或账号。9 张截图已导出，关键页面经视觉核对无系统遮挡、中文与控件可读；见[本轮截图说明](./screenshots/core-quality-20260906/README.md)。当前提交的 GitHub CI 证据随本 PR 记录。
 
 ## 2026-09-05：已完成候选功能的 PR 范围
 

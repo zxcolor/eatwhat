@@ -1,5 +1,9 @@
 package com.chishenme.app
 
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
@@ -15,9 +19,9 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
-import androidx.compose.ui.test.SemanticsMatcher
-import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.datastore.preferences.preferencesDataStoreFile
+import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -65,6 +69,10 @@ class MainActivityAmapLiveFixtureTest {
     private val requests = CopyOnWriteArrayList<CapturedRequest>()
     @Volatile
     private var radiusDefaultsEnabled = false
+    @Volatile
+    private var preferenceRankingEnabled = false
+    @Volatile
+    private var configurationMinimumVersion = "0.1.1"
 
     @Before
     fun startDeviceServerAndResetState() {
@@ -106,6 +114,10 @@ class MainActivityAmapLiveFixtureTest {
     fun liveAmapResponse_isAttributedUnscoredAndCannotLaunchOutboundActions() {
         ActivityScenario.launch(MainActivity::class.java).use {
             enterManualLocation()
+            composeRule.onNodeWithContentDescription("设置").performClick()
+            awaitSettingsConfiguration(enabled = false)
+            composeRule.onNodeWithContentDescription("返回").performClick()
+            assertHomePreferenceControls(enabled = false)
             scrollHomeTo(hasClickAction() and hasText("帮我决定"))
                 .assertIsDisplayed()
                 .performClick()
@@ -213,6 +225,130 @@ class MainActivityAmapLiveFixtureTest {
             }
         }
         assertTransportContract(expectedRadiusMeters = 750)
+    }
+
+    @Test
+    fun liveSettings_hideInactiveControlsAndKeepPreferencesUntilExplicitlyCleared() {
+        // The synthetic licensed config is used only to save a preference through
+        // the existing UI. No recommendation or external provider is called.
+        preferenceRankingEnabled = true
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            enterManualLocation()
+            composeRule.onNodeWithContentDescription("设置").performClick()
+            awaitText("设置与透明度")
+            awaitSettingsConfiguration(enabled = true)
+            scrollSettingsTo("推荐偏好")
+            composeRule.onNodeWithContentDescription("质量信号 权重 100%")
+                .performSemanticsAction(SemanticsActions.SetProgress) { setProgress ->
+                    assertTrue(setProgress(40f))
+                }
+            awaitText("存在本机设置")
+
+            refreshPreferenceRankingCapability(scenario, enabled = false)
+            scrollSettingsTo("推荐偏好")
+            composeRule.onNodeWithText("当前不使用偏好排序，已保存的偏好仍保留在本机。")
+                .assertIsDisplayed()
+            assertInactivePreferenceControlsAbsent()
+            composeRule.onNodeWithText("清除本机偏好").assertIsDisplayed()
+            captureSyntheticScreenshot("live-settings-stored-preferences.png")
+
+            // Merely entering LIVE must preserve the user's saved value.
+            refreshPreferenceRankingCapability(scenario, enabled = true)
+            scrollSettingsTo("推荐偏好")
+            composeRule.onNodeWithContentDescription("质量信号 权重 40%")
+                .assertIsDisplayed()
+            composeRule.onNodeWithText("存在本机设置").assertIsDisplayed()
+
+            refreshPreferenceRankingCapability(scenario, enabled = false)
+            scrollSettingsTo("清除本机偏好").performClick()
+            composeRule.waitUntil(UI_TIMEOUT_MS) {
+                !hasUiText("推荐偏好") && !hasUiText("清除本机偏好")
+            }
+            scrollSettingsTo("推荐透明度")
+            composeRule.onNodeWithText("数据来源").assertIsDisplayed()
+            composeRule.onNodeWithText("推荐偏好").assertDoesNotExist()
+            composeRule.onNodeWithText("清除本机偏好").assertDoesNotExist()
+            assertInactivePreferenceControlsAbsent()
+            captureSyntheticScreenshot("live-settings-without-preferences.png")
+
+            // A later licensed config must observe the explicit clear, not a
+            // hidden copy of the old value or an automatic reset on mode change.
+            refreshPreferenceRankingCapability(scenario, enabled = true)
+            scrollSettingsTo("推荐偏好")
+            composeRule.onNodeWithContentDescription("质量信号 权重 100%")
+                .assertIsDisplayed()
+            composeRule.onNodeWithText("当前使用应用默认值").assertIsDisplayed()
+            scrollSettingsTo("清除本机偏好").assertIsNotEnabled()
+            composeRule.onNodeWithContentDescription("返回").performClick()
+            assertHomePreferenceControls(enabled = true)
+        }
+        assertEquals(setOf("/v1/config"), requests.map { it.path }.toSet())
+        requests.forEach { request ->
+            assertEquals(API_CONTRACT_VERSION, request.contractVersion)
+            assertNull("本机偏好管理不得发送账号凭据", request.authorization)
+        }
+    }
+
+    private fun refreshPreferenceRankingCapability(
+        scenario: ActivityScenario<MainActivity>,
+        enabled: Boolean,
+    ) {
+        val previousConfigRequests = requests.count { it.path == "/v1/config" }
+        preferenceRankingEnabled = enabled
+        // Every refresh has a distinct public UI value so a request arrival or
+        // a transient Loading presentation cannot be mistaken for the new Ready.
+        configurationMinimumVersion = "0.0.${previousConfigRequests + 1}"
+        scenario.moveToState(Lifecycle.State.CREATED)
+        scenario.moveToState(Lifecycle.State.RESUMED)
+        composeRule.waitUntil(UI_TIMEOUT_MS) {
+            requests.count { it.path == "/v1/config" } > previousConfigRequests
+        }
+        awaitSettingsConfiguration(enabled)
+    }
+
+    private fun awaitSettingsConfiguration(enabled: Boolean) {
+        scrollSettingsTo("版本兼容性")
+        awaitText("满足服务端最低兼容版本 $configurationMinimumVersion")
+        scrollSettingsTo("推荐规则摘要")
+        awaitText(
+            if (enabled) {
+                "先执行营业、距离、预算和排除项硬规则，再做可解释排序。"
+            } else {
+                "先执行营业、距离、预算和排除项硬过滤；当前实时展示保持数据源顺序，不生成自有适合度。"
+            },
+        )
+    }
+
+    private fun assertHomePreferenceControls(enabled: Boolean) {
+        scrollHomeTo(hasText("精细匹配") and hasClickAction()).performClick()
+        for (title in listOf("人均预算", "一共可用多久", "交通方式")) {
+            scrollHomeTo(hasText(title)).assertIsDisplayed()
+        }
+        if (enabled) {
+            scrollHomeTo(hasText("探索偏好")).assertIsDisplayed()
+        } else {
+            composeRule.onNodeWithText("探索偏好").assertDoesNotExist()
+        }
+        scrollHomeTo(hasText("最远距离")).assertIsDisplayed()
+        if (!enabled) composeRule.onNodeWithText("探索偏好").assertDoesNotExist()
+        if (enabled) scrollHomeTo(hasText("更想吃")).assertIsDisplayed()
+        scrollHomeTo(hasText("这次不吃")).assertIsDisplayed()
+        if (!enabled) composeRule.onNodeWithText("更想吃").assertDoesNotExist()
+        captureSyntheticScreenshot(if (enabled) "licensed-home-conditions.png" else "live-home-conditions.png")
+        scrollHomeTo(hasText("极速决定") and hasClickAction()).performClick()
+        val summary = "人均 25元内 · 60 分钟 · 只步行" + if (enabled) " · 平衡选择" else ""
+        scrollHomeTo(hasText(summary)).assertIsDisplayed()
+        captureSyntheticScreenshot(if (enabled) "licensed-home-summary.png" else "live-home-summary.png")
+    }
+
+    private fun scrollSettingsTo(text: String): SemanticsNodeInteraction =
+        scrollHomeTo(hasText(text))
+
+    private fun assertInactivePreferenceControlsAbsent() {
+        composeRule.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsActions.SetProgress))
+            .assertCountEquals(0)
+        composeRule.onNodeWithText("恢复默认").assertDoesNotExist()
+        composeRule.onNodeWithText("可控偏好向量").assertDoesNotExist()
     }
 
     private fun enterManualLocation() {
@@ -344,12 +480,12 @@ class MainActivityAmapLiveFixtureTest {
             "areaCode":"NATIONWIDE","defaultRadiusMeters":750,"maximumRadiusMeters":1250
           },
           """.trimIndent() else ""}
-          "dataRightsMode":"LIVE_DISPLAY_ONLY",
+          "dataRightsMode":"${if (preferenceRankingEnabled) "LICENSED_ENRICHMENT" else "LIVE_DISPLAY_ONLY"}",
           "aiEnabled":false,
           "accountsEnabled":false,
           "favoritesEnabled":false,
           "supportFeedbackEnabled":false,
-          "minimumSupportedVersion":"0.1.1",
+          "minimumSupportedVersion":"$configurationMinimumVersion",
           "ruleVersion":"rule-amap-device-fixture-v1",
           "promptVersion":"prompt-disabled",
           "modelVersion":"rule-amap-device-fixture-v1",

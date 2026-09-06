@@ -158,7 +158,14 @@ function isCuisineExcluded(
 	candidate: PlaceCandidate,
 	context: RecommendationContext,
 ): boolean {
-	const exclusions = new Set(context.excludedCuisines.map(normalize));
+	// A grouped user choice also excludes its provider child-category tags.
+	const exclusions = new Set(
+		context.excludedCuisines
+			.flatMap((cuisine) =>
+				cuisine === "川湘菜" ? ["川湘菜", "川菜", "湘菜"] : [cuisine],
+			)
+			.map(normalize),
+	);
 	if (exclusions.size === 0) return false;
 	return candidate.tags.some((tag) => {
 		const normalizedTag = normalize(tag);
