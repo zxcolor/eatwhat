@@ -4,13 +4,16 @@ import android.content.ContextWrapper
 import android.content.Intent
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasText as hasSemanticsText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.datastore.preferences.preferencesDataStoreFile
+import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.espresso.intent.Intents
@@ -23,6 +26,8 @@ import com.chishenme.app.data.remote.OpenStatus
 import com.chishenme.app.data.remote.RecommendationActions
 import com.chishenme.app.data.remote.RecommendationDataMode
 import com.chishenme.app.data.remote.RecommendationResult
+import com.chishenme.app.feature.decision.DecisionViewModel
+import com.chishenme.app.feature.decision.RecommendationLoadState
 import com.chishenme.app.feature.detail.AndroidRestaurantActions
 import com.chishenme.app.feature.detail.RestaurantShareOutcome
 import com.chishenme.app.feature.detail.toRestaurantDisplayModel
@@ -40,8 +45,9 @@ import org.junit.runner.RunWith
 /**
  * Android 1.0 acceptance for the sealed recommendation-card share boundary.
  *
- * The API v1 fixture deliberately advertises `actions.share=true`. Android must still
- * render no share entry, start no share Intent and create no temporary share-card file.
+ * The real local DEMO API advertises `actions.share=false`; its UI flow must render no
+ * share entry, start no share Intent and create no temporary share-card file. A separate
+ * direct-action test supplies a synthetic `actions.share=true` result to prove the hard close.
  */
 @LargeTest
 @RunWith(AndroidJUnit4::class)
@@ -62,15 +68,15 @@ class MainActivityShareCardTest {
     }
 
     @Test
-    fun demoDetail_serverShareTrue_hasNoShareUiIntentOrNewCacheFile() {
+    fun demoDetail_serverShareFalse_hasNoShareUiIntentOrNewCacheFile() {
         val application = ApplicationProvider.getApplicationContext<ChiShenMeApplication>()
         val shareDirectory = File(application.cacheDir, SHARE_DIRECTORY_NAME)
         val filesBefore = shareFileNames(shareDirectory)
 
         Intents.init()
         try {
-            ActivityScenario.launch(MainActivity::class.java).use {
-                openPrimaryDemoRestaurant()
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                openPrimaryDemoRestaurant(scenario)
 
                 composeRule.onNodeWithText(
                     "分享推荐卡",
@@ -134,27 +140,38 @@ class MainActivityShareCardTest {
         assertTrue("直接动作调用不得生成临时分享文件：$newFiles", newFiles.isEmpty())
     }
 
-    private fun openPrimaryDemoRestaurant() {
+    private fun openPrimaryDemoRestaurant(scenario: ActivityScenario<MainActivity>) {
         composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
             hasText("同意并继续") || hasText("手动选择")
         }
         if (hasText("同意并继续")) {
-            composeRule.onNodeWithText("同意并继续").assertIsDisplayed().performClick()
+            composeRule.onNodeWithText("同意并继续")
+                .performScrollTo()
+                .assertIsDisplayed()
+                .performClick()
         }
 
         composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) { hasText("手动选择") }
-        composeRule.onNodeWithText("手动选择").assertIsDisplayed().performClick()
+        lateinit var decisionViewModel: DecisionViewModel
+        scenario.onActivity { activity ->
+            decisionViewModel = ViewModelProvider(activity)[DecisionViewModel::class.java]
+        }
+        composeRule.onNodeWithText("手动选择")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
         composeRule.onNodeWithText(MANUAL_LOCATION)
             .performScrollTo()
             .assertIsDisplayed()
             .performClick()
         composeRule.onNodeWithText("帮我决定")
-            .performScrollTo()
             .assertIsDisplayed()
             .performClick()
 
         composeRule.waitUntil(timeoutMillis = RECOMMENDATION_TIMEOUT_MS) {
-            hasText("推荐结果") || hasText("这次没决定出来")
+            (hasText("本次用餐候选") &&
+                decisionViewModel.uiState.value.loadState is RecommendationLoadState.Ready) ||
+                hasText("这次没决定出来")
         }
         if (hasText("这次没决定出来")) {
             val diagnostic = RECOMMENDATION_DIAGNOSTICS.firstOrNull(::hasText)
@@ -162,6 +179,9 @@ class MainActivityShareCardTest {
             fail("本地 DEMO 分享验收无法取得推荐，界面诊断：$diagnostic")
         }
 
+        composeRule.onNode(hasScrollToIndexAction()).performScrollToNode(
+            hasClickAction() and hasSemanticsText(PRIMARY_DEMO_RESTAURANT, substring = true),
+        )
         composeRule.onNode(
             hasClickAction() and hasSemanticsText(PRIMARY_DEMO_RESTAURANT, substring = true),
         )
@@ -172,9 +192,9 @@ class MainActivityShareCardTest {
             hasText("餐厅详情") || hasText(DETAIL_EXPIRED_MARKER)
         }
         if (hasText(DETAIL_EXPIRED_MARKER)) {
-            fail("打开 DEMO 主推荐后详情会话意外失效")
+            fail("打开 DEMO 首个候选后详情会话意外失效")
         }
-        composeRule.onNodeWithText(PRIMARY_DEMO_RESTAURANT).assertIsDisplayed()
+        composeRule.onNodeWithText(PRIMARY_DEMO_RESTAURANT).performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithText("数据来源：", substring = true)
             .performScrollTo()
             .assertIsDisplayed()

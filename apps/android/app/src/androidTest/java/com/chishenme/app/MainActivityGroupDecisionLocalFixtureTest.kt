@@ -237,7 +237,7 @@ class MainActivityGroupDecisionLocalFixtureTest {
             scenario.moveToState(Lifecycle.State.RESUMED)
 
             composeRule.waitUntil(UI_TIMEOUT_MS) {
-                configCallCount.get() >= 2 && hasUiText("现在这一顿，30 秒决定")
+                configCallCount.get() >= 2 && hasUiText("附近美食，少一点纠结")
             }
             assertFalse("后台清理后不得停留在已关闭群组页", hasUiText("当前不可用"))
             assertFalse("真实后台返回后不得恢复成员进度", hasUiText("第 2 位 / 共 2 位"))

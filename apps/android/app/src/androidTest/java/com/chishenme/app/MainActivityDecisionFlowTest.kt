@@ -5,8 +5,10 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.isDisplayed
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -15,11 +17,13 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
-import androidx.datastore.preferences.preferencesDataStoreFile
+import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ActivityScenario
-import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.LargeTest
+import com.chishenme.app.feature.consent.ConsentViewModel
+import com.chishenme.app.feature.decision.DecisionViewModel
+import com.chishenme.app.feature.decision.RecommendationLoadState
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -44,38 +48,49 @@ class MainActivityDecisionFlowTest {
 
     @Before
     fun resetToFirstLaunch() {
-        val application = ApplicationProvider.getApplicationContext<ChiShenMeApplication>()
-        // ChiShenMeApplication does not initialize DataStore. Deleting the exact backing
-        // file before MainActivity launches is therefore deterministic and avoids adding
-        // a test-only Hilt entry point or replacing the production dependency graph.
-        val preferencesFile = application.preferencesDataStoreFile(
-            "app_preferences.preferences_pb",
-        )
-        assertTrue(
-            "无法重置首次启动状态：${preferencesFile.absolutePath}",
-            !preferencesFile.exists() || preferencesFile.delete(),
-        )
+        // DataStore remains open for the instrumentation process. Deleting its backing
+        // file between methods can revoke consent after the next screen has opened.
+        // Use the production Activity-scoped consent contract to reset this synthetic
+        // app, then require a genuine consent screen before the test Activity starts.
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            lateinit var consentViewModel: ConsentViewModel
+            scenario.onActivity { activity ->
+                consentViewModel = ViewModelProvider(activity)[ConsentViewModel::class.java]
+                consentViewModel.withdrawPrivacy {}
+            }
+            composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
+                consentViewModel.privacyAccepted.value == false && hasText("同意并继续")
+            }
+            composeRule.onNodeWithText("同意并继续")
+                .performScrollTo()
+                .assertIsDisplayed()
+        }
     }
 
     @Test
     fun firstLaunch_manualDemoLocation_opensPrimaryDetailAndReturnsToResults() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            // The production DataStore is process-scoped. When this test follows
-            // another activity test, deleting its backing file cannot rewind the
-            // already-open singleton, so accept consent only when it is present.
+            lateinit var decisionViewModel: DecisionViewModel
             composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
-                hasText("同意并继续") || hasText("手动选择")
+                hasText("同意并继续")
             }
-            if (hasText("同意并继续")) {
-                composeRule.onNodeWithText("同意并继续").assertIsDisplayed().performClick()
-            }
+            composeRule.onNodeWithText("同意并继续")
+                .performScrollTo()
+                .assertIsDisplayed()
+                .performClick()
 
             composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
                 hasText("手动选择")
             }
+            scenario.onActivity { activity ->
+                decisionViewModel = ViewModelProvider(activity)[DecisionViewModel::class.java]
+            }
             composeRule.onNodeWithText("吃什么").assertIsDisplayed()
-            composeRule.onNodeWithText("现在这一顿，30 秒决定").assertIsDisplayed()
-            composeRule.onNodeWithText("手动选择").assertIsDisplayed().performClick()
+            composeRule.onNodeWithText("附近美食，少一点纠结").assertIsDisplayed()
+            composeRule.onNodeWithText("手动选择")
+                .performScrollTo()
+                .assertIsDisplayed()
+                .performClick()
 
             composeRule.onNodeWithText("快捷地点（始终可用）")
                 .performScrollTo()
@@ -86,16 +101,18 @@ class MainActivityDecisionFlowTest {
                 .performClick()
 
             composeRule.onNodeWithText(MANUAL_LOCATION).assertIsDisplayed()
+            scrollListTo("当前极速条件")
             composeRule.onNodeWithText("当前极速条件")
                 .performScrollTo()
                 .assertIsDisplayed()
             composeRule.onNodeWithText("帮我决定")
-                .performScrollTo()
                 .assertIsDisplayed()
                 .performClick()
 
             composeRule.waitUntil(timeoutMillis = RECOMMENDATION_TIMEOUT_MS) {
-                hasText("推荐结果") || hasText("这次没决定出来")
+                (composeRule.onNodeWithText(RESULTS_HEADING).isDisplayed() &&
+                    decisionViewModel.uiState.value.loadState is RecommendationLoadState.Ready) ||
+                    hasText("这次没决定出来")
             }
 
             if (hasText("这次没决定出来")) {
@@ -107,10 +124,13 @@ class MainActivityDecisionFlowTest {
                 fail("本地 DEMO 推荐验收失败，界面诊断：$diagnostic")
             }
 
-            composeRule.onNodeWithText("推荐结果").assertIsDisplayed()
-            composeRule.onNodeWithText("主推荐")
+            composeRule.onNodeWithText(RESULTS_HEADING).assertIsDisplayed()
+            scrollListTo("首个候选")
+            composeRule.onNodeWithText("首个候选")
                 .performScrollTo()
                 .assertIsDisplayed()
+            composeRule.onNodeWithText("主推荐").assertDoesNotExist()
+            scrollListTo("虚构演示数据", substring = true)
             composeRule.onAllNodesWithText("虚构演示数据", substring = true)[0]
                 .performScrollTo()
                 .assertIsDisplayed()
@@ -119,11 +139,13 @@ class MainActivityDecisionFlowTest {
                 DEMO_RESTAURANT_NAMES.any { name -> hasText(name) },
             )
 
+            scrollListTo("仅营业中")
             composeRule.onNodeWithText("仅营业中")
                 .performScrollTo()
                 .assertIsDisplayed()
                 .performClick()
                 .assertIsSelected()
+            scrollListTo("附近方位图")
             composeRule.onNodeWithText("附近方位图")
                 .performScrollTo()
                 .assertIsDisplayed()
@@ -132,17 +154,24 @@ class MainActivityDecisionFlowTest {
 
             recreateActivity(scenario)
             composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
-                hasText("推荐结果") || hasText(RECOMMENDATION_EXPIRED_MARKER)
+                (composeRule.onNodeWithText(RESULTS_HEADING).isDisplayed() &&
+                    decisionViewModel.uiState.value.loadState is RecommendationLoadState.Ready) ||
+                    hasText(RECOMMENDATION_EXPIRED_MARKER)
             }
             if (hasText(RECOMMENDATION_EXPIRED_MARKER)) {
                 fail("Activity 重建后推荐结果会话意外失效")
             }
+            composeRule.onNodeWithText(RESULTS_HEADING).assertIsDisplayed()
+            scrollListTo("仅营业中")
             composeRule.onNodeWithText("仅营业中").assertIsSelected()
+            scrollListTo("附近方位图")
             composeRule.onNodeWithText("附近方位图").assertIsSelected()
+            scrollListTo("附近方位图（非道路导航图）")
             composeRule.onNodeWithText("附近方位图（非道路导航图）")
                 .performScrollTo()
                 .assertIsDisplayed()
 
+            scrollListTo(PRIMARY_DEMO_RESTAURANT, substring = true)
             composeRule.onNode(
                 hasClickAction() and
                     androidx.compose.ui.test.hasText(
@@ -158,14 +187,14 @@ class MainActivityDecisionFlowTest {
                 hasText("餐厅详情") || hasText("详情会话已失效")
             }
             if (hasText("详情会话已失效")) {
-                fail("打开主推荐后详情会话意外失效")
+                fail("打开首个候选后详情会话意外失效")
             }
 
             composeRule.onNodeWithText("餐厅详情").assertIsDisplayed()
-            composeRule.onNodeWithText(PRIMARY_DEMO_RESTAURANT).assertIsDisplayed()
-            composeRule.onNodeWithText(DEMO_ADDRESS).assertIsDisplayed()
-            composeRule.onNodeWithText("地图查询").assertIsDisplayed()
-            composeRule.onNodeWithText("复制地址").assertIsDisplayed()
+            for (text in listOf(PRIMARY_DEMO_RESTAURANT, DEMO_ADDRESS, "地图查询", "复制地址")) {
+                scrollListTo(text)
+                composeRule.onNodeWithText(text).performScrollTo().assertIsDisplayed()
+            }
 
             recreateActivity(scenario)
             composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
@@ -175,9 +204,12 @@ class MainActivityDecisionFlowTest {
                 fail("Activity 重建后推荐详情会话意外失效")
             }
             composeRule.onNodeWithText("餐厅详情").assertIsDisplayed()
-            composeRule.onNodeWithText(PRIMARY_DEMO_RESTAURANT).assertIsDisplayed()
-            composeRule.onNodeWithText(DEMO_ADDRESS).assertIsDisplayed()
+            for (text in listOf(PRIMARY_DEMO_RESTAURANT, DEMO_ADDRESS)) {
+                scrollListTo(text)
+                composeRule.onNodeWithText(text).performScrollTo().assertIsDisplayed()
+            }
 
+            scrollListTo(DEMO_DATA_SOURCE)
             composeRule.onNodeWithText(DEMO_DATA_SOURCE)
                 .performScrollTo()
                 .assertIsDisplayed()
@@ -186,35 +218,41 @@ class MainActivityDecisionFlowTest {
                 substring = true,
                 useUnmergedTree = true,
             ).assertDoesNotExist()
+            scrollListTo("营业状态：营业中")
             composeRule.onNodeWithText("营业状态：营业中")
                 .performScrollTo()
                 .assertIsDisplayed()
 
+            scrollListTo(DEMO_DETAIL_WARNING)
             composeRule.onNodeWithText(DEMO_DETAIL_WARNING)
                 .performScrollTo()
+                .assertIsDisplayed()
 
             composeRule.onNodeWithContentDescription("返回推荐结果")
                 .assertIsDisplayed()
                 .performClick()
             composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
-                hasText("本次用餐候选") || hasText(RECOMMENDATION_EXPIRED_MARKER)
+                (composeRule.onNodeWithText(RESULTS_HEADING).isDisplayed() &&
+                    decisionViewModel.uiState.value.loadState is RecommendationLoadState.Ready) ||
+                    hasText(RECOMMENDATION_EXPIRED_MARKER)
             }
             if (hasText(RECOMMENDATION_EXPIRED_MARKER)) {
                 fail("从重建后的详情返回时推荐结果会话意外失效")
             }
-            composeRule.onNodeWithText("本次用餐候选").assertIsDisplayed()
-            composeRule.onNode(hasScrollToIndexAction()).performScrollToNode(
-                androidx.compose.ui.test.hasText("仅营业中"),
-            )
-            composeRule.onNodeWithText("仅营业中").assertIsSelected()
-            composeRule.onNode(hasScrollToIndexAction()).performScrollToNode(
-                androidx.compose.ui.test.hasText("附近方位图"),
-            )
-            composeRule.onNodeWithText("附近方位图").assertIsSelected()
-            composeRule.onNode(hasScrollToIndexAction()).performScrollToNode(
-                androidx.compose.ui.test.hasText("附近方位图（非道路导航图）"),
-            )
+            composeRule.onNodeWithText(RESULTS_HEADING).assertIsDisplayed()
+            scrollListTo("仅营业中")
+            composeRule.onNodeWithText("仅营业中")
+                .performScrollTo()
+                .assertIsDisplayed()
+                .assertIsSelected()
+            scrollListTo("附近方位图")
+            composeRule.onNodeWithText("附近方位图")
+                .performScrollTo()
+                .assertIsDisplayed()
+                .assertIsSelected()
+            scrollListTo("附近方位图（非道路导航图）")
             composeRule.onNodeWithText("附近方位图（非道路导航图）")
+                .performScrollTo()
                 .assertIsDisplayed()
         }
     }
@@ -223,11 +261,12 @@ class MainActivityDecisionFlowTest {
     fun firstLaunch_supportFeedbackDisabled_hasNoSubmissionEntry() {
         ActivityScenario.launch(MainActivity::class.java).use {
             composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
-                hasText("同意并继续") || hasText("手动选择")
+                hasText("同意并继续")
             }
-            if (hasText("同意并继续")) {
-                composeRule.onNodeWithText("同意并继续").assertIsDisplayed().performClick()
-            }
+            composeRule.onNodeWithText("同意并继续")
+                .performScrollTo()
+                .assertIsDisplayed()
+                .performClick()
 
             composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
                 hasText("手动选择")
@@ -239,12 +278,15 @@ class MainActivityDecisionFlowTest {
             composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
                 hasText("设置与透明度")
             }
+            scrollListTo("问题反馈与餐厅纠错")
             composeRule.onNodeWithText("问题反馈与餐厅纠错")
                 .performScrollTo()
                 .assertIsDisplayed()
+            scrollListTo("反馈服务尚未完成就绪确认，当前不会开放任何提交入口。")
             composeRule.onNodeWithText("反馈服务尚未完成就绪确认，当前不会开放任何提交入口。")
                 .performScrollTo()
                 .assertIsDisplayed()
+            scrollListTo("当前未开放")
             composeRule.onNodeWithText("当前未开放")
                 .performScrollTo()
                 .assertIsDisplayed()
@@ -277,11 +319,12 @@ class MainActivityDecisionFlowTest {
     fun firstLaunch_locationKeywordSearch_selectsDemoPlace_withoutRestaurantSearchEntry() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
-                hasText("同意并继续") || hasText("手动选择")
+                hasText("同意并继续")
             }
-            if (hasText("同意并继续")) {
-                composeRule.onNodeWithText("同意并继续").assertIsDisplayed().performClick()
-            }
+            composeRule.onNodeWithText("同意并继续")
+                .performScrollTo()
+                .assertIsDisplayed()
+                .performClick()
 
             composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
                 hasText("手动选择")
@@ -291,12 +334,16 @@ class MainActivityDecisionFlowTest {
                 "正常首页不应显示直接餐厅搜索入口",
                 hasText("搜索附近餐厅 / 菜系 / 食物"),
             )
-            composeRule.onNodeWithText("手动选择").assertIsDisplayed().performClick()
+            composeRule.onNodeWithText("手动选择")
+                .performScrollTo()
+                .assertIsDisplayed()
+                .performClick()
             composeRule.onNodeWithText("搜索或选择地点").assertIsDisplayed()
             composeRule.waitUntil(timeoutMillis = CONFIG_TIMEOUT_MS) {
                 hasText("搜索地点")
             }
             composeRule.onNode(hasSetTextAction())
+                .performScrollTo()
                 .assertIsDisplayed()
                 .performTextInput(LOCATION_SEARCH_QUERY)
 
@@ -305,9 +352,11 @@ class MainActivityDecisionFlowTest {
                 hasText("搜索或选择地点")
             }
             composeRule.onNode(hasSetTextAction())
+                .performScrollTo()
                 .assertIsDisplayed()
                 .assertTextContains(LOCATION_SEARCH_QUERY)
             composeRule.onNodeWithText("搜索地点")
+                .performScrollTo()
                 .assertIsDisplayed()
                 .performClick()
 
@@ -347,11 +396,13 @@ class MainActivityDecisionFlowTest {
             composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
                 hasText(DEMO_SEARCH_PLACE)
             }
-            composeRule.onNodeWithText(DEMO_SEARCH_PLACE).assertIsDisplayed()
+            scrollListTo(DEMO_SEARCH_PLACE)
+            composeRule.onNodeWithText(DEMO_SEARCH_PLACE).performScrollTo().assertIsDisplayed()
+            scrollListTo("演示位置只在本次会话使用，不会写入历史。")
             composeRule.onNodeWithText("演示位置只在本次会话使用，不会写入历史。")
+                .performScrollTo()
                 .assertIsDisplayed()
             composeRule.onNodeWithText("帮我决定")
-                .performScrollTo()
                 .assertIsDisplayed()
             assertFalse("选择地点后也不应显示直接餐厅搜索卡片", hasText("已经知道想吃什么？"))
             assertFalse(
@@ -359,6 +410,14 @@ class MainActivityDecisionFlowTest {
                 hasText("搜索附近餐厅 / 菜系 / 食物"),
             )
         }
+    }
+
+    private fun scrollListTo(text: String, substring: Boolean = false) {
+        composeRule.onNode(
+            hasScrollToIndexAction() and !hasAnyAncestor(hasScrollToIndexAction()),
+        ).performScrollToNode(
+            androidx.compose.ui.test.hasText(text, substring = substring),
+        )
     }
 
     private fun recreateActivity(scenario: ActivityScenario<MainActivity>) {
@@ -386,6 +445,7 @@ class MainActivityDecisionFlowTest {
         private const val LOCATION_SEARCH_TIMEOUT_MS = 15_000L
         private const val RECOMMENDATION_TIMEOUT_MS = 20_000L
         private const val MANUAL_LOCATION = "北京大学东门"
+        private const val RESULTS_HEADING = "本次用餐候选"
         private const val LOCATION_SEARCH_QUERY = "北京大学"
         private const val DEMO_SEARCH_PLACE = "演示·北京大学东门测试点"
         private const val DEMO_LOCATION_DISCLOSURE =

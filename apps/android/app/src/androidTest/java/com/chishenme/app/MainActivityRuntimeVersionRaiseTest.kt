@@ -266,7 +266,7 @@ class MainActivityRuntimeVersionRaiseTest {
             )
             composeRule.onNodeWithText(REQUIRED_UPDATE_MESSAGE).assertDoesNotExist()
             composeRule.onNodeWithText(OLD_RESTAURANT_NAME).assertDoesNotExist()
-            composeRule.onNodeWithText("推荐结果").assertDoesNotExist()
+            composeRule.onNodeWithText("本次用餐候选").assertDoesNotExist()
             assertEquals(
                 "配置刷新应保留安全的表单地点，供用户显式重新提交",
                 MANUAL_LOCATION,
@@ -274,7 +274,6 @@ class MainActivityRuntimeVersionRaiseTest {
             )
 
             composeRule.onNode(hasText("帮我决定") and hasClickAction())
-                .performScrollTo()
                 .assertIsDisplayed()
                 .assertIsEnabled()
                 .performClick()
@@ -296,7 +295,7 @@ class MainActivityRuntimeVersionRaiseTest {
                     viewModel = decisionViewModel,
                 )
             }
-            composeRule.onNodeWithText("推荐结果").assertIsDisplayed()
+            composeRule.onNodeWithText("本次用餐候选").assertIsDisplayed()
             composeRule.onNodeWithText(NEW_RESTAURANT_NAME)
                 .performScrollTo()
                 .assertIsDisplayed()
@@ -344,7 +343,6 @@ class MainActivityRuntimeVersionRaiseTest {
             .performClick()
         assertEquals(MANUAL_LOCATION, viewModel.uiState.value.input.location?.label)
         composeRule.onNode(hasText("帮我决定") and hasClickAction())
-            .performScrollTo()
             .assertIsDisplayed()
             .assertIsEnabled()
             .performClick()
@@ -427,7 +425,7 @@ class MainActivityRuntimeVersionRaiseTest {
         )
         assertEquals("旧推荐不得产生自动曝光事件", 0, eventCallCount.get())
         composeRule.onNodeWithText(UPDATE_HEADING).assertIsDisplayed()
-        composeRule.onNodeWithText("推荐结果").assertDoesNotExist()
+        composeRule.onNodeWithText("本次用餐候选").assertDoesNotExist()
         composeRule.onNodeWithText(OLD_RESTAURANT_NAME).assertDoesNotExist()
     }
 

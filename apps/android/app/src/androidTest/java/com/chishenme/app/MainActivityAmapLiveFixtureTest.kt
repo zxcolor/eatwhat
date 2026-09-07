@@ -18,10 +18,12 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.datastore.preferences.preferencesDataStoreFile
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -29,6 +31,9 @@ import androidx.test.filters.LargeTest
 import androidx.test.platform.app.InstrumentationRegistry
 import com.chishenme.app.data.remote.API_CONTRACT_VERSION
 import com.chishenme.app.data.remote.API_CONTRACT_VERSION_HEADER
+import com.chishenme.app.feature.config.RemoteFeatureConfigState
+import com.chishenme.app.feature.decision.DecisionViewModel
+import com.chishenme.app.feature.decision.RecommendationLoadState
 import java.io.IOException
 import java.net.InetAddress
 import java.util.concurrent.CopyOnWriteArrayList
@@ -112,18 +117,25 @@ class MainActivityAmapLiveFixtureTest {
 
     @Test
     fun liveAmapResponse_isAttributedUnscoredAndCannotLaunchOutboundActions() {
-        ActivityScenario.launch(MainActivity::class.java).use {
-            enterManualLocation()
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            enterManualLocation(scenario)
+            scrollOverviewToTop()
+            captureSyntheticScreenshot("home-overview.png")
             composeRule.onNodeWithContentDescription("设置").performClick()
             awaitSettingsConfiguration(enabled = false)
+            scrollOverviewToTop()
+            composeRule.onNodeWithText("设置与透明度").assertIsDisplayed()
+            captureSyntheticScreenshot("settings-overview.png")
             composeRule.onNodeWithContentDescription("返回").performClick()
             assertHomePreferenceControls(enabled = false)
             scrollHomeTo(hasClickAction() and hasText("帮我决定"))
                 .assertIsDisplayed()
                 .performClick()
 
-            awaitText(RESTAURANT_NAME)
+            awaitResultsReady(scenario)
+            scrollOverviewToTop()
             composeRule.onNodeWithText("本次用餐候选").assertIsDisplayed()
+            captureSyntheticScreenshot("live-results-overview.png")
             assertFalse("实时展示模式不得声称已替用户选定", hasUiText("这顿就吃它"))
             scrollResultsTo(RESTAURANT_NAME)
             composeRule.onNodeWithText(RESTAURANT_NAME).assertIsDisplayed()
@@ -140,23 +152,29 @@ class MainActivityAmapLiveFixtureTest {
                 .assertIsDisplayed()
                 .performClick()
             composeRule.onNodeWithText("保持数据源返回顺序", substring = true)
+                .performScrollTo()
                 .assertIsDisplayed()
             composeRule.onNodeWithText("综合路程", substring = true).assertDoesNotExist()
+            captureSyntheticScreenshot("live-results-why.png")
             composeRule.onNodeWithText("知道了").assertIsDisplayed().performClick()
 
+            scrollResultsTo(RESTAURANT_NAME)
             composeRule.onNode(hasClickAction() and hasText(RESTAURANT_NAME, substring = true))
                 .assertIsDisplayed()
                 .performClick()
             awaitText("餐厅详情")
+            captureSyntheticScreenshot("live-detail-overview.png")
             composeRule.onNodeWithText("数据来源：高德地图实时数据")
                 .performScrollTo()
                 .assertIsDisplayed()
             for (action in listOf("地图查询", "复制地址", "联系商户")) {
+                scrollResultsTo(action)
                 composeRule.onNodeWithText(action)
                     .performScrollTo()
                     .assertIsDisplayed()
                     .assertIsNotEnabled()
             }
+            captureSyntheticScreenshot("live-detail-actions.png")
 			composeRule.onNodeWithText(
 				"分享推荐卡",
 				substring = true,
@@ -179,18 +197,14 @@ class MainActivityAmapLiveFixtureTest {
     @Test
     fun publicRadiusDefaults_showExactOptionsAndRequireExplicitCorrectionBeforeSubmission() {
         radiusDefaultsEnabled = true
-        ActivityScenario.launch(MainActivity::class.java).use {
-            enterManualLocation()
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            enterManualLocation(scenario)
             scrollHomeTo(hasText("精细匹配") and hasClickAction()).performClick()
+            composeRule.onNode(hasText("精细匹配") and hasClickAction()).assertIsSelected()
             radiusOption("750 m").assertIsSelected()
             radiusOption("1.25 km").assertIsDisplayed()
             captureSyntheticScreenshot("single-radius-750-default.png")
 
-            // The initial configuration notice can cover the bottom of the
-            // scrolled scenario row. Wait for its real dismissal before tapping.
-            composeRule.waitUntil(UI_TIMEOUT_MS) {
-                !hasUiText("已按当前服务建议将最远距离调整为 750 米。")
-            }
             // Fixed options respect the live upper bound. A user's scenario is
             // still preserved and must be corrected explicitly when it exceeds it.
             scrollHomeTo(hasText("工作日午餐") and hasClickAction()).performClick()
@@ -214,7 +228,7 @@ class MainActivityAmapLiveFixtureTest {
             captureSyntheticScreenshot("single-radius-explicit-correction.png")
             scrollHomeTo(hasText("帮我决定") and hasClickAction()).performClick()
 
-            awaitText(RESTAURANT_NAME)
+            awaitResultsReady(scenario)
             scrollResultsTo(RESTAURANT_NAME)
             composeRule.onNode(hasClickAction() and hasText(RESTAURANT_NAME, substring = true))
                 .assertIsDisplayed()
@@ -233,39 +247,40 @@ class MainActivityAmapLiveFixtureTest {
         // the existing UI. No recommendation or external provider is called.
         preferenceRankingEnabled = true
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-            enterManualLocation()
+            enterManualLocation(scenario)
             composeRule.onNodeWithContentDescription("设置").performClick()
             awaitText("设置与透明度")
             awaitSettingsConfiguration(enabled = true)
             scrollSettingsTo("推荐偏好")
             composeRule.onNodeWithContentDescription("质量信号 权重 100%")
+                .performScrollTo()
+                .assertIsDisplayed()
                 .performSemanticsAction(SemanticsActions.SetProgress) { setProgress ->
                     assertTrue(setProgress(40f))
                 }
-            awaitText("存在本机设置")
+            scrollSettingsTo("存在本机设置").assertIsDisplayed()
 
             refreshPreferenceRankingCapability(scenario, enabled = false)
-            scrollSettingsTo("推荐偏好")
-            composeRule.onNodeWithText("当前不使用偏好排序，已保存的偏好仍保留在本机。")
+            scrollSettingsTo("当前不使用偏好排序，已保存的偏好仍保留在本机。")
                 .assertIsDisplayed()
             assertInactivePreferenceControlsAbsent()
-            composeRule.onNodeWithText("清除本机偏好").assertIsDisplayed()
+            scrollSettingsTo("清除本机偏好").assertIsDisplayed()
             captureSyntheticScreenshot("live-settings-stored-preferences.png")
 
             // Merely entering LIVE must preserve the user's saved value.
             refreshPreferenceRankingCapability(scenario, enabled = true)
             scrollSettingsTo("推荐偏好")
             composeRule.onNodeWithContentDescription("质量信号 权重 40%")
+                .performScrollTo()
                 .assertIsDisplayed()
-            composeRule.onNodeWithText("存在本机设置").assertIsDisplayed()
+            scrollSettingsTo("存在本机设置").assertIsDisplayed()
 
             refreshPreferenceRankingCapability(scenario, enabled = false)
             scrollSettingsTo("清除本机偏好").performClick()
             composeRule.waitUntil(UI_TIMEOUT_MS) {
                 !hasUiText("推荐偏好") && !hasUiText("清除本机偏好")
             }
-            scrollSettingsTo("推荐透明度")
-            composeRule.onNodeWithText("数据来源").assertIsDisplayed()
+            scrollSettingsTo("数据来源").assertIsDisplayed()
             composeRule.onNodeWithText("推荐偏好").assertDoesNotExist()
             composeRule.onNodeWithText("清除本机偏好").assertDoesNotExist()
             assertInactivePreferenceControlsAbsent()
@@ -276,8 +291,9 @@ class MainActivityAmapLiveFixtureTest {
             refreshPreferenceRankingCapability(scenario, enabled = true)
             scrollSettingsTo("推荐偏好")
             composeRule.onNodeWithContentDescription("质量信号 权重 100%")
+                .performScrollTo()
                 .assertIsDisplayed()
-            composeRule.onNodeWithText("当前使用应用默认值").assertIsDisplayed()
+            scrollSettingsTo("当前使用应用默认值").assertIsDisplayed()
             scrollSettingsTo("清除本机偏好").assertIsNotEnabled()
             composeRule.onNodeWithContentDescription("返回").performClick()
             assertHomePreferenceControls(enabled = true)
@@ -351,18 +367,34 @@ class MainActivityAmapLiveFixtureTest {
         composeRule.onNodeWithText("可控偏好向量").assertDoesNotExist()
     }
 
-    private fun enterManualLocation() {
+    private fun enterManualLocation(scenario: ActivityScenario<MainActivity>) {
         composeRule.waitUntil(UI_TIMEOUT_MS) {
-            hasUiText("同意并继续") || hasUiText("手动选择")
+            hasUiText("同意并继续") || hasUiText("吃什么")
         }
         if (hasUiText("同意并继续")) {
             assertEquals("隐私同意前不得访问配置或地点服务", 0, server.requestCount)
-            composeRule.onNodeWithText("同意并继续").performClick()
+            composeRule.onNodeWithText("同意并继续")
+                .performScrollTo()
+                .assertIsDisplayed()
+                .performClick()
+        }
+        lateinit var decisionViewModel: DecisionViewModel
+        scenario.onActivity { activity ->
+            decisionViewModel = ViewModelProvider(activity)[DecisionViewModel::class.java]
         }
         composeRule.waitUntil(UI_TIMEOUT_MS) {
-            requests.any { it.path == "/v1/config" } && hasUiText("手动选择")
+            requests.any { it.path == "/v1/config" } && hasUiText("吃什么") &&
+                decisionViewModel.uiState.value.remoteFeatureConfig is RemoteFeatureConfigState.Ready
         }
-        composeRule.onNodeWithText("手动选择").performClick()
+        // The configuration notice can cover even the first scrolled location action
+        // in a short viewport. Await its actual dismissal before touching the form.
+        composeRule.waitForIdle()
+        composeRule.waitUntil(UI_TIMEOUT_MS) {
+            !hasUiText("已按当前服务建议将最远距离调整为 750 米。")
+        }
+        scrollHomeTo(hasText("手动选择") and hasClickAction())
+            .assertIsDisplayed()
+            .performClick()
         composeRule.onNodeWithText("快捷地点（始终可用）").performScrollTo()
         composeRule.onNodeWithText(MANUAL_LOCATION)
             .performScrollTo()
@@ -371,10 +403,19 @@ class MainActivityAmapLiveFixtureTest {
     }
 
     private fun scrollHomeTo(matcher: SemanticsMatcher): SemanticsNodeInteraction {
+        val node = composeRule.onNode(matcher)
+        // The decision action lives outside the list in the Scaffold bottom bar.
+        if (runCatching { node.assertIsDisplayed() }.isSuccess) return node.assertIsDisplayed()
         composeRule.onNode(
             hasScrollToIndexAction() and !hasAnyAncestor(hasScrollToIndexAction()),
         ).performScrollToNode(matcher)
         return composeRule.onNode(matcher).performScrollTo().assertIsDisplayed()
+    }
+
+    private fun scrollOverviewToTop() {
+        composeRule.onNode(
+            hasScrollToIndexAction() and !hasAnyAncestor(hasScrollToIndexAction()),
+        ).performScrollToIndex(0)
     }
 
     private fun radiusOption(text: String): SemanticsNodeInteraction {
@@ -385,47 +426,38 @@ class MainActivityAmapLiveFixtureTest {
             hasScrollToIndexAction() and hasAnyAncestor(hasScrollToIndexAction()) and
                 hasAnyDescendant(radiusLabels),
         ).performScrollToNode(hasText(text))
+        composeRule.onNode(
+            hasScrollToIndexAction() and !hasAnyAncestor(hasScrollToIndexAction()),
+        ).performScrollToNode(hasClickAction() and hasText(text))
         return composeRule.onNode(hasClickAction() and hasText(text))
             .performScrollTo()
             .assertIsDisplayed()
     }
 
     private fun captureSyntheticScreenshot(fileName: String) {
-        composeRule.waitForIdle()
-        val instrumentation = InstrumentationRegistry.getInstrumentation()
-        composeRule.waitUntil(UI_TIMEOUT_MS) {
-            val activeWindow = instrumentation.uiAutomation.rootInActiveWindow
-                ?: return@waitUntil false
-            assertEquals(
-                "A system dialog or another app must not obscure the fixture screenshot",
-                instrumentation.targetContext.packageName,
-                activeWindow.packageName?.toString(),
-            )
-            true
-        }
-        assertEquals(
-            "The fixture must remain the active window immediately before capture",
-            instrumentation.targetContext.packageName,
-            checkNotNull(instrumentation.uiAutomation.rootInActiveWindow).packageName?.toString(),
-        )
-        val bitmap = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
-        try {
-            java.io.File(instrumentation.targetContext.cacheDir, fileName)
-                .outputStream().use { output ->
-                    assertTrue(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output))
-                }
-        } finally {
-            bitmap.recycle()
-        }
+        composeRule.captureUiRefinementScreenshot(fileName)
     }
 
     private fun scrollResultsTo(text: String, substring: Boolean = false) {
+        val node = composeRule.onNode(hasText(text, substring = substring))
+        if (runCatching { node.assertIsDisplayed() }.isSuccess) return
         composeRule.onNode(hasScrollToIndexAction())
             .performScrollToNode(hasText(text, substring = substring))
     }
 
     private fun awaitText(text: String) {
         composeRule.waitUntil(timeoutMillis = UI_TIMEOUT_MS) { hasUiText(text) }
+    }
+
+    private fun awaitResultsReady(scenario: ActivityScenario<MainActivity>) {
+        lateinit var decisionViewModel: DecisionViewModel
+        scenario.onActivity { activity ->
+            decisionViewModel = ViewModelProvider(activity)[DecisionViewModel::class.java]
+        }
+        composeRule.waitUntil(timeoutMillis = UI_TIMEOUT_MS) {
+            hasUiText("本次用餐候选") &&
+                decisionViewModel.uiState.value.loadState is RecommendationLoadState.Ready
+        }
     }
 
     private fun hasUiText(text: String): Boolean = composeRule.onAllNodesWithText(
