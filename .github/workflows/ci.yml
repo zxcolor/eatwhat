@@ -3174,8 +3174,11 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-          cache: gradle
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          # GitHub isolates branch caches. Repository pushes can warm their own
+          # cache; pull requests only read and cannot publish cache entries.
+          cache-read-only: ${{ github.event_name != 'push' }}
       - name: Install Android SDK 36
         shell: bash
         run: |
@@ -3188,7 +3191,8 @@ jobs:
           "$sdkmanager" "platforms;android-36" "build-tools;36.0.0"
       - run: chmod +x gradlew
       - name: Test Android build-logic security policies
-        run: ./gradlew -p buildSrc test --stacktrace
+        # Re-execute tests while allowing their compilation dependencies to be cached.
+        run: ./gradlew -p buildSrc test --rerun --build-cache --profile --console=plain --stacktrace
       - name: Reject Fusion SDK, phone-state permission, and legacy auth UI
         shell: bash
         run: |
@@ -3201,8 +3205,42 @@ jobs:
           fi
       - name: Verify cloud Debug
         run: >-
-          ./gradlew testDebugUnitTest lintDebug assembleDebug
-          --stacktrace
+          ./gradlew testDebugUnitTest --rerun lintDebug assembleDebug
+          --build-cache --profile --console=plain --stacktrace
+      - name: Verify executed JVM test reports
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          groups = {
+              "build-logic": Path("buildSrc/build/test-results/test"),
+              "android-debug": Path("app/build/test-results/testDebugUnitTest"),
+          }
+          results = {}
+          for name, directory in groups.items():
+              reports = sorted(directory.glob("TEST-*.xml"))
+              if not reports:
+                  raise SystemExit(f"{name}: no JUnit reports were generated")
+              totals = dict.fromkeys(("tests", "failures", "errors", "skipped"), 0)
+              for report in reports:
+                  suite = ET.parse(report).getroot()
+                  for key in totals:
+                      totals[key] += int(suite.attrib.get(key, "0"))
+              if totals["tests"] <= 0 or any(totals[key] for key in ("failures", "errors", "skipped")):
+                  raise SystemExit(f"{name}: incomplete or unsuccessful JVM tests: {totals}")
+              results[name] = totals
+          output = Path("build/reports/ci/jvm-tests.json")
+          output.parent.mkdir(parents=True, exist_ok=True)
+          output.write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
+          print(output.read_text(encoding="utf-8"))
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("\n### JVM tests executed on this runner\n\n")
+              for name, totals in results.items():
+                  summary.write(f"- {name}: {totals['tests']} passed; 0 failed, errored or skipped.\n")
+          PY
       - name: Verify Release manifest
         run: >-
           ./gradlew processReleaseMainManifest
@@ -3211,7 +3249,7 @@ jobs:
       - name: Assemble isolated Fixture test artifacts
         run: >-
           ./gradlew assembleFixture assembleFixtureAndroidTest
-          --stacktrace
+          --build-cache --profile --console=plain --stacktrace
       - name: Reject Fusion contents in generated APKs
         shell: bash
         run: |
@@ -3249,7 +3287,7 @@ jobs:
           set +e
           ./gradlew assembleAlpha \
             -PCHISHENME_ALPHA_API_BASE_URL=https://api.unfinished-era.com/ \
-            --no-daemon >"$log_file" 2>&1
+            --no-daemon --no-build-cache --no-configuration-cache >"$log_file" 2>&1
           status=$?
           set -e
           cat "$log_file"
@@ -3271,7 +3309,7 @@ jobs:
             set +e
             ./gradlew "$@" \
               -PCHISHENME_API_BASE_URL=https://api.unfinished-era.com/ \
-              --no-daemon >"$log_file" 2>&1
+              --no-daemon --no-build-cache --no-configuration-cache >"$log_file" 2>&1
             local status=$?
             set -e
             cat "$log_file"
@@ -3292,3 +3330,14 @@ jobs:
           assert_unsigned_release_rejected mixed processReleaseMainManifest assembleRelease
           test ! -e app/build/outputs/apk/release/app-release.apk
           test ! -e app/build/outputs/bundle/release/app-release.aab
+      - name: Preserve Android build performance reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build-profile-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            apps/android/build/reports/profile/**
+            apps/android/buildSrc/build/reports/profile/**
+            apps/android/build/reports/ci/jvm-tests.json
+          if-no-files-found: warn
+          retention-days: 7
