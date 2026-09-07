@@ -58,7 +58,6 @@ import com.chishenme.app.feature.support.showSupportFeedbackEntryAction
 import com.chishenme.app.ui.AppCard
 import com.chishenme.app.ui.AppDimens
 import com.chishenme.app.ui.AppDialog
-import com.chishenme.app.ui.AppHeroCard
 import com.chishenme.app.ui.AppIcons
 import com.chishenme.app.ui.AppSectionHeader
 import com.chishenme.app.ui.AppTopBar
@@ -115,12 +114,12 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(AppDimens.SectionGap),
         ) {
             item {
-                AppHeroCard(
-                    eyebrow = "CONTROL CENTER",
-                    title = "你的选择，始终由你掌控",
-                    description = "权限按需开启，数据边界清晰可查；账号、历史和主题都能在这里独立管理。",
-                    icon = Icons.Rounded.Lock,
-                )
+                AppCard(contentPadding = PaddingValues(14.dp)) {
+                    AppSectionHeader(
+                        title = "你的选择，始终由你掌控",
+                        subtitle = "权限按需开启，数据边界清晰可查；账号、历史和主题都能在这里独立管理。",
+                    )
+                }
             }
             item { SettingsHeader("隐私控制") }
             item {
@@ -251,7 +250,7 @@ fun SettingsScreen(
             item { SettingsHeader("显示") }
             item {
                 AppCard(contentPadding = PaddingValues(0.dp)) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(AppIcons.DarkMode, null, tint = MaterialTheme.colorScheme.primary)
                             Spacer(Modifier.width(10.dp))
@@ -396,8 +395,8 @@ private fun PreferenceVectorCard(
     }
     AppCard(contentPadding = PaddingValues(0.dp)) {
         Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Row(
                 verticalAlignment = Alignment.Top,
@@ -407,7 +406,7 @@ private fun PreferenceVectorCard(
                     shape = MaterialTheme.shapes.medium,
                     color = MaterialTheme.colorScheme.primaryContainer,
                     contentColor = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(42.dp),
+                    modifier = Modifier.size(32.dp),
                 ) {
                     androidx.compose.foundation.layout.Box(contentAlignment = Alignment.Center) {
                         Icon(AppIcons.Tune, contentDescription = null)
@@ -550,7 +549,7 @@ private fun DecisionHistoryCard(
 ) {
     AppCard(contentPadding = PaddingValues(0.dp)) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -655,37 +654,28 @@ private fun SettingsCard(
     description: String,
     action: @Composable () -> Unit,
 ) {
-    AppCard(contentPadding = PaddingValues(0.dp)) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+    AppCard(contentPadding = PaddingValues(14.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Row(
-                verticalAlignment = Alignment.Top,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                androidx.compose.material3.Surface(
-                    shape = MaterialTheme.shapes.medium,
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(42.dp),
-                ) { androidx.compose.foundation.layout.Box(contentAlignment = Alignment.Center) { icon() } }
-                Column(Modifier.weight(1f)) {
-                    Text(title, style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        description,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            Row(
-                modifier = Modifier.align(Alignment.End),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                action()
-            }
+            androidx.compose.material3.Surface(
+                shape = MaterialTheme.shapes.small,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(32.dp),
+            ) { androidx.compose.foundation.layout.Box(contentAlignment = Alignment.Center) { icon() } }
+            AppSectionHeader(
+                title = title,
+                modifier = Modifier.weight(1f),
+                trailing = action,
+            )
         }
+        Text(
+            description,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

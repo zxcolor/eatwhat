@@ -12,13 +12,16 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
@@ -51,6 +54,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -97,6 +102,10 @@ fun AccountScreen(
     val capabilities = remoteFeatureConfig.configOrNull?.authCapabilities
     val lifecycleOwner = LocalLifecycleOwner.current
     val snackbar = remember { SnackbarHostState() }
+    val accountListState = rememberLazyListState()
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    var settledAccountStatus by remember { mutableStateOf<AccountStatus?>(null) }
     var confirmDelete by remember { mutableStateOf(false) }
     var pendingUnbind by remember { mutableStateOf<AuthIdentityBinding?>(null) }
     var pendingRevoke by remember { mutableStateOf<AuthSessionSummary?>(null) }
@@ -140,6 +149,17 @@ fun AccountScreen(
         }
     }
 
+    LaunchedEffect(state.status) {
+        if (state.status == AccountStatus.GUEST || state.status == AccountStatus.SIGNED_IN) {
+            if (settledAccountStatus != null && settledAccountStatus != state.status) {
+                focusManager.clearFocus()
+                keyboardController?.hide()
+                accountListState.scrollToItem(0)
+            }
+            settledAccountStatus = state.status
+        }
+    }
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
@@ -153,7 +173,12 @@ fun AccountScreen(
         snackbarHost = { AppSnackbarHost(snackbar) },
     ) { padding ->
         LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding),
+            state = accountListState,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .consumeWindowInsets(padding)
+                .imePadding(),
             contentPadding = PaddingValues(
                 horizontal = AppDimens.ScreenHorizontal,
                 vertical = AppDimens.ScreenVertical,
@@ -506,71 +531,17 @@ private fun AccountBusyBanner(state: AccountUiState) {
 
 @Composable
 private fun GuestNoticeCard() {
-    AppHeroCard(
-        eyebrow = "访客模式",
-        title = "不登录也能决定吃什么",
-        description = "登录只用于跨设备同步、身份绑定和账号数据权利；不会改变自然推荐排序。",
-        icon = Icons.Rounded.Lock,
-        footer = {
-            FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                AppBadge(text = "核心推荐可用", tone = AppTone.SUCCESS)
-                AppBadge(text = "不影响排序", tone = AppTone.INFO)
-            }
-            AccountHeroMetricStrip(
-                firstValue = "游客",
-                firstLabel = "当前身份",
-                secondValue = "仅本机",
-                secondLabel = "登录材料",
-                thirdValue = "按需",
-                thirdLabel = "第三方授权",
-            )
-        }
-    )
-}
-
-@Composable
-private fun AccountHeroMetricStrip(
-    firstValue: String,
-    firstLabel: String,
-    secondValue: String,
-    secondLabel: String,
-    thirdValue: String,
-    thirdLabel: String,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        AccountHeroMetric(firstValue, firstLabel, Modifier.weight(1f))
-        AccountHeroMetric(secondValue, secondLabel, Modifier.weight(1f))
-        AccountHeroMetric(thirdValue, thirdLabel, Modifier.weight(1f))
-    }
-}
-
-@Composable
-private fun AccountHeroMetric(value: String, label: String, modifier: Modifier = Modifier) {
-    Surface(
-        modifier = modifier,
-        color = Color.White.copy(alpha = 0.10f),
-        contentColor = Color.White,
-        shape = RoundedCornerShape(AppDimens.CompactRadius),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.13f)),
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            Text(value, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-            Text(
-                label,
-                style = MaterialTheme.typography.labelSmall,
-                color = Color.White.copy(alpha = 0.76f),
-            )
-        }
+    AppCard(contentPadding = PaddingValues(14.dp)) {
+        Text(
+            text = "访客模式",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.SemiBold,
+        )
+        AppSectionHeader(
+            title = "不登录也能决定吃什么",
+            subtitle = "登录只用于跨设备同步、身份绑定和账号数据权利；不会改变自然推荐排序。",
+        )
     }
 }
 
@@ -593,7 +564,7 @@ private fun OtpChallengePrivacyCard() {
 
 @Composable
 private fun GuestProtectionCard() {
-    AppCard {
+    AppCard(contentPadding = PaddingValues(14.dp)) {
         AppSectionHeader(
             title = "账号安全边界",
             subtitle = "每一种登录方式都遵守同一套身份规则。",
@@ -609,10 +580,10 @@ private fun GuestProtectionCard() {
 private fun SecurityPromiseRow(text: String) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        AppIconTile(Icons.Rounded.Check, tone = AppTone.SUCCESS, size = 36.dp)
+        AppIconTile(Icons.Rounded.Check, tone = AppTone.SUCCESS, size = 28.dp)
         Text(
             text,
             modifier = Modifier.weight(1f),
@@ -657,7 +628,7 @@ private fun OtpLoginCard(
     }
     val targetHasError = target.isNotBlank() && !targetIsValid
 
-    AppCard {
+    AppCard(contentPadding = PaddingValues(14.dp)) {
         AppSectionHeader(
             title = "手机号 / 邮箱验证码",
             subtitle = if (challenge == null) {
@@ -975,14 +946,6 @@ private fun SignedInCard(
                     Text("刷新")
                 }
             }
-            AccountHeroMetricStrip(
-                firstValue = if (identities > 0) "$identities 项" else "核对中",
-                firstLabel = "登录身份",
-                secondValue = if (sessions > 0) "$sessions 台" else "核对中",
-                secondLabel = "活跃设备",
-                thirdValue = "Keystore",
-                thirdLabel = "本机保护",
-            )
         }
     )
 }

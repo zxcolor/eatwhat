@@ -10,7 +10,6 @@ import android.provider.Settings as AndroidSettings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -73,7 +72,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
@@ -83,6 +84,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -259,27 +261,87 @@ fun HomeScreen(
 
     HomeSurfaceTheme {
         val homeColors = currentHomeVisualColors()
+        val compactHeight = LocalConfiguration.current.screenHeightDp < 600
+        val decisionActions: @Composable () -> Unit = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                (state.formError ?: state.radiusError)?.let { error ->
+                    Surface(
+                        modifier = Modifier.semantics {
+                            liveRegion = LiveRegionMode.Assertive
+                            stateDescription = error
+                        },
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        shape = MaterialTheme.shapes.small,
+                    ) {
+                        Text(
+                            error,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                        )
+                    }
+                }
+                if (state.radiusError != null) {
+                    val suggestedRadius = RecommendationRadiusPolicy.automaticRadius(
+                        state.input.mealPeriod,
+                        recommendationDefaults,
+                    )
+                    TextButton(onClick = { viewModel.setRadius(suggestedRadius) }) {
+                        Text("将最远距离改为 $suggestedRadius 米")
+                    }
+                }
+                HomePrimaryAction(
+                    enabled = recommendationEnabled,
+                    onClick = {
+                        if (viewModel.recommend()) onRecommendationStarted()
+                    },
+                )
+                Text(
+                    "最多 3 个候选 · 每个选择都有可核对理由",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
         Scaffold(
             containerColor = homeColors.page,
             snackbarHost = { AppSnackbarHost(snackbarHostState) },
             topBar = {
                 AppTopBar(
                     title = "吃什么",
-                    subtitle = "现在这一顿，30 秒决定",
+                    subtitle = "附近美食，少一点纠结",
                     actions = {
                         Surface(
                             modifier = Modifier.padding(end = 10.dp).size(48.dp),
-                            color = homeColors.card,
+                            color = homeColors.accentSoft,
                             shape = MaterialTheme.shapes.medium,
-                            border = BorderStroke(1.dp, homeColors.border),
-                            shadowElevation = 1.dp,
                         ) {
                             IconButton(onClick = onOpenSettings) {
-                                Icon(Icons.Rounded.Settings, contentDescription = "设置")
+                                Icon(
+                                    Icons.Rounded.Settings,
+                                    contentDescription = "设置",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(22.dp),
+                                )
                             }
                         }
                     },
                 )
+            },
+            bottomBar = {
+                if (!compactHeight) Surface(color = homeColors.card, shadowElevation = 5.dp) {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().navigationBarsPadding()
+                            .padding(horizontal = HomeDimens.ScreenHorizontal, vertical = 12.dp),
+                    ) {
+                        decisionActions()
+                    }
+                }
             },
         ) { contentPadding ->
             LazyColumn(
@@ -569,60 +631,8 @@ fun HomeScreen(
                     )
                 }
             }
-
-            item {
-                HomeCard {
-                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text(
-                            "准备好了",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            "不做无限信息流，把符合这次条件的候选清楚地放到你面前。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    (state.formError ?: state.radiusError)?.let { error ->
-                        Surface(
-                            modifier = Modifier.semantics {
-                                liveRegion = LiveRegionMode.Assertive
-                                stateDescription = error
-                            },
-                            color = MaterialTheme.colorScheme.errorContainer,
-                            shape = MaterialTheme.shapes.small,
-                        ) {
-                            Text(
-                                error,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                                style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
-                            )
-                        }
-                    }
-                    if (state.radiusError != null) {
-                        val suggestedRadius = RecommendationRadiusPolicy.automaticRadius(
-                            state.input.mealPeriod,
-                            recommendationDefaults,
-                        )
-                        TextButton(onClick = { viewModel.setRadius(suggestedRadius) }) {
-                            Text("将最远距离改为 $suggestedRadius 米")
-                        }
-                    }
-                    HomePrimaryAction(
-                        enabled = recommendationEnabled,
-                        onClick = {
-                            if (viewModel.recommend()) onRecommendationStarted()
-                        },
-                    )
-                    Text(
-                        "最多展示 3 个符合条件的候选 · 每个候选附可核对理由",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
+            if (compactHeight) {
+                item { HomeCard { decisionActions() } }
             }
             }
         }
@@ -782,9 +792,9 @@ private fun QuickDecisionSummary(
     val colors = currentHomeVisualColors()
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = colors.greenSoft),
+        colors = CardDefaults.cardColors(containerColor = colors.accentSoft),
         shape = RoundedCornerShape(HomeDimens.CardRadius),
-        border = BorderStroke(1.dp, colors.border),
+        border = BorderStroke(0.5.dp, colors.border),
     ) {
         Column(
             modifier = Modifier.padding(HomeDimens.CardPadding),
@@ -809,24 +819,13 @@ private fun QuickDecisionSummary(
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
-                        "已经替你收好常用条件，可以直接开始。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        "人均 ${budgetMaxYuan?.let { "${it}元内" } ?: "不限"} · " +
+                            "$availableMinutes 分钟 · ${travelLabel(travelMode)}" +
+                            if (showExplorationPreference) " · ${explorationLabel(explorationMode)}" else "",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
                     )
                 }
-            }
-            Surface(
-                color = colors.card.copy(alpha = 0.72f),
-                shape = MaterialTheme.shapes.small,
-            ) {
-                Text(
-                    "人均 ${budgetMaxYuan?.let { "${it}元内" } ?: "不限"} · " +
-                        "$availableMinutes 分钟 · ${travelLabel(travelMode)}" +
-                        if (showExplorationPreference) " · ${explorationLabel(explorationMode)}" else "",
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium,
-                )
             }
             Text(
                 "切换到“精细匹配”可以调整这些条件。",
@@ -1131,38 +1130,34 @@ private fun ModeButton(
         animationSpec = tween(HomeMotion.SelectionMillis),
         label = "mode border",
     )
-    val elevation by animateDpAsState(
-        targetValue = if (selected) 2.dp else 0.dp,
-        animationSpec = tween(HomeMotion.SelectionMillis),
-        label = "mode elevation",
-    )
     Card(
         onClick = onClick,
         modifier = modifier
-            .heightIn(min = 116.dp)
+            .heightIn(min = 80.dp)
             .semantics(mergeDescendants = true) {
                 this.selected = selected
                 role = Role.RadioButton
             },
         colors = CardDefaults.cardColors(containerColor = containerColor),
         border = BorderStroke(1.dp, borderColor),
-        elevation = CardDefaults.cardElevation(defaultElevation = elevation),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         shape = RoundedCornerShape(HomeDimens.CompactRadius),
     ) {
-        Column(
-            modifier = Modifier.fillMaxSize().padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            HomeIconTile(if (selected) colors.card.copy(alpha = 0.78f) else colors.card) {
+            if (LocalDensity.current.fontScale <= 1.2f) {
                 Icon(
-                    if (selected) AppIcons.Restaurant else AppIcons.Tune,
+                    if (title == "极速决定") AppIcons.Restaurant else AppIcons.Tune,
                     contentDescription = null,
                     tint = if (selected) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(21.dp),
+                    modifier = Modifier.size(22.dp),
                 )
             }
-            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
                 Text(
                     title,
                     style = MaterialTheme.typography.titleSmall,
@@ -1203,7 +1198,10 @@ private fun <T> OptionSection(
     selected: T?,
     onSelected: (T) -> Unit,
 ) {
-    HomeCard {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         SectionTitle(title, subtitle)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(options) { (value, label) ->
@@ -1216,7 +1214,7 @@ private fun <T> OptionSection(
                     } else {
                         null
                     },
-                    modifier = Modifier.heightIn(min = 42.dp),
+                    modifier = Modifier.heightIn(min = HomeDimens.MinTouchTarget),
                     shape = RoundedCornerShape(HomeDimens.CompactRadius),
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,

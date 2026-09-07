@@ -35,6 +35,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
@@ -51,6 +52,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
@@ -63,16 +65,16 @@ import androidx.compose.ui.window.DialogProperties
 
 /** Shared mobile visual language, adapted from the approved HomeScreen direction. */
 object AppDimens {
-    val ScreenHorizontal = 14.dp
+    val ScreenHorizontal = 16.dp
     val ScreenVertical = 12.dp
     val SectionGap = 14.dp
     val CardPadding = 16.dp
-    val CardRadius = 14.dp
-    val HeroRadius = 20.dp
+    val CardRadius = 16.dp
+    val HeroRadius = 24.dp
     val CompactRadius = 10.dp
     val IconTile = 42.dp
     val MinTouchTarget = 48.dp
-    val PrimaryButtonHeight = 54.dp
+    val PrimaryButtonHeight = 56.dp
 }
 
 object AppMotion {
@@ -100,37 +102,37 @@ data class AppVisualPalette(
 )
 
 private val LightAppVisualPalette = AppVisualPalette(
-    page = Color(0xFFF5F6F7),
+    page = Color(0xFFF5F7FB),
     card = Color.White,
-    cardMuted = Color(0xFFF0F1F4),
-    border = Color(0xFFE7E8EC),
-    accentSoft = Color(0xFFFDE7F2),
+    cardMuted = Color(0xFFEEF2F8),
+    border = Color(0xFFE3E9F2),
+    accentSoft = Color(0xFFEAF0FF),
     blueSoft = Color(0xFFEAF0FF),
-    blueStrong = Color(0xFF4A68A2),
+    blueStrong = Color(0xFF365D9A),
     greenSoft = Color(0xFFE8F7EF),
     greenStrong = Color(0xFF267653),
     amberSoft = Color(0xFFFFF2D9),
     amberStrong = Color(0xFF98611A),
-    heroStart = Color(0xFF282237),
-    heroEnd = Color(0xFF7A2858),
-    heroGlow = Color(0xFFFF77B7),
+    heroStart = Color(0xFF19396F),
+    heroEnd = Color(0xFF315BCB),
+    heroGlow = Color(0xFF91CFFF),
 )
 
 private val DarkAppVisualPalette = AppVisualPalette(
-    page = Color(0xFF292A2D),
-    card = Color(0xFF323335),
-    cardMuted = Color(0xFF37383A),
-    border = Color(0xFF44464B),
-    accentSoft = Color(0xFF57213A),
-    blueSoft = Color(0xFF29354D),
+    page = Color(0xFF141B27),
+    card = Color(0xFF1D2736),
+    cardMuted = Color(0xFF263245),
+    border = Color(0xFF334157),
+    accentSoft = Color(0xFF293E66),
+    blueSoft = Color(0xFF2A374C),
     blueStrong = Color(0xFFAFC6FF),
     greenSoft = Color(0xFF293E35),
     greenStrong = Color(0xFF8ED8B2),
     amberSoft = Color(0xFF493A24),
     amberStrong = Color(0xFFFFD18B),
-    heroStart = Color(0xFF211D2B),
-    heroEnd = Color(0xFF63304D),
-    heroGlow = Color(0xFFFF77B7),
+    heroStart = Color(0xFF20375F),
+    heroEnd = Color(0xFF2C4F99),
+    heroGlow = Color(0xFF91CFFF),
 )
 
 @Composable
@@ -176,12 +178,18 @@ fun AppTopBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 64.dp)
-                .padding(start = 4.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+                .heightIn(min = 60.dp)
+                .padding(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             onBack?.let {
-                IconButton(onClick = it, enabled = navigationEnabled) {
+                IconButton(
+                    onClick = it,
+                    enabled = navigationEnabled,
+                    colors = IconButtonDefaults.iconButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary,
+                    ),
+                ) {
                     Icon(
                         Icons.AutoMirrored.Rounded.ArrowBack,
                         contentDescription = navigationContentDescription,
@@ -297,18 +305,18 @@ fun AppHeroCard(
                 .matchParentSize()
                 .background(
                     Brush.radialGradient(
-                        colors = listOf(palette.heroGlow.copy(alpha = 0.28f), Color.Transparent),
+                        colors = listOf(palette.heroGlow.copy(alpha = 0.12f), Color.Transparent),
                         radius = 560f,
                     ),
                 ),
         )
         Column(
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(
@@ -317,7 +325,7 @@ fun AppHeroCard(
                 ) {
                     eyebrow?.let {
                         Surface(
-                            color = Color.White.copy(alpha = 0.12f),
+                            color = Color.White.copy(alpha = 0.06f),
                             contentColor = Color.White,
                             shape = CircleShape,
                             border = BorderStroke(1.dp, Color.White.copy(alpha = 0.14f)),
@@ -339,25 +347,20 @@ fun AppHeroCard(
                     )
                     Text(
                         text = description,
-                        color = Color.White.copy(alpha = 0.76f),
+                        color = Color.White.copy(alpha = 0.94f),
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                Box(modifier = Modifier.size(72.dp), contentAlignment = Alignment.Center) {
-                    Box(
-                        modifier = Modifier
-                            .size(70.dp)
-                            .border(1.dp, Color.White.copy(alpha = 0.17f), CircleShape),
-                    )
+                if (LocalDensity.current.fontScale <= 1.2f) {
                     Surface(
-                        modifier = Modifier.size(48.dp),
-                        shape = CircleShape,
+                        modifier = Modifier.size(44.dp),
+                        shape = RoundedCornerShape(14.dp),
                         color = Color.White.copy(alpha = 0.13f),
                         contentColor = Color.White,
                         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.18f)),
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Icon(icon, contentDescription = null, modifier = Modifier.size(25.dp))
+                            Icon(icon, contentDescription = null, modifier = Modifier.size(23.dp))
                         }
                     }
                 }
@@ -379,8 +382,8 @@ fun AppCard(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = containerColor),
         shape = RoundedCornerShape(AppDimens.CardRadius),
-        border = BorderStroke(1.dp, palette.border),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        border = BorderStroke(0.5.dp, palette.border),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.5.dp),
     ) {
         Column(
             modifier = Modifier
@@ -399,12 +402,8 @@ fun AppSectionHeader(
     subtitle: String? = null,
     trailing: (@Composable () -> Unit)? = null,
 ) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.Bottom,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    val copy: @Composable () -> Unit = {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
                 text = title,
                 modifier = Modifier.semantics { heading() },
@@ -419,7 +418,24 @@ fun AppSectionHeader(
                 )
             }
         }
-        trailing?.invoke()
+    }
+    if (LocalDensity.current.fontScale > 1.2f && trailing != null) {
+        Column(
+            modifier = modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            copy()
+            trailing()
+        }
+    } else {
+        Row(
+            modifier = modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Box(modifier = Modifier.weight(1f)) { copy() }
+            trailing?.invoke()
+        }
     }
 }
 
@@ -550,7 +566,7 @@ fun AppPrimaryButton(
             disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
         ),
         elevation = ButtonDefaults.buttonElevation(
-            defaultElevation = 2.dp,
+            defaultElevation = 0.dp,
             pressedElevation = 0.dp,
             disabledElevation = 0.dp,
         ),

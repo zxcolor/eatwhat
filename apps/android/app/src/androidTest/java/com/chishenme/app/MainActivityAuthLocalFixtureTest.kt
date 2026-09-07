@@ -1,5 +1,8 @@
 package com.chishenme.app
 
+import android.graphics.Rect
+import android.os.Build
+import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.hasClickAction
@@ -15,6 +18,9 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.datastore.preferences.preferencesDataStoreFile
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
@@ -124,24 +130,29 @@ class MainActivityAuthLocalFixtureTest {
 
     @Test
     fun phoneLogin_emailBind_emailLogin_andNativeOAuthRemainFailClosed() {
-        ActivityScenario.launch(MainActivity::class.java).use {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             acceptPrivacyAndOpenAccount()
+            captureAccountOverview("account-guest-overview.png")
 
             assertGuestChannelPresentation()
             requestOtpAndSubmit(
+                scenario = scenario,
                 inputLabel = "手机号",
                 target = PHONE_NUMBER,
                 sendAction = "发送验证码",
                 maskedTarget = PHONE_MASK,
                 submitAction = "验证并登录 / 创建账号",
+                keyboardScreenshot = "account-phone-keyboard.png",
             )
             awaitText("已安全登录")
             awaitRequestCount(5)
+            awaitSecurityDataReady()
             assertCredentialsNotExposedAcrossSignedInAccount(
                 itemCount = SIGNED_IN_WITH_EMAIL_BIND_ITEM_COUNT,
             )
+            captureAccountOverview("account-signed-in-overview.png")
 
-            bindEmail()
+            bindEmail(scenario)
             awaitRequestCount(9)
             scrollAccountTo("邮箱 · $EMAIL_MASK")
             composeRule.onNodeWithText("邮箱 · $EMAIL_MASK").assertIsDisplayed()
@@ -149,18 +160,23 @@ class MainActivityAuthLocalFixtureTest {
             logoutAndAwaitGuest()
             selectEmailLogin()
             requestOtpAndSubmit(
+                scenario = scenario,
                 inputLabel = "邮箱",
                 target = EMAIL,
                 sendAction = "发送验证码",
                 maskedTarget = EMAIL_MASK,
                 submitAction = "安全登录",
+                keyboardScreenshot = "account-email-keyboard.png",
             )
             awaitText("已安全登录")
             awaitRequestCount(14)
-            awaitText("邮箱 · $EMAIL_MASK")
+            awaitSecurityDataReady()
+            scrollAccountTo("邮箱 · $EMAIL_MASK")
+            composeRule.onNodeWithText("邮箱 · $EMAIL_MASK").assertIsDisplayed()
             assertCredentialsNotExposedAcrossSignedInAccount(
                 itemCount = SIGNED_IN_EMAIL_BOUND_ITEM_COUNT,
             )
+            captureAccountOverview("account-email-bound-overview.png")
             logoutAndAwaitGuest()
         }
 
@@ -170,8 +186,12 @@ class MainActivityAuthLocalFixtureTest {
     private fun acceptPrivacyAndOpenAccount() {
         awaitText("同意并继续")
         assertEquals("隐私同意前不得访问账号或配置接口", 0, server.requestCount)
-        composeRule.onNodeWithText("同意并继续").assertIsDisplayed().performClick()
-        awaitText("手动选择")
+        composeRule.onNodeWithText("同意并继续")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .performClick()
+        awaitText("吃什么")
+        awaitRequestCount(1)
         composeRule.onNodeWithContentDescription("设置").assertIsDisplayed().performClick()
         awaitText("设置与透明度")
         composeRule.onNodeWithText("账号与安全")
@@ -180,6 +200,7 @@ class MainActivityAuthLocalFixtureTest {
         // The card title is descriptive text; the explicit action at the end
         // of the first settings card is the account-management entry point.
         composeRule.onAllNodesWithText("管理")[0]
+            .performScrollTo()
             .assertIsDisplayed()
             .performClick()
         awaitText("不登录也能决定吃什么")
@@ -239,17 +260,21 @@ class MainActivityAuthLocalFixtureTest {
     }
 
     private fun requestOtpAndSubmit(
+        scenario: ActivityScenario<MainActivity>,
         inputLabel: String,
         target: String,
         sendAction: String,
         maskedTarget: String,
         submitAction: String,
+        keyboardScreenshot: String,
     ) {
         scrollAccountTo(sendAction)
+        captureEmptyInputWithKeyboard(scenario, inputLabel, keyboardScreenshot)
         composeRule.onNode(hasSetTextAction() and hasText(inputLabel))
             .performScrollTo()
             .assertIsDisplayed()
             .performTextInput(target)
+        awaitInputKeyboardIdle(scenario)
         composeRule.onNode(hasClickAction() and hasText(sendAction))
             .performScrollTo()
             .assertIsDisplayed()
@@ -259,32 +284,42 @@ class MainActivityAuthLocalFixtureTest {
             .performScrollTo()
             .assertIsDisplayed()
             .performTextInput(OTP)
+        awaitInputKeyboardIdle(scenario)
         composeRule.onNode(hasClickAction() and hasText(submitAction))
             .performScrollTo()
             .assertIsDisplayed()
             .performClick()
     }
 
-    private fun bindEmail() {
+    private fun bindEmail(scenario: ActivityScenario<MainActivity>) {
         scrollAccountTo("绑定邮箱")
+        // Opening the IME changes the viewport asynchronously. Verify the empty field above
+        // the real keyboard and capture stable frames before typing, as in both login flows.
+        captureEmptyInputWithKeyboard(scenario, "邮箱", "account-email-bind-keyboard.png")
         composeRule.onNode(hasSetTextAction() and hasText("邮箱"))
             .performScrollTo()
             .assertIsDisplayed()
             .performTextInput(EMAIL)
+        awaitInputKeyboardIdle(scenario)
         composeRule.onNode(hasClickAction() and hasText("发送绑定验证码"))
             .performScrollTo()
             .assertIsDisplayed()
+            .assertIsEnabled()
             .performClick()
         awaitText("验证码已发送至 $EMAIL_MASK")
         composeRule.onNode(hasSetTextAction() and hasText("6 位验证码"))
             .performScrollTo()
             .assertIsDisplayed()
             .performTextInput(OTP)
+        awaitInputKeyboardIdle(scenario)
         composeRule.onNode(hasClickAction() and hasText("确认绑定"))
             .performScrollTo()
             .assertIsDisplayed()
             .performClick()
-        awaitText("邮箱 · $EMAIL_MASK")
+        awaitRequestCount(9)
+        awaitSecurityDataReady()
+        scrollAccountTo("邮箱 · $EMAIL_MASK")
+        composeRule.onNodeWithText("邮箱 · $EMAIL_MASK").assertIsDisplayed()
     }
 
     private fun logoutAndAwaitGuest() {
@@ -293,23 +328,140 @@ class MainActivityAuthLocalFixtureTest {
             .assertIsDisplayed()
             .assertIsEnabled()
             .performClick()
-        awaitText("手机号 / 邮箱验证码")
+        awaitText("不登录也能决定吃什么")
+        scrollAccountTo("手机号 / 邮箱验证码")
+        composeRule.onNodeWithText("手机号 / 邮箱验证码").assertIsDisplayed()
     }
 
     private fun selectEmailLogin() {
         scrollAccountTo("手机号 / 邮箱验证码")
         composeRule.onNode(hasClickAction() and hasText("邮箱"))
+            .performScrollTo()
             .assertIsDisplayed()
             .performClick()
     }
 
     private fun scrollAccountTo(text: String) {
+        val node = composeRule.onNode(hasText(text))
+        if (runCatching { node.assertIsDisplayed() }.isSuccess) return
         composeRule.onNode(hasScrollToIndexAction())
             .performScrollToNode(hasText(text))
+        // A tall account card can be composed while its requested child remains
+        // below the viewport. Bring that exact child into view after composing it.
+        composeRule.onNode(hasText(text)).performScrollTo()
+    }
+
+    private fun captureAccountOverview(fileName: String) {
+        composeRule.onNode(hasScrollToIndexAction()).performScrollToIndex(0)
+        composeRule.captureUiRefinementScreenshot(fileName)
+    }
+
+    private fun awaitSecurityDataReady() {
+        // Identities and sessions are installed together when the automatic refresh ends.
+        // Wait for the actual enabled action before scanning the stable account list.
+        scrollAccountTo("刷新")
+        composeRule.waitUntil(timeoutMillis = UI_TIMEOUT_MS) {
+            runCatching {
+                composeRule.onNode(hasClickAction() and hasText("刷新")).assertIsEnabled()
+            }.isSuccess
+        }
+    }
+
+    private fun captureEmptyInputWithKeyboard(
+        scenario: ActivityScenario<MainActivity>,
+        inputLabel: String,
+        fileName: String,
+    ) {
+        val input = composeRule.onNode(hasSetTextAction() and hasText(inputLabel))
+        input.performScrollTo().assertIsDisplayed().performClick()
+        scenario.onActivity { activity ->
+            WindowCompat.getInsetsController(activity.window, activity.window.decorView)
+                .show(WindowInsetsCompat.Type.ime())
+        }
+        awaitKeyboardVisibility(scenario, visible = true)
+        input.performScrollTo().assertIsDisplayed()
+        var imeTopOnScreen = 0
+        scenario.onActivity { activity ->
+            val decorView = activity.window.decorView
+            val insets = checkNotNull(ViewCompat.getRootWindowInsets(decorView))
+            assertTrue(
+                "The IME must still be visible immediately before capture",
+                insets.isVisible(WindowInsetsCompat.Type.ime()),
+            )
+            val imeHeight = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+            assertTrue(
+                "The fixture requires a docked keyboard with a measurable height",
+                imeHeight > 0,
+            )
+            imeTopOnScreen = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                activity.windowManager.currentWindowMetrics.bounds.bottom - imeHeight
+            } else {
+                // Before API 30, the visible display frame excludes the docked IME.
+                Rect().also(decorView::getWindowVisibleDisplayFrame).bottom
+            }
+        }
+        val inputNode = input.fetchSemanticsNode()
+        val inputBottomOnScreen = inputNode.positionOnScreen.y + inputNode.size.height
+        assertTrue(
+            "The input bottom ($inputBottomOnScreen px) must not extend below " +
+                "the IME top ($imeTopOnScreen px)",
+            inputNode.size.height > 0 && inputBottomOnScreen <= imeTopOnScreen,
+        )
+        // Capture before typing so the keyboard proof contains no account input or OTP.
+        composeRule.captureUiRefinementScreenshot(fileName)
+    }
+
+    private fun awaitInputKeyboardIdle(scenario: ActivityScenario<MainActivity>) {
+        // Email and numeric input can resize the IME after text input has completed.
+        // Keep the actual keyboard open for action reachability, including when the
+        // next challenge field was focused through a semantics text-input action.
+        scenario.onActivity { activity ->
+            WindowCompat.getInsetsController(activity.window, activity.window.decorView)
+                .show(WindowInsetsCompat.Type.ime())
+        }
+        awaitKeyboardVisibility(scenario, visible = true)
+        InstrumentationRegistry.getInstrumentation().uiAutomation.waitForIdle(500L, 5_000L)
+        composeRule.waitForIdle()
+    }
+
+    private fun awaitKeyboardVisibility(
+        scenario: ActivityScenario<MainActivity>,
+        visible: Boolean,
+    ) {
+        composeRule.waitUntil(timeoutMillis = UI_TIMEOUT_MS) {
+            var visibilityMatches = false
+            scenario.onActivity { activity ->
+                visibilityMatches = ViewCompat.getRootWindowInsets(activity.window.decorView)
+                    ?.isVisible(WindowInsetsCompat.Type.ime()) == visible
+            }
+            visibilityMatches
+        }
     }
 
     private fun awaitText(text: String) {
-        composeRule.waitUntil(timeoutMillis = UI_TIMEOUT_MS) { hasUiText(text) }
+        try {
+            composeRule.waitUntil(timeoutMillis = UI_TIMEOUT_MS) { hasUiText(text) }
+        } catch (error: ComposeTimeoutException) {
+            throw AssertionError("Auth fixture timeout; ${authFailureDiagnostics()}", error)
+        }
+    }
+
+    private fun authFailureDiagnostics(): String {
+        // Only fixed route counts and synthetic counters enter failure output.
+        val routeCounts = listOf(
+            "GET" to "/v1/config",
+            "POST" to "/v1/auth/phone/request-code",
+            "POST" to "/v1/auth/email/request-code",
+            "POST" to "/v1/auth/login",
+            "GET" to "/v1/auth/identities",
+            "GET" to "/v1/auth/sessions",
+            "POST" to "/v1/auth/identities",
+            "POST" to "/v1/auth/logout",
+        ).joinToString { (method, path) ->
+            "$method $path=${requests.count { it.method == method && it.path == path }}"
+        }
+        return "routeCounts=[$routeCounts]; loginCount=${loginCount.get()}; " +
+            "emailBound=${emailBound.get()}"
     }
 
     private fun awaitRequestCount(expected: Int) {
@@ -644,7 +796,7 @@ class MainActivityAuthLocalFixtureTest {
         const val UI_TIMEOUT_MS = 20_000L
         const val GUEST_ACCOUNT_ITEM_COUNT = 4
         const val SIGNED_IN_WITH_EMAIL_BIND_ITEM_COUNT = 7
-        const val SIGNED_IN_EMAIL_BOUND_ITEM_COUNT = 6
+        const val SIGNED_IN_EMAIL_BOUND_ITEM_COUNT = 7
         const val PHONE_NUMBER = "+8613800138000"
         const val PHONE_MASK = "+86138****8000"
         const val EMAIL = "user@example.com"

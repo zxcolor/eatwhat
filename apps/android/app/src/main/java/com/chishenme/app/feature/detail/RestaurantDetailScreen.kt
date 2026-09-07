@@ -7,16 +7,19 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
@@ -66,6 +69,7 @@ import com.chishenme.app.ui.AppBadge
 import com.chishenme.app.ui.AppCard
 import com.chishenme.app.ui.AppDimens
 import com.chishenme.app.ui.AppEmptyState
+import com.chishenme.app.ui.AppIconTile
 import com.chishenme.app.ui.AppIcons
 import com.chishenme.app.ui.AppMotion
 import com.chishenme.app.ui.AppSectionHeader
@@ -74,6 +78,7 @@ import com.chishenme.app.ui.AppStatusBanner
 import com.chishenme.app.ui.AppTone
 import com.chishenme.app.ui.AppTopBar
 import com.chishenme.app.ui.currentAppVisualPalette
+import java.util.Locale
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -92,6 +97,7 @@ fun RestaurantDetailScreen(
 ) {
     val context = LocalContext.current
     val actionAvailability = RestaurantActionAvailabilityPolicy.evaluate(result, resultSessionState)
+    val actionMessages = actionAvailability.pageMessages()
     val resultSessionCurrent = resultSessionState == ResultSessionState.CURRENT
     val uiScope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
@@ -131,10 +137,25 @@ fun RestaurantDetailScreen(
                 AppCard(contentPadding = PaddingValues(0.dp)) {
                     RestaurantHeroImage(result)
                     Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            AppIconTile(icon = AppIcons.Restaurant, size = 40.dp)
+                            Text(
+                                result.name,
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.headlineSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
                             AppBadge(
                                 openStatusLabel(result.openStatus),
                                 tone = if (result.openStatus == OpenStatus.OPEN) {
@@ -144,16 +165,25 @@ fun RestaurantDetailScreen(
                                 },
                             )
                             result.averageCostYuan?.let {
-                                AppBadge("约 ¥${it.toInt()}/人", tone = AppTone.WARNING)
+                                AppBadge("约 ¥${it.toInt()}/人", tone = AppTone.ACCENT)
                             }
                         }
-                        Text(
-                            result.name,
-                            style = MaterialTheme.typography.headlineMedium,
-                            fontWeight = FontWeight.Bold,
-                        )
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            DetailFact(
+                                icon = Icons.Rounded.LocationOn,
+                                text = detailDistanceLabel(result.distanceMeters),
+                            )
+                            DetailFact(
+                                icon = AppIcons.AccessTime,
+                                text = "约 ${result.estimatedTravelMinutes.toInt()} 分钟",
+                            )
+                        }
                         Text(
                             result.address,
+                            style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Text(
@@ -187,8 +217,10 @@ fun RestaurantDetailScreen(
                             }
                         },
                         enabled = actionAvailability.navigate.enabled,
+                        shape = RoundedCornerShape(AppDimens.CompactRadius),
                         modifier = Modifier
                             .weight(1f)
+                            .heightIn(min = AppDimens.MinTouchTarget)
                             .actionStateDescription(actionAvailability.navigate, "地图查询"),
                     ) {
                         Icon(Icons.Rounded.LocationOn, contentDescription = null)
@@ -211,8 +243,10 @@ fun RestaurantDetailScreen(
                             }
                         },
                         enabled = actionAvailability.copyAddress.enabled,
+                        shape = RoundedCornerShape(AppDimens.CompactRadius),
                         modifier = Modifier
                             .weight(1f)
+                            .heightIn(min = AppDimens.MinTouchTarget)
                             .actionStateDescription(actionAvailability.copyAddress, "复制地址"),
                     ) {
                         Icon(AppIcons.ContentCopy, contentDescription = null)
@@ -236,13 +270,36 @@ fun RestaurantDetailScreen(
                             }
                         },
                         enabled = actionAvailability.call.enabled,
+                        shape = RoundedCornerShape(AppDimens.CompactRadius),
                         modifier = Modifier
                             .fillMaxWidth()
+                            .heightIn(min = AppDimens.MinTouchTarget)
                             .actionStateDescription(actionAvailability.call, "联系商户"),
                     ) {
                         Icon(Icons.Rounded.Call, contentDescription = null)
                         Spacer(Modifier.width(7.dp))
                         Text("联系商户")
+                    }
+                }
+            }
+            if (actionMessages.isNotEmpty()) {
+                item {
+                    AppCard(
+                        contentPadding = PaddingValues(14.dp),
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                    ) {
+                        Text(
+                            "部分操作暂不可用",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        actionMessages.forEach { message ->
+                            Text(
+                                message,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             }
@@ -265,7 +322,8 @@ fun RestaurantDetailScreen(
                                 },
                                 enabled = resultSessionCurrent &&
                                     !persistenceState.busy && !persistenceState.favoriteSaved,
-                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(AppDimens.CompactRadius),
+                                modifier = Modifier.weight(1f).heightIn(min = AppDimens.MinTouchTarget),
                             ) { Text(if (persistenceState.favoriteSaved) "已收藏" else "收藏到想去") }
                             OutlinedButton(
                                 onClick = {
@@ -275,7 +333,8 @@ fun RestaurantDetailScreen(
                                 },
                                 enabled = resultSessionCurrent &&
                                     !persistenceState.busy && !persistenceState.favoriteSaved,
-                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(AppDimens.CompactRadius),
+                                modifier = Modifier.weight(1f).heightIn(min = AppDimens.MinTouchTarget),
                             ) { Text("收藏到常吃") }
                         }
                         if (persistenceState.loginRequired) {
@@ -310,29 +369,11 @@ fun RestaurantDetailScreen(
                                         }
                                     },
                                     enabled = resultSessionCurrent && !persistenceState.busy && !submitted,
-                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(AppDimens.CompactRadius),
+                                    modifier = Modifier.weight(1f).heightIn(min = AppDimens.MinTouchTarget),
                                 ) { Text(if (submitted) "已记录：${type.label()}" else type.label()) }
                             }
                             if (rowTypes.size == 1) Spacer(Modifier.weight(1f))
-                        }
-                    }
-                }
-            }
-            val actionMessages = actionAvailability.pageMessages()
-            if (actionMessages.isNotEmpty()) {
-                item {
-                    AppCard(containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
-                        Text(
-                            "部分操作暂不可用",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        actionMessages.forEach { message ->
-                            Text(
-                                message,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
                         }
                     }
                 }
@@ -457,8 +498,11 @@ private fun Notice(
 
 @Composable
 private fun RestaurantHeroImage(result: RecommendationResult) {
+    val imageUrl = result.imageUrl?.takeIf { it.isNotBlank() } ?: return
+    var imageFailed by remember(imageUrl) { mutableStateOf(false) }
+    if (imageFailed) return
     val palette = currentAppVisualPalette()
-    var imageLoaded by remember(result.imageUrl) { mutableStateOf(false) }
+    var imageLoaded by remember(imageUrl) { mutableStateOf(false) }
     val imageAlpha by animateFloatAsState(
         targetValue = if (imageLoaded) 1f else 0f,
         animationSpec = tween(AppMotion.ContentMillis),
@@ -468,7 +512,7 @@ private fun RestaurantHeroImage(result: RecommendationResult) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(210.dp)
+            .height(168.dp)
             .clip(MaterialTheme.shapes.large)
             .background(
                 Brush.linearGradient(
@@ -483,24 +527,50 @@ private fun RestaurantHeroImage(result: RecommendationResult) {
             tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.72f),
             modifier = Modifier.size(52.dp),
         )
-        result.imageUrl?.let { imageUrl ->
-            AsyncImage(
-                model = imageUrl,
-                contentDescription = if (imageLoaded) {
-                    "${result.name}图片，来源：${result.sourceAttribution}"
-                } else {
-                    null
-                },
-                contentScale = ContentScale.Crop,
-                onLoading = { imageLoaded = false },
-                onSuccess = { imageLoaded = true },
-                onError = { imageLoaded = false },
-                modifier = Modifier
-                    .matchParentSize()
-                    .alpha(imageAlpha),
-            )
-        }
+        AsyncImage(
+            model = imageUrl,
+            contentDescription = if (imageLoaded) {
+                "${result.name}图片，来源：${result.sourceAttribution}"
+            } else {
+                null
+            },
+            contentScale = ContentScale.Crop,
+            onLoading = { imageLoaded = false },
+            onSuccess = { imageLoaded = true },
+            onError = {
+                imageLoaded = false
+                imageFailed = true
+            },
+            modifier = Modifier
+                .matchParentSize()
+                .alpha(imageAlpha),
+        )
     }
+}
+
+@Composable
+private fun DetailFact(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    text: String,
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            modifier = Modifier.size(17.dp),
+            tint = MaterialTheme.colorScheme.primary,
+        )
+        Text(text, style = MaterialTheme.typography.labelMedium)
+    }
+}
+
+private fun detailDistanceLabel(meters: Double): String = if (meters < 1_000) {
+    "${meters.toInt()} 米"
+} else {
+    "${String.format(Locale.CHINA, "%.1f", meters / 1_000)} 公里"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

@@ -2,6 +2,7 @@ package com.chishenme.app
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasText
@@ -10,6 +11,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
 import androidx.datastore.preferences.preferencesDataStoreFile
 import androidx.lifecycle.ViewModelProvider
@@ -35,6 +37,7 @@ import com.chishenme.app.data.remote.RecommendationResult
 import com.chishenme.app.feature.config.RemoteFeatureConfigState
 import com.chishenme.app.feature.config.RuntimeAppVersionGate
 import com.chishenme.app.feature.decision.DecisionViewModel
+import com.chishenme.app.feature.decision.RecommendationLoadState
 import java.io.IOException
 import java.net.InetAddress
 import java.util.concurrent.TimeUnit
@@ -121,9 +124,14 @@ class MainActivityConfigUnavailableTest {
             composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
                 hasUiText(PRIVACY_ACCEPT_ACTION)
             }
-            composeRule.onNodeWithText(PRIVACY_ACCEPT_ACTION).assertIsDisplayed()
+            composeRule.onNodeWithText(PRIVACY_ACCEPT_ACTION)
+                .performScrollTo()
+                .assertIsDisplayed()
             assertEquals("隐私同意前不应访问任何接口", 0, server.requestCount)
-            composeRule.onNodeWithText(PRIVACY_ACCEPT_ACTION).performClick()
+            composeRule.onNodeWithText(PRIVACY_ACCEPT_ACTION)
+                .performScrollTo()
+                .assertIsDisplayed()
+                .performClick()
 
             composeRule.waitUntil(timeoutMillis = CONFIG_TIMEOUT_MS) {
                 hasUiText(CONFIG_UNAVAILABLE_MESSAGE)
@@ -154,7 +162,10 @@ class MainActivityConfigUnavailableTest {
             composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
                 hasUiText("手动选择")
             }
-            composeRule.onNodeWithText("手动选择").assertIsDisplayed().performClick()
+            composeRule.onNodeWithText("手动选择")
+                .performScrollTo()
+                .assertIsDisplayed()
+                .performClick()
             composeRule.onNodeWithText("快捷地点（始终可用）")
                 .performScrollTo()
                 .assertIsDisplayed()
@@ -169,15 +180,24 @@ class MainActivityConfigUnavailableTest {
                 MANUAL_LOCATION,
                 decisionViewModel.uiState.value.input.location?.label,
             )
-            composeRule.onNode(hasText("帮我决定") and hasClickAction())
-                .performScrollTo()
+            composeRule.onNode(
+                hasScrollToIndexAction() and !hasAnyAncestor(hasScrollToIndexAction()),
+            ).performScrollToIndex(0)
+            composeRule.captureUiRefinementScreenshot("config-unavailable-home-overview.png")
+            val decisionAction = composeRule.onNode(hasText("帮我决定") and hasClickAction())
+            if (!runCatching { decisionAction.assertIsDisplayed() }.isSuccess) {
+                decisionAction.performScrollTo()
+            }
+            decisionAction
                 .assertIsDisplayed()
                 .assertIsEnabled()
                 .performClick()
 
             val reachedRecommendationScreen = runCatching {
                 composeRule.waitUntil(timeoutMillis = RECOMMENDATION_TIMEOUT_MS) {
-                    hasUiText("推荐结果") || hasUiText("这次没决定出来")
+                    (hasUiText(RESULTS_HEADING) &&
+                        decisionViewModel.uiState.value.loadState is RecommendationLoadState.Ready) ||
+                        hasUiText("这次没决定出来")
                 }
             }.isSuccess
             if (!reachedRecommendationScreen) {
@@ -191,14 +211,21 @@ class MainActivityConfigUnavailableTest {
             }
 
             assertDisplayOnlyResult()
+            composeRule.onNode(hasScrollToIndexAction()).performScrollToIndex(0)
+            composeRule.captureUiRefinementScreenshot("config-unavailable-results-overview.png")
             scrollResultsListTo("为什么")
             composeRule.onNode(hasText("为什么") and hasClickAction())
                 .assertIsDisplayed()
                 .performClick()
-            composeRule.onNodeWithText(LIVE_DISPLAY_ONLY_EXPLANATION).assertIsDisplayed()
+            composeRule.captureUiRefinementScreenshot("config-unavailable-results-why.png")
+            composeRule.onNodeWithText(LIVE_DISPLAY_ONLY_EXPLANATION)
+                .performScrollTo()
+                .assertIsDisplayed()
             composeRule.onNodeWithText("模型 rule-device-fallback-v1", substring = true)
+                .performScrollTo()
                 .assertIsDisplayed()
             composeRule.onNodeWithText("知道了").assertIsDisplayed().performClick()
+            composeRule.onNodeWithText(RESULTS_HEADING).assertIsDisplayed()
 
             val configRequest = takeRequiredRequest("远程配置")
             assertRequest(configRequest, "GET", "/v1/config")
@@ -214,7 +241,9 @@ class MainActivityConfigUnavailableTest {
 
             recreateActivity(scenario)
             composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
-                hasUiText("推荐结果") || hasUiText(RECOMMENDATION_EXPIRED_MARKER)
+                (hasUiText(RESULTS_HEADING) &&
+                    decisionViewModel.uiState.value.loadState is RecommendationLoadState.Ready) ||
+                    hasUiText(RECOMMENDATION_EXPIRED_MARKER)
             }
             if (hasUiText(RECOMMENDATION_EXPIRED_MARKER)) {
                 fail("Activity 重建后配置不可用的展示态推荐意外失效")
@@ -230,8 +259,7 @@ class MainActivityConfigUnavailableTest {
     }
 
     private fun assertDisplayOnlyResult() {
-        scrollResultsListTo("推荐结果")
-        composeRule.onNodeWithText("推荐结果").assertIsDisplayed()
+        composeRule.onNodeWithText(RESULTS_HEADING).assertIsDisplayed()
         scrollResultsListTo(GUEST_RULES_ONLY_NOTICE)
         composeRule.onNodeWithText(GUEST_RULES_ONLY_NOTICE)
             .assertIsDisplayed()
@@ -265,8 +293,12 @@ class MainActivityConfigUnavailableTest {
     }
 
     private fun scrollResultsListTo(text: String, substring: Boolean = false) {
-        composeRule.onNode(hasScrollToIndexAction())
-            .performScrollToNode(hasText(text, substring = substring))
+        composeRule.onNode(
+            hasScrollToIndexAction() and !hasAnyAncestor(hasScrollToIndexAction()),
+        ).performScrollToNode(hasText(text, substring = substring))
+        composeRule.onAllNodesWithText(text, substring = substring)[0]
+            .performScrollTo()
+            .assertIsDisplayed()
     }
 
     private fun assertRequest(
@@ -412,6 +444,7 @@ class MainActivityConfigUnavailableTest {
         private const val CONFIG_UNAVAILABLE_MESSAGE =
             "远程配置暂不可用，AI 已按安全默认值关闭"
         private const val MANUAL_LOCATION = "北京大学东门"
+        private const val RESULTS_HEADING = "本次用餐候选"
         private const val FALLBACK_RESTAURANT_NAME = "设备内规则饭堂（虚构）"
         private const val RECOMMENDATION_EXPIRED_MARKER = "推荐状态已失效"
         private const val LIVE_DISPLAY_ONLY_EXPLANATION =
