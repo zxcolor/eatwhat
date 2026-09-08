@@ -1,8 +1,8 @@
 package com.chishenme.app.data.remote
 
+import com.chishenme.app.domain.CuisineExclusionPolicy
 import java.net.URI
 import java.time.Instant
-import java.util.Locale
 import java.util.UUID
 
 object RecommendationResponseValidator {
@@ -115,19 +115,8 @@ object RecommendationResponseValidator {
         val budget = context.budgetMaxYuan
         val knownCost = result.averageCostYuan
         if (budget != null && knownCost != null && knownCost > budget.toDouble()) return false
-        if (hasExcludedCuisine(result.tags, context.excludedCuisines)) return false
+        if (CuisineExclusionPolicy.hasExcludedCuisine(result.tags, context.excludedCuisines)) return false
         return true
-    }
-
-    private fun hasExcludedCuisine(tags: List<String>, exclusions: List<String>): Boolean {
-        if (tags.isEmpty() || exclusions.isEmpty()) return false
-        val normalizedExclusions = exclusions.map(::normalizeCuisine).filter { it.isNotEmpty() }
-        return tags.any { tag ->
-            val normalizedTag = normalizeCuisine(tag)
-            normalizedTag.isNotEmpty() && normalizedExclusions.any { exclusion ->
-                normalizedTag == exclusion || normalizedTag.contains(exclusion)
-            }
-        }
     }
 
     private fun isValid(result: RecommendationResult, rightsMode: DataRightsMode): Boolean {
@@ -159,8 +148,6 @@ object RecommendationResponseValidator {
         val uri = URI(value)
         uri.scheme.equals("https", ignoreCase = true) && !uri.host.isNullOrBlank()
     }.getOrDefault(false)
-
-    private fun normalizeCuisine(value: String): String = value.trim().lowercase(Locale.CHINA)
 
     private const val MAX_COORDINATE_ACCURACY_METERS = 10_000.0
 }

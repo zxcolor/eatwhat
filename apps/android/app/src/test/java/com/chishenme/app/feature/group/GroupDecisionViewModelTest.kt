@@ -11,6 +11,7 @@ import com.chishenme.app.data.remote.GroupConstraintAggregation
 import com.chishenme.app.data.remote.GroupRecommendationApi
 import com.chishenme.app.data.remote.GroupRecommendationRequest
 import com.chishenme.app.data.remote.GroupRecommendationResponse
+import com.chishenme.app.data.remote.GroupRecommendationResponseValidator
 import com.chishenme.app.data.remote.GroupRecommendationResult
 import com.chishenme.app.data.remote.OpenStatus
 import com.chishenme.app.data.remote.PublicRecommendationDefaults
@@ -221,14 +222,15 @@ class GroupDecisionViewModelTest {
     }
 
     @Test
-    fun `trusted capability drives two-member edit review submit and exact request`() = runTest {
+    fun `licensed capability drives two-member edit review submit and exact request`() = runTest {
         withMainDispatcher(testScheduler) {
-            val api = RecordingGroupApi()
+            val api = RecordingGroupApi(::licensedResponse)
             val gate = RuntimeAppVersionGate("1.0.0")
-            val viewModel = authorizedViewModel(api, gate)
+            val viewModel = authorizedViewModel(api, gate, licensedConfig())
 
             assertTrue(viewModel.start())
             assertEquals(GroupDecisionPhase.EDITING, viewModel.state.value.phase)
+            assertTrue(viewModel.state.value.softPreferencesAvailable)
             assertTrue(viewModel.setLocation(location))
             assertTrue(
                 viewModel.updateMember(
@@ -277,6 +279,131 @@ class GroupDecisionViewModelTest {
             assertEquals(null, request.members[0].budgetMaxYuan)
             assertEquals(35, request.members[1].budgetMaxYuan)
             assertEquals(listOf("面食", "米饭"), request.members[0].preferredCuisines)
+            assertEquals(listOf("面食"), request.members[1].preferredCuisines)
+            assertEquals(listOf("米饭"), request.members[1].excludedCuisines)
+        }
+    }
+
+    @Test
+    fun `live mode strips unsupported preferences from drafts review submission and retry`() = runTest {
+        withMainDispatcher(testScheduler) {
+            val api = RecordingGroupApi()
+            val gate = RuntimeAppVersionGate("1.0.0")
+            val viewModel = authorizedViewModel(api, gate)
+            assertTrue(viewModel.start())
+            assertFalse(viewModel.state.value.softPreferencesAvailable)
+            assertTrue(viewModel.setLocation(location))
+            assertTrue(viewModel.updateMember(0, member(preferred = setOf("面食"), excluded = setOf("川湘菜"))))
+            assertTrue(viewModel.confirmCurrentMember())
+            // A previously captured UI draft must not restore unsupported preferences,
+            // even when it contains a preference that overlaps a retained exclusion.
+            assertTrue(viewModel.updateMember(1, member(preferred = setOf("面食", "米饭"), excluded = setOf("米饭"))))
+            assertTrue(viewModel.state.value.input.members.all { it.preferredCuisines.isEmpty() })
+            assertEquals(setOf("川湘菜"), viewModel.state.value.input.members[0].excludedCuisines)
+            assertEquals(setOf("米饭"), viewModel.state.value.input.members[1].excludedCuisines)
+            assertTrue(viewModel.confirmCurrentMember())
+            assertTrue(viewModel.review())
+            assertTrue(requireNotNull(viewModel.state.value.aggregation).preferredCuisines.isEmpty())
+            assertEquals(setOf("川湘菜", "米饭"), requireNotNull(viewModel.state.value.aggregation).excludedCuisines.toSet())
+
+            assertTrue(viewModel.submit())
+            advanceUntilIdle()
+            assertEquals(GroupDecisionPhase.RESULT, viewModel.state.value.phase)
+            assertTrue(viewModel.retry())
+            advanceUntilIdle()
+            assertEquals(GroupDecisionPhase.RESULT, viewModel.state.value.phase)
+            assertEquals(2, api.requests.size)
+            assertEquals(api.requests[0], api.requests[1])
+            api.requests.forEach { request ->
+                assertTrue(request.members.all { it.preferredCuisines.isEmpty() })
+                assertEquals(listOf("川湘菜"), request.members[0].excludedCuisines)
+                assertEquals(listOf("米饭"), request.members[1].excludedCuisines)
+            }
+        }
+    }
+
+    @Test
+    fun `same generation downgrade clears licensed review and rejects a restored member draft`() = runTest {
+        withMainDispatcher(testScheduler) {
+            val api = RecordingGroupApi()
+            val gate = RuntimeAppVersionGate("1.0.0")
+            val viewModel = viewModel(api, gate)
+            val generation = trust(gate)
+            viewModel.applyFeatureConfig(licensedConfig(), generation)
+            prepareReview(viewModel, preferred = setOf("面食"))
+            val oldDraft = viewModel.state.value.input.members[0]
+            assertEquals(listOf("面食"), requireNotNull(viewModel.state.value.aggregation).preferredCuisines)
+
+            viewModel.applyFeatureConfig(enabledConfig(), generation)
+
+            val cleared = viewModel.state.value
+            assertEquals(GroupDecisionPhase.CLOSED, cleared.phase)
+            assertTrue(cleared.capabilityAvailable)
+            assertEquals(DataRightsMode.LIVE_DISPLAY_ONLY, cleared.dataRightsMode)
+            assertFalse(cleared.softPreferencesAvailable)
+            assertNull(cleared.input.location)
+            assertTrue(cleared.input.members.all { it.preferredCuisines.isEmpty() })
+            assertEquals(List(2) { false }, cleared.confirmedMembers)
+            assertNull(cleared.aggregation)
+            assertNull(cleared.response)
+            assertFalse(viewModel.submit())
+            assertFalse(viewModel.retry())
+            assertEquals(0, api.requests.size)
+
+            assertTrue(viewModel.start())
+            assertTrue(viewModel.setLocation(location))
+            assertTrue(viewModel.updateMember(0, oldDraft))
+            assertTrue(viewModel.state.value.input.members[0].preferredCuisines.isEmpty())
+            assertTrue(viewModel.confirmCurrentMember())
+            assertTrue(viewModel.confirmCurrentMember())
+            assertTrue(viewModel.review())
+            assertTrue(requireNotNull(viewModel.state.value.aggregation).preferredCuisines.isEmpty())
+            assertTrue(viewModel.submit())
+            advanceUntilIdle()
+            assertEquals(GroupDecisionPhase.RESULT, viewModel.state.value.phase)
+            assertTrue(api.requests.single().members.all { it.preferredCuisines.isEmpty() })
+        }
+    }
+
+    @Test
+    fun `same generation downgrade rejects an otherwise valid late licensed response`() = runTest {
+        withMainDispatcher(testScheduler) {
+            val api = LateGroupApi()
+            val gate = RuntimeAppVersionGate("1.0.0")
+            val viewModel = viewModel(api, gate)
+            val generation = trust(gate)
+            viewModel.applyFeatureConfig(licensedConfig(), generation)
+            prepareReview(viewModel, preferred = setOf("面食"))
+            assertTrue(viewModel.submit())
+            runCurrent()
+            assertEquals(GroupDecisionPhase.SUBMITTING, viewModel.state.value.phase)
+            val oldRequest = requireNotNull(api.request)
+            assertTrue(oldRequest.members.all { it.preferredCuisines == listOf("面食") })
+            val oldResponse = licensedResponse(oldRequest)
+            assertTrue(
+                GroupRecommendationResponseValidator.isValid(
+                    response = oldResponse,
+                    request = oldRequest,
+                    expectedAggregation = aggregation(oldRequest),
+                    expectedDataRightsMode = DataRightsMode.LICENSED_ENRICHMENT,
+                    expectedRuleVersion = "rule-v2",
+                ),
+            )
+
+            viewModel.applyFeatureConfig(enabledConfig(), generation)
+            assertEquals(GroupDecisionPhase.CLOSED, viewModel.state.value.phase)
+            assertNull(viewModel.state.value.input.location)
+            assertNull(viewModel.state.value.aggregation)
+            assertNull(viewModel.state.value.response)
+            assertTrue(viewModel.start())
+            val liveState = viewModel.state.value
+            assertFalse(liveState.softPreferencesAvailable)
+
+            api.resume(oldResponse)
+            advanceUntilIdle()
+
+            assertEquals(liveState, viewModel.state.value)
+            assertNull(viewModel.state.value.response)
         }
     }
 
@@ -459,12 +586,14 @@ class GroupDecisionViewModelTest {
                 { it.clear() },
             )
             clearers.forEach { clear ->
-                val api = RecordingGroupApi()
+                val api = RecordingGroupApi(::licensedResponse)
                 val gate = RuntimeAppVersionGate("1.0.0")
-                val viewModel = authorizedViewModel(api, gate)
-                prepareReview(viewModel)
+                val viewModel = authorizedViewModel(api, gate, licensedConfig())
+                prepareReview(viewModel, preferred = setOf("面食"))
                 viewModel.submit()
                 advanceUntilIdle()
+                assertEquals(GroupDecisionPhase.RESULT, viewModel.state.value.phase)
+                assertTrue(viewModel.state.value.softPreferencesAvailable)
                 clear(viewModel)
 
                 assertCleared(viewModel)
@@ -492,9 +621,16 @@ class GroupDecisionViewModelTest {
         assertTrue(parameterTypes.none { type -> forbiddenSuffixes.any(type::endsWith) })
     }
 
-    private suspend fun prepareReview(viewModel: GroupDecisionViewModel) {
+    private suspend fun prepareReview(
+        viewModel: GroupDecisionViewModel,
+        preferred: Set<String> = emptySet(),
+    ) {
         assertTrue(viewModel.start())
         assertTrue(viewModel.setLocation(location))
+        if (preferred.isNotEmpty()) {
+            assertTrue(viewModel.updateMember(0, member(preferred = preferred)))
+            assertTrue(viewModel.updateMember(1, member(preferred = preferred)))
+        }
         assertTrue(viewModel.confirmCurrentMember())
         assertTrue(viewModel.confirmCurrentMember())
         assertTrue(viewModel.review())
@@ -536,6 +672,8 @@ class GroupDecisionViewModelTest {
         ),
     )
 
+    private fun licensedConfig() = enabledConfig().copy(dataRightsMode = DataRightsMode.LICENSED_ENRICHMENT)
+
     private fun member(
         budget: Int? = null,
         minutes: Int = 60,
@@ -554,8 +692,11 @@ class GroupDecisionViewModelTest {
         val state = viewModel.state.value
         assertEquals(GroupDecisionPhase.CLOSED, state.phase)
         assertFalse(state.capabilityAvailable)
+        assertFalse(state.softPreferencesAvailable)
+        assertNull(state.dataRightsMode)
         assertNull(state.input.location)
         assertEquals(2, state.input.members.size)
+        assertTrue(state.input.members.all { it.preferredCuisines.isEmpty() && it.excludedCuisines.isEmpty() })
         assertEquals(List(2) { false }, state.confirmedMembers)
         assertNull(state.aggregation)
         assertNull(state.response)
@@ -603,6 +744,14 @@ private class LateGroupApi : GroupRecommendationApi {
 }
 
 private var responseSequence = 0
+
+private fun licensedResponse(request: GroupRecommendationRequest): GroupRecommendationResponse =
+    validResponse(request).let { response ->
+        response.copy(
+            dataRightsMode = DataRightsMode.LICENSED_ENRICHMENT,
+            results = response.results.map { it.copy(fitScore = 88.0) },
+        )
+    }
 
 private fun validResponse(request: GroupRecommendationRequest): GroupRecommendationResponse =
     GroupRecommendationResponse(

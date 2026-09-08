@@ -29,6 +29,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.lifecycle.Lifecycle
 import com.chishenme.app.data.remote.API_CONTRACT_VERSION
 import com.chishenme.app.data.remote.API_CONTRACT_VERSION_HEADER
+import com.chishenme.app.data.remote.DataRightsMode
 import java.io.IOException
 import java.net.InetAddress
 import java.util.concurrent.CopyOnWriteArrayList
@@ -70,6 +71,8 @@ class MainActivityGroupDecisionLocalFixtureTest {
     private val requests = CopyOnWriteArrayList<CapturedRequest>()
     @Volatile
     private var configuredRadiusMeters: Int? = null
+    @Volatile
+    private var configuredDataRightsMode = DataRightsMode.LIVE_DISPLAY_ONLY
 
     @Before
     fun startDeviceServerAndResetState() {
@@ -112,12 +115,15 @@ class MainActivityGroupDecisionLocalFixtureTest {
         ActivityScenario.launch(MainActivity::class.java).use {
             enterGroupFlow()
             composeRule.onAllNodes(hasSetTextAction()).assertCountEquals(0)
+            assertLiveCuisinePreferenceHidden()
 
             clickScrollableAction("确认第 1 位条件")
             awaitText("第 2 位 / 共 2 位")
+            assertLiveCuisinePreferenceHidden()
             clickScrollableAction("确认第 2 位条件")
             clickScrollableAction("复核共同条件")
             awaitText("共同条件复核")
+            assertLiveReviewHasNoPreferences()
             clickScrollableAction("按共同条件查找候选")
 
             awaitText(RESTAURANT_NAME)
@@ -154,6 +160,42 @@ class MainActivityGroupDecisionLocalFixtureTest {
         }
 
         assertTransportContract()
+    }
+
+    @Test
+    fun licensedMembers_selectSharedCuisine_reviewAndSubmitExactPreferences() {
+        configuredDataRightsMode = DataRightsMode.LICENSED_ENRICHMENT
+        ActivityScenario.launch(MainActivity::class.java).use {
+            enterGroupFlow()
+            cuisineOption("更想吃", "面食").performClick().assertIsSelected()
+            clickScrollableAction("确认第 1 位条件")
+            awaitText("第 2 位 / 共 2 位")
+            cuisineOption("更想吃", "面食").performClick().assertIsSelected()
+            clickScrollableAction("确认第 2 位条件")
+            clickScrollableAction("复核共同条件")
+
+            awaitText("共同条件复核")
+            scrollToContent(hasText("共同偏好")).assertIsDisplayed()
+            composeRule.onNodeWithText("面食").assertIsDisplayed()
+            captureSyntheticScreenshot("group-licensed-preferences-review.png")
+            clickScrollableAction("按共同条件查找候选")
+
+            awaitText(RESTAURANT_NAME)
+            scrollToContent(hasText("授权数据候选")).assertIsDisplayed()
+            scrollToContent(hasTestTag("group-result-card-0"))
+                .assertIsDisplayed()
+                .assertHasNoClickAction()
+            composeRule.onAllNodes(
+                hasClickAction() and hasAnyAncestor(hasTestTag("group-result-card-0")),
+                useUnmergedTree = true,
+            ).assertCountEquals(0)
+            scrollToContent(hasText("透明规则匹配分 88（不是成员满意度）"))
+                .assertIsDisplayed()
+            captureSyntheticScreenshot("group-licensed-preferences-result.png")
+            composeRule.waitUntil(UI_TIMEOUT_MS) { groupCallCount.get() == 1 }
+        }
+
+        assertTransportContract(expectedPreferredCuisines = listOf("面食"))
     }
 
     @Test
@@ -209,15 +251,20 @@ class MainActivityGroupDecisionLocalFixtureTest {
     fun configurationRecreation_keepsInMemoryProgressWithoutRouteArguments() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             enterGroupFlow()
+            assertLiveCuisinePreferenceHidden()
             clickScrollableAction("确认第 1 位条件")
             awaitText("第 2 位 / 共 2 位")
+            assertLiveCuisinePreferenceHidden()
 
             scenario.recreate()
 
             awaitText("第 2 位 / 共 2 位")
             composeRule.onAllNodes(hasSetTextAction()).assertCountEquals(0)
+            assertLiveCuisinePreferenceHidden()
             clickScrollableAction("确认第 2 位条件")
             clickScrollableAction("复核共同条件")
+            awaitText("共同条件复核")
+            assertLiveReviewHasNoPreferences()
             clickScrollableAction("按共同条件查找候选")
             awaitText(RESTAURANT_NAME)
             composeRule.waitUntil(UI_TIMEOUT_MS) { groupCallCount.get() == 1 }
@@ -247,31 +294,40 @@ class MainActivityGroupDecisionLocalFixtureTest {
 
     private fun enterGroupFlow() {
         composeRule.waitUntil(UI_TIMEOUT_MS) {
-            hasUiText("同意并继续") || hasUiText("手动选择")
+            hasUiText("同意并继续") || hasUiText("附近美食，少一点纠结")
         }
         if (hasUiText("同意并继续")) {
             assertEquals("隐私同意前不得访问配置或群组接口", 0, server.requestCount)
-            composeRule.onNodeWithText("同意并继续").performClick()
+            composeRule.onNodeWithText("同意并继续")
+                .performScrollTo()
+                .assertIsDisplayed()
+                .performClick()
         }
 
         composeRule.waitUntil(UI_TIMEOUT_MS) {
-            configCallCount.get() >= 1 && hasUiText("手动选择")
+            configCallCount.get() >= 1 && hasUiText("附近美食，少一点纠结")
         }
-        composeRule.onNodeWithText("手动选择").performClick()
+        // The fixed top bar signals Home readiness. Location and group actions
+        // are lazy items that may not be composed yet in a narrow, large-font viewport.
+        scrollToContent(hasClickAction() and hasText("手动选择"))
+            .assertIsDisplayed()
+            .performClick()
         composeRule.onNodeWithText("快捷地点（始终可用）").performScrollTo()
         composeRule.onNodeWithText(MANUAL_LOCATION)
             .performScrollTo()
             .assertIsDisplayed()
             .performClick()
 
-        composeRule.onNode(hasClickAction() and hasText("开始同机填写"))
-            .performScrollTo()
+        scrollToContent(hasClickAction() and hasText("开始同机填写"))
             .assertIsDisplayed()
             .performClick()
         awaitText("第 1 位 / 共 2 位")
     }
 
-    private fun assertTransportContract(expectedMemberRadii: List<Int> = listOf(1_500, 1_500)) {
+    private fun assertTransportContract(
+        expectedMemberRadii: List<Int> = listOf(1_500, 1_500),
+        expectedPreferredCuisines: List<String> = emptyList(),
+    ) {
         assertTrue(
             "设备夹具收到未声明接口：$requests",
             requests.all {
@@ -320,7 +376,13 @@ class MainActivityGroupDecisionLocalFixtureTest {
                 expectedMemberRadii[index].toString(),
                 member.getValue("radiusMeters").jsonPrimitive.content,
             )
-            assertTrue(member.getValue("preferredCuisines").jsonArray.isEmpty())
+            assertEquals(
+                expectedPreferredCuisines,
+                member.getValue("preferredCuisines").jsonArray.map { it.jsonPrimitive.content },
+            )
+            if (configuredDataRightsMode == DataRightsMode.LIVE_DISPLAY_ONLY) {
+                assertTrue(member.getValue("preferredCuisines").jsonArray.isEmpty())
+            }
             assertTrue(member.getValue("excludedCuisines").jsonArray.isEmpty())
         }
         for (forbiddenKey in listOf(
@@ -341,6 +403,37 @@ class MainActivityGroupDecisionLocalFixtureTest {
         scrollToContent(hasClickAction() and hasText(text))
             .assertIsDisplayed()
             .performClick()
+    }
+
+    private fun assertLiveCuisinePreferenceHidden() {
+        // Both cuisine sections belong to the same member card. Compose the card
+        // before checking absence so a lazy item outside the viewport cannot pass.
+        scrollToContent(
+            hasText("这次不吃") and hasAnyAncestor(hasTestTag("group-cuisine-这次不吃")),
+        ).assertIsDisplayed()
+        composeRule.onNodeWithTag("group-cuisine-这次不吃").assertIsDisplayed()
+        composeRule.onAllNodes(
+            hasTestTag("group-cuisine-更想吃"),
+            useUnmergedTree = true,
+        ).assertCountEquals(0)
+        composeRule.onAllNodesWithText("更想吃", useUnmergedTree = true).assertCountEquals(0)
+    }
+
+    private fun assertLiveReviewHasNoPreferences() {
+        scrollToContent(hasText("共同排除")).assertIsDisplayed()
+        composeRule.onAllNodesWithText("共同偏好", useUnmergedTree = true).assertCountEquals(0)
+        scrollToContent(hasText(LIVE_PREFERENCE_NOTICE)).assertIsDisplayed()
+    }
+
+    private fun cuisineOption(title: String, cuisine: String): SemanticsNodeInteraction {
+        val section = hasTestTag("group-cuisine-$title")
+        scrollToContent(hasText(title) and hasAnyAncestor(section)).assertIsDisplayed()
+        composeRule.onNode(
+            hasScrollToIndexAction() and hasAnyAncestor(section),
+        ).performScrollToNode(hasText(cuisine))
+        return composeRule.onNode(
+            hasClickAction() and hasText(cuisine) and hasAnyAncestor(section),
+        ).performScrollTo().assertIsDisplayed()
     }
 
     private fun radiusOption(text: String): SemanticsNodeInteraction {
@@ -465,7 +558,7 @@ class MainActivityGroupDecisionLocalFixtureTest {
             "areaCode":"NATIONWIDE","defaultRadiusMeters":$it,"maximumRadiusMeters":$it
           },
           """.trimIndent() }.orEmpty()}
-          "dataRightsMode":"LIVE_DISPLAY_ONLY",
+          "dataRightsMode":"${configuredDataRightsMode.name}",
           "aiEnabled":false,
           "accountsEnabled":false,
           "favoritesEnabled":false,
@@ -483,12 +576,14 @@ class MainActivityGroupDecisionLocalFixtureTest {
         }
     """.trimIndent()
 
+    // Expected aggregation is fixed by the fixture, never echoed from the request.
+    // The licensed case uses synthetic DEMO data and both members choose 面食.
     private fun groupResponseBody(): String = """
         {
           "requestId":"70000000-0000-4000-8000-000000000001",
           "generatedAt":"2026-09-03T00:00:00Z",
           "coverage":"NATIONWIDE",
-          "dataRightsMode":"LIVE_DISPLAY_ONLY",
+          "dataRightsMode":"${configuredDataRightsMode.name}",
           "ruleVersion":"group-fixture-rule-v1",
           "aggregation":{
             "version":"group-constraints-v1",
@@ -496,16 +591,16 @@ class MainActivityGroupDecisionLocalFixtureTest {
             "effectiveBudgetMaxYuan":null,
             "effectiveAvailableMinutes":60,
             "effectiveRadiusMeters":${configuredRadiusMeters ?: 1_500},
-            "preferredCuisines":[],
+            "preferredCuisines":${if (configuredDataRightsMode == DataRightsMode.LICENSED_ENRICHMENT) """["面食"]""" else "[]"},
             "excludedCuisines":[]
           },
           "results":[{
-            "provider":"AMAP",
-            "dataMode":"LIVE",
+            "provider":"${if (configuredDataRightsMode == DataRightsMode.LICENSED_ENRICHMENT) "DEMO" else "AMAP"}",
+            "dataMode":"${if (configuredDataRightsMode == DataRightsMode.LICENSED_ENRICHMENT) "DEMO" else "LIVE"}",
             "name":"$RESTAURANT_NAME",
             "address":"北京市海淀区设备内群组测试路 2 号",
             "rank":1,
-            "fitScore":null,
+            "fitScore":${if (configuredDataRightsMode == DataRightsMode.LICENSED_ENRICHMENT) "88.0" else "null"},
             "sourceRating":4.4,
             "averageCostYuan":28.0,
             "distanceMeters":620.0,
@@ -516,7 +611,7 @@ class MainActivityGroupDecisionLocalFixtureTest {
             "reasons":[{"code":"DISTANCE_FIT","text":"在共同最远距离内"}],
             "warnings":[],
             "confidence":"HIGH",
-            "sourceAttribution":"高德地图实时数据"
+            "sourceAttribution":"${if (configuredDataRightsMode == DataRightsMode.LICENSED_ENRICHMENT) "设备内合成授权模式数据，仅供测试" else "高德地图实时数据"}"
           }],
           "notice":null
         }
@@ -545,6 +640,8 @@ class MainActivityGroupDecisionLocalFixtureTest {
         const val UI_TIMEOUT_MS = 20_000L
         const val MANUAL_LOCATION = "北京电子科技学院"
         const val RESTAURANT_NAME = "两人共同候选面馆"
+        const val LIVE_PREFERENCE_NOTICE =
+            "当前数据仅支持共同限制筛选，未收集或提交菜系偏好；结果仍需逐项核实。"
         val preferencesReset = AtomicBoolean(false)
     }
 }

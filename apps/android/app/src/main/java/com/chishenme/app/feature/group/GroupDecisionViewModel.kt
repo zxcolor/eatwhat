@@ -45,6 +45,7 @@ enum class GroupDecisionPhase {
 data class GroupDecisionUiState(
     val phase: GroupDecisionPhase = GroupDecisionPhase.CLOSED,
     val capabilityAvailable: Boolean = false,
+    val dataRightsMode: DataRightsMode? = null,
     val input: GroupDecisionInput = GroupDecisionInput(),
     val activeMemberIndex: Int = 0,
     val confirmedMembers: List<Boolean> = List(2) { false },
@@ -55,6 +56,9 @@ data class GroupDecisionUiState(
 ) {
     val busy: Boolean
         get() = phase == GroupDecisionPhase.SUBMITTING
+
+    val softPreferencesAvailable: Boolean
+        get() = capabilityAvailable && dataRightsMode == DataRightsMode.LICENSED_ENRICHMENT
 }
 
 /**
@@ -142,6 +146,7 @@ class GroupDecisionViewModel @Inject constructor(
         }
         mutableState.value = GroupDecisionUiState(
             capabilityAvailable = newLease != null,
+            dataRightsMode = capabilitySession?.dataRightsMode,
             recommendationDefaults = capabilitySession?.recommendationDefaults,
             formError = if (newLease == null) {
                 "同设备群组推荐尚未通过当前配置校验"
@@ -162,6 +167,7 @@ class GroupDecisionViewModel @Inject constructor(
         mutableState.value = GroupDecisionUiState(
             phase = GroupDecisionPhase.EDITING,
             capabilityAvailable = true,
+            dataRightsMode = capabilitySession?.dataRightsMode,
             input = GroupDecisionInput(members = List(2) { defaultMember() }),
             recommendationDefaults = capabilitySession?.recommendationDefaults,
         )
@@ -199,10 +205,7 @@ class GroupDecisionViewModel @Inject constructor(
 
     fun updateMember(index: Int, value: GroupMemberConstraints): Boolean {
         if (!canEdit() || index !in mutableState.value.input.members.indices) return false
-        val isolatedValue = value.copy(
-            preferredCuisines = value.preferredCuisines.toSet(),
-            excludedCuisines = value.excludedCuisines.toSet(),
-        )
+        val isolatedValue = normalizeMember(value, capabilitySession?.dataRightsMode)
         mutableState.update { current ->
             current.copy(
                 input = current.input.copy(
@@ -251,19 +254,20 @@ class GroupDecisionViewModel @Inject constructor(
     fun review(): Boolean {
         if (!canEdit()) return false
         val snapshot = mutableState.value
+        val input = normalizeInput(snapshot.input, capabilitySession?.dataRightsMode)
         if (snapshot.confirmedMembers.size != snapshot.input.members.size ||
             snapshot.confirmedMembers.any { !it }
         ) {
             mutableState.update { it.copy(formError = "请依次确认每位成员的条件") }
             return false
         }
-        return when (val validation = GroupDecisionInputValidator.validate(snapshot.input)) {
+        return when (val validation = GroupDecisionInputValidator.validate(input)) {
             is GroupInputValidation.Invalid -> {
                 mutableState.update { it.copy(formError = validation.message) }
                 false
             }
             GroupInputValidation.Valid -> {
-                val aggregation = GroupConstraintAggregator.aggregate(snapshot.input.members)
+                val aggregation = GroupConstraintAggregator.aggregate(input.members)
                 val radiusError = groupRadiusError(aggregation)
                 if (radiusError != null) {
                     mutableState.update { it.copy(formError = radiusError) }
@@ -272,6 +276,7 @@ class GroupDecisionViewModel @Inject constructor(
                 mutableState.update {
                     it.copy(
                         phase = GroupDecisionPhase.REVIEW,
+                        input = input,
                         aggregation = aggregation,
                         response = null,
                         formError = null,
@@ -335,11 +340,20 @@ class GroupDecisionViewModel @Inject constructor(
             revokeCapability("群组推荐权限已失效，请重新进入")
             return false
         }
-        if (GroupDecisionInputValidator.validate(input) != GroupInputValidation.Valid ||
-            GroupConstraintAggregator.aggregate(input.members) != aggregation
+        val normalizedInput = normalizeInput(input, session.dataRightsMode)
+        if (normalizedInput != input ||
+            GroupDecisionInputValidator.validate(normalizedInput) != GroupInputValidation.Valid ||
+            GroupConstraintAggregator.aggregate(normalizedInput.members) != aggregation
         ) {
             mutableState.update {
-                it.copy(phase = GroupDecisionPhase.EDITING, aggregation = null, formError = "共同条件已变化，请重新复核")
+                it.copy(
+                    phase = GroupDecisionPhase.EDITING,
+                    input = normalizedInput,
+                    confirmedMembers = List(normalizedInput.members.size) { false },
+                    aggregation = null,
+                    response = null,
+                    formError = "共同条件已变化，请重新确认成员条件并复核",
+                )
             }
             return false
         }
@@ -355,7 +369,7 @@ class GroupDecisionViewModel @Inject constructor(
             }
             return false
         }
-        val request = GroupRecommendationRequestFactory.create(input)
+        val request = GroupRecommendationRequestFactory.create(normalizedInput)
         val generation = invalidateOperation()
         mutableState.update {
             it.copy(
@@ -416,6 +430,24 @@ class GroupDecisionViewModel @Inject constructor(
 
     private fun canEdit(): Boolean =
         mutableState.value.phase == GroupDecisionPhase.EDITING && groupAccessIsCurrent()
+
+    /** Normalize every entry point so an old UI draft cannot restore unsupported preferences. */
+    private fun normalizeMember(
+        member: GroupMemberConstraints,
+        dataRightsMode: DataRightsMode?,
+    ) = member.copy(
+        preferredCuisines = if (dataRightsMode == DataRightsMode.LICENSED_ENRICHMENT) {
+            member.preferredCuisines.toSet()
+        } else {
+            emptySet()
+        },
+        excludedCuisines = member.excludedCuisines.toSet(),
+    )
+
+    private fun normalizeInput(
+        input: GroupDecisionInput,
+        dataRightsMode: DataRightsMode?,
+    ) = input.copy(members = input.members.map { normalizeMember(it, dataRightsMode) })
 
     private fun defaultMember() = GroupMemberConstraints(
         radiusMeters = RecommendationRadiusPolicy.automaticRadius(

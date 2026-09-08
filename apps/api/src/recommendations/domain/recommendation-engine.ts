@@ -275,7 +275,9 @@ function candidateWarnings(
 	candidate: PlaceCandidate,
 	context: RecommendationContext,
 ): string[] {
-	const warnings: string[] = [];
+	const warnings: string[] = [
+		"往返及用餐时间仅为估算，实际路线、等位、点餐与制作时间未确认",
+	];
 	if (candidate.openStatus === "UNKNOWN")
 		warnings.push("营业状态暂无可靠信息，请到店前确认");
 	if (candidate.averageCostYuan === null) warnings.push("人均消费暂无可靠信息");
@@ -306,7 +308,7 @@ function candidateReasons(
 	const reasons: RecommendationReason[] = [
 		{
 			code: "DISTANCE_FIT",
-			text: `距离约 ${candidate.distanceMeters} 米，${travelModeText(context.travelMode)}约 ${candidate.estimatedTravelMinutes} 分钟`,
+			text: `距离约 ${candidate.distanceMeters} 米，${travelModeText(context.travelMode)}约 ${candidate.estimatedTravelMinutes} 分钟（按距离与固定速度估算，非实际路线用时）`,
 		},
 	];
 	if (
@@ -318,7 +320,7 @@ function candidateReasons(
 	) {
 		reasons.push({
 			code: "BUDGET_FIT",
-			text: `人均约 ${Math.round(candidate.averageCostYuan)} 元，在 ${context.budgetMaxYuan} 元预算内`,
+			text: `来源参考人均约 ${Math.round(candidate.averageCostYuan)} 元，不高于 ${context.budgetMaxYuan} 元预算；实际消费请确认`,
 		});
 	}
 	const totalMinutes =
@@ -330,7 +332,7 @@ function candidateReasons(
 	) {
 		reasons.push({
 			code: "TIME_FIT",
-			text: `预计往返加用餐约 ${totalMinutes} 分钟，符合 ${context.availableMinutes} 分钟时间预算`,
+			text: `往返及用餐估算约 ${totalMinutes} 分钟（时间预算 ${context.availableMinutes} 分钟），未计等位、点餐与制作`,
 		});
 	}
 	const intentMatch = intent.mealTypes.find((type) =>

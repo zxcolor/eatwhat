@@ -1,7 +1,7 @@
 package com.chishenme.app.data.remote
 
+import com.chishenme.app.domain.CuisineExclusionPolicy
 import java.time.Instant
-import java.util.Locale
 import java.util.UUID
 
 object GroupRecommendationResponseValidator {
@@ -77,21 +77,9 @@ object GroupRecommendationResponseValidator {
         if (result.tags.size > 20 || result.tags.any { it.isBlank() || it.length > 40 }) return false
         if (result.warnings.size > 20 || result.warnings.any { it.length > 200 }) return false
         if (result.sourceAttribution.isBlank() || result.sourceAttribution.length > 100) return false
-        if (containsExcludedCuisine(result.tags, aggregation.excludedCuisines)) return false
+        if (CuisineExclusionPolicy.hasExcludedCuisine(result.tags, aggregation.excludedCuisines)) return false
         return true
     }
-
-    private fun containsExcludedCuisine(tags: List<String>, exclusions: List<String>): Boolean {
-        val normalizedExclusions = exclusions.map(::normalizeCuisine)
-        return tags.any { tag ->
-            val normalizedTag = normalizeCuisine(tag)
-            normalizedTag.isNotEmpty() && normalizedExclusions.any { exclusion ->
-                normalizedTag == exclusion || normalizedTag.contains(exclusion)
-            }
-        }
-    }
-
-    private fun normalizeCuisine(value: String): String = value.trim().lowercase(Locale.CHINA)
 
     private const val GROUP_AGGREGATION_VERSION = "group-constraints-v1"
 }
