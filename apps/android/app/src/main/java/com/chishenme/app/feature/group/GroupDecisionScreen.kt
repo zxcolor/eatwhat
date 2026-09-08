@@ -212,6 +212,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.editingItems(
                 total = state.input.members.size,
                 member = member,
                 maximumRadiusMeters = state.recommendationDefaults?.maximumRadiusMeters,
+                softPreferencesAvailable = state.softPreferencesAvailable,
                 onChange = { viewModel.updateMember(state.activeMemberIndex, it) },
             )
         }
@@ -250,6 +251,7 @@ private fun MemberEditor(
     total: Int,
     member: GroupMemberConstraints,
     maximumRadiusMeters: Int?,
+    softPreferencesAvailable: Boolean,
     onChange: (GroupMemberConstraints) -> Unit,
 ) {
     AppCard {
@@ -297,19 +299,21 @@ private fun MemberEditor(
             selected = member.radiusMeters,
             onSelected = { onChange(member.copy(radiusMeters = it)) },
         )
-        CuisineChoices(
-            title = "更想吃",
-            selected = member.preferredCuisines,
-            onToggle = { cuisine ->
-                val next = member.preferredCuisines.toggle(cuisine)
-                onChange(
-                    member.copy(
-                        preferredCuisines = next,
-                        excludedCuisines = member.excludedCuisines - cuisine,
-                    ),
-                )
-            },
-        )
+        if (softPreferencesAvailable) {
+            CuisineChoices(
+                title = "更想吃",
+                selected = member.preferredCuisines,
+                onToggle = { cuisine ->
+                    val next = member.preferredCuisines.toggle(cuisine)
+                    onChange(
+                        member.copy(
+                            preferredCuisines = next,
+                            excludedCuisines = member.excludedCuisines - cuisine,
+                        ),
+                    )
+                },
+            )
+        }
         CuisineChoices(
             title = "这次不吃",
             selected = member.excludedCuisines,
@@ -362,7 +366,10 @@ private fun CuisineChoices(
     selected: Set<String>,
     onToggle: (String) -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(
+        modifier = Modifier.testTag("group-cuisine-$title"),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
         Text(title, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             itemsIndexed(GroupCuisinePolicy.orderedValues) { _, cuisine ->
@@ -381,7 +388,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.reviewItems(
     viewModel: GroupDecisionViewModel,
 ) {
     state.aggregation?.let { aggregation ->
-        item { AggregationCard(aggregation) }
+        item { AggregationCard(aggregation, state.softPreferencesAvailable) }
     }
     state.formError?.let { error ->
         item { AppStatusBanner("无法提交", error, tone = AppTone.ERROR) }
@@ -405,7 +412,9 @@ private fun androidx.compose.foundation.lazy.LazyListScope.reviewItems(
 private fun androidx.compose.foundation.lazy.LazyListScope.submittingItems(
     state: GroupDecisionUiState,
 ) {
-    state.aggregation?.let { aggregation -> item { AggregationCard(aggregation) } }
+    state.aggregation?.let { aggregation ->
+        item { AggregationCard(aggregation, state.softPreferencesAvailable) }
+    }
     item {
         AppCard(
             modifier = Modifier.semantics {
@@ -436,7 +445,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.resultItems(
         return
     }
     item { ResultRightsNotice(response) }
-    item { AggregationCard(response.aggregation) }
+    item { AggregationCard(response.aggregation, state.softPreferencesAvailable) }
     if (response.results.isEmpty()) {
         item {
             AppStatusBanner(
@@ -510,7 +519,10 @@ private fun androidx.compose.foundation.lazy.LazyListScope.failedItems(
 }
 
 @Composable
-private fun AggregationCard(aggregation: GroupConstraintAggregation) {
+private fun AggregationCard(
+    aggregation: GroupConstraintAggregation,
+    softPreferencesAvailable: Boolean,
+) {
     AppCard {
         AppSectionHeader(
             title = "共同条件复核",
@@ -523,10 +535,26 @@ private fun AggregationCard(aggregation: GroupConstraintAggregation) {
         )
         SummaryLine("可用时间", "${aggregation.effectiveAvailableMinutes} 分钟")
         SummaryLine("最远距离", "${aggregation.effectiveRadiusMeters} 米")
-        SummaryLine(
-            "共同偏好",
-            aggregation.preferredCuisines.takeIf(List<String>::isNotEmpty)?.joinToString("、") ?: "无额外共同偏好",
-        )
+        if (softPreferencesAvailable) {
+            SummaryLine(
+                "共同偏好",
+                aggregation.preferredCuisines.takeIf(List<String>::isNotEmpty)?.joinToString("、")
+                    ?: "无额外共同偏好",
+            )
+            if (aggregation.preferredCuisines.isEmpty()) {
+                Text(
+                    "没有共同偏好仅表示不额外限定菜系，不代表没有可吃的餐厅。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else {
+            Text(
+                "当前数据仅支持共同限制筛选，未收集或提交菜系偏好；结果仍需逐项核实。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         SummaryLine(
             "共同排除",
             aggregation.excludedCuisines.takeIf(List<String>::isNotEmpty)?.joinToString("、") ?: "无",

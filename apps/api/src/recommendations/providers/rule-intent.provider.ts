@@ -1,4 +1,5 @@
 import {
+	CuisinePreferenceSchema,
 	type IntentProfile,
 	IntentProfileSchema,
 	type RecommendationContext,
@@ -20,6 +21,11 @@ export function buildRuleIntent(
 	context: RecommendationContext,
 	plan: RecommendationQueryPlan = buildRecommendationQueryPlan(context),
 ): IntentProfile {
+	// The client submits a set of choices, not an ordered preference ballot.
+	// Canonical order also keeps capped meal types and their explanations stable.
+	const preferredCuisines = CuisinePreferenceSchema.options.filter((cuisine) =>
+		context.preferredCuisines.includes(cuisine),
+	);
 	const legacyMealTypes =
 		context.mealPeriod === "BREAKFAST"
 			? ["早餐", "包子", "粥", "面食", "快餐"]
@@ -31,19 +37,18 @@ export function buildRuleIntent(
 					? ["午餐", "快餐", "盖饭", "面食", "简餐"]
 					: ["午餐", "家常菜", "盖饭", "面食", "正餐"];
 	const mealTypes =
-		plan.profile.target === "MEAL" ? legacyMealTypes : plan.queryTerms;
+		plan.profile.target === "MEAL"
+			? legacyMealTypes
+			: [plan.preferredTerm, ...preferredCuisines];
 	const cuisineWeights = Object.fromEntries(
-		context.preferredCuisines.map((cuisine, index) => [
-			cuisine,
-			Math.max(0.45, 1 - index * 0.08),
-		]),
+		preferredCuisines.map((cuisine) => [cuisine, 1]),
 	);
 	return IntentProfileSchema.parse({
 		cuisineWeights,
 		mealTypes: [
 			...new Set(
 				plan.profile.target === "MEAL"
-					? [...context.preferredCuisines, ...mealTypes]
+					? [...preferredCuisines, ...mealTypes]
 					: mealTypes,
 			),
 		].slice(0, 8),

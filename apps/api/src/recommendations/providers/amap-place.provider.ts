@@ -133,8 +133,9 @@ function parseLocation(value: unknown): {
 		: null;
 }
 
-function shanghaiHourAndMinute(requestTime: string | undefined): number {
+function shanghaiHourAndMinute(requestTime: string | undefined): number | null {
 	const date = requestTime === undefined ? new Date() : new Date(requestTime);
+	if (!Number.isFinite(date.getTime())) return null;
 	const parts = new Intl.DateTimeFormat("en-GB", {
 		timeZone: "Asia/Shanghai",
 		hour: "2-digit",
@@ -172,23 +173,39 @@ export function interpretAmapOpenStatus(
 	if (/^(休息|歇业|关闭)$/.test(text)) return "CLOSED";
 
 	const current = shanghaiHourAndMinute(requestTime);
-	let understood = false;
-	// The official field commonly separates today's multiple ranges with spaces.
-	for (const range of text.split(/[\s;,，；]+/u)) {
+	if (current === null) return "UNKNOWN";
+	const ranges: { start: number; end: number }[] = [];
+	// Interpret only a complete list of today's numeric ranges. An unrecognised
+	// date, closure or other qualifier may override even a range that looks open.
+	for (const range of text.split(/[\s;,，；]+/u).filter(Boolean)) {
 		const [startText, endText, ...extra] = range.split("-");
 		if (startText === undefined || endText === undefined || extra.length > 0)
-			continue;
+			return "UNKNOWN";
 		const start = parseMinuteOfDay(startText);
 		const end = parseMinuteOfDay(endText);
-		if (start === null || end === null) continue;
-		understood = true;
-		if (start <= end) {
-			if (current >= start && current <= end) return "OPEN";
-		} else if (current >= start || current <= end) {
+		// 24:00 is an end-of-day endpoint only. Equal endpoints are ambiguous:
+		// they do not establish either a full day or a closed business.
+		if (start === null || end === null || start === 1_440 || start === end)
+			return "UNKNOWN";
+		ranges.push({ start, end });
+	}
+	if (ranges.length === 0) return "UNKNOWN";
+	for (const { start, end } of ranges) {
+		if (
+			start < end
+				? current >= start && current < end
+				: current >= start || current < end
+		) {
 			return "OPEN";
 		}
 	}
-	return understood ? "CLOSED" : "UNKNOWN";
+	// The source field does not specify whether its closing minute is inclusive.
+	// Another range starting at this minute can establish OPEN above; otherwise
+	// avoid asserting either OPEN or CLOSED at the ambiguous endpoint. Normalize
+	// 24:00 to the same midnight minute as 00:00 for this endpoint check only.
+	return ranges.some(({ end }) => current === end % 1_440)
+		? "UNKNOWN"
+		: "CLOSED";
 }
 
 function tagsFromPoi(poi: AmapPoi, business: AmapBusiness): string[] {

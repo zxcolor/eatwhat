@@ -4,6 +4,7 @@ import {
 	RecommendationContextSchema,
 } from "@chi-shen-me/contracts";
 import { describe, expect, it } from "vitest";
+import { buildRuleIntent } from "../providers/rule-intent.provider.js";
 import type { PlaceCandidate } from "./place-candidate.js";
 import { rankCandidates } from "./recommendation-engine.js";
 
@@ -126,6 +127,99 @@ it("rejects malformed generic provider and action metadata", () => {
 });
 
 describe("rankCandidates", () => {
+	it.each(["LIVE_DISPLAY_ONLY", "LICENSED_ENRICHMENT"] as const)(
+		"keeps source price and travel/time estimates explicitly qualified in %s",
+		(dataRightsMode) => {
+			const [result] = rankCandidates({
+				context: context(),
+				intent: intent(),
+				dataRightsMode,
+				candidates: [candidate()],
+			});
+
+			expect(result?.reasons).toEqual([
+				{
+					code: "DISTANCE_FIT",
+					text: "距离约 500 米，步行约 7 分钟（按距离与固定速度估算，非实际路线用时）",
+				},
+				{
+					code: "BUDGET_FIT",
+					text: "来源参考人均约 25 元，不高于 40 元预算；实际消费请确认",
+				},
+				{
+					code: "TIME_FIT",
+					text: "往返及用餐估算约 44 分钟（时间预算 60 分钟），未计等位、点餐与制作",
+				},
+			]);
+			expect(result?.warnings).toContain(
+				"往返及用餐时间仅为估算，实际路线、等位、点餐与制作时间未确认",
+			);
+		},
+	);
+
+	it.each(["LIVE_DISPLAY_ONLY", "LICENSED_ENRICHMENT"] as const)(
+		"retains unknown price and a 15-minute time risk without claiming a fit in %s",
+		(dataRightsMode) => {
+			const [result] = rankCandidates({
+				context: context({ availableMinutes: 15 }),
+				intent: intent(),
+				dataRightsMode,
+				candidates: [candidate({ averageCostYuan: null })],
+			});
+
+			expect(result?.providerPlaceId).toBe("place-1");
+			expect(result?.averageCostYuan).toBeNull();
+			expect(result?.reasons.map((reason) => reason.code)).not.toContain(
+				"BUDGET_FIT",
+			);
+			expect(result?.reasons.map((reason) => reason.code)).not.toContain(
+				"TIME_FIT",
+			);
+			expect(result?.warnings).toEqual(
+				expect.arrayContaining([
+					"人均消费暂无可靠信息",
+					"往返及用餐时间仅为估算，实际路线、等位、点餐与制作时间未确认",
+					"预计往返及用餐时间可能超出你的时间预算",
+				]),
+			);
+		},
+	);
+
+	it("keeps licensed scores, order and reasons stable for every cuisine-set permutation", () => {
+		const candidates = ["面食", "米饭", "火锅"].map((cuisine, index) =>
+			candidate({
+				providerPlaceId: `cuisine-${index}`,
+				providerRank: index + 1,
+				name: `合成测试${cuisine}`,
+				tags: [cuisine],
+			}),
+		);
+		const rankWith = (preferredCuisines: readonly string[]) => {
+			const request = RecommendationContextSchema.parse({
+				...context(),
+				preferredCuisines,
+			});
+			return rankCandidates({
+				context: request,
+				intent: buildRuleIntent(request),
+				dataRightsMode: "LICENSED_ENRICHMENT",
+				candidates,
+			});
+		};
+		const expected = rankWith(["面食", "米饭", "火锅"]);
+		expect(expected).toHaveLength(3);
+		expect(new Set(expected.map((result) => result.fitScore)).size).toBe(1);
+		for (const choices of [
+			["面食", "火锅", "米饭"],
+			["米饭", "面食", "火锅"],
+			["米饭", "火锅", "面食"],
+			["火锅", "面食", "米饭"],
+			["火锅", "米饭", "面食"],
+		]) {
+			expect(rankWith(choices)).toEqual(expected);
+		}
+	});
+
 	it("keeps provider order and hides fit scores in live-display-only mode", () => {
 		const results = rankCandidates({
 			context: context(),

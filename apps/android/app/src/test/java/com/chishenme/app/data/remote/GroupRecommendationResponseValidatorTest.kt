@@ -41,6 +41,10 @@ class GroupRecommendationResponseValidatorTest {
         preferredCuisines = listOf("面食", "米饭"),
         excludedCuisines = listOf("火锅"),
     )
+    private val groupedCuisineRequest = request.copy(
+        members = request.members.map { it.copy(excludedCuisines = listOf("川湘菜")) },
+    )
+    private val groupedCuisineAggregation = aggregation.copy(excludedCuisines = listOf("川湘菜"))
 
     @Test
     fun `accepts valid live display-only response without score`() {
@@ -168,6 +172,89 @@ class GroupRecommendationResponseValidatorTest {
                 ),
             )
         }
+    }
+
+    @Test
+    fun `rejects grouped cuisine and provider child tags in either data rights mode`() {
+        for (mode in DataRightsMode.entries) {
+            for (tags in listOf(
+                listOf("川湘菜"),
+                listOf("川菜"),
+                listOf("湘菜"),
+                listOf("正餐", "四川菜(川菜)"),
+                listOf("正餐", " 湖南湘菜 "),
+            )) {
+                assertFalse(
+                    "$mode: $tags",
+                    validate(
+                        response().copy(
+                            dataRightsMode = mode,
+                            aggregation = groupedCuisineAggregation,
+                            results = listOf(result().copy(tags = tags)),
+                        ),
+                        groupedCuisineRequest,
+                        groupedCuisineAggregation,
+                        expectedMode = mode,
+                    ),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `rejects a child cuisine injected into any later candidate`() {
+        val candidates = List(3) { index -> result().copy(rank = index + 1) }
+        val validResponse = response().copy(
+            aggregation = groupedCuisineAggregation,
+            results = candidates,
+        )
+        assertTrue(validate(validResponse, groupedCuisineRequest, groupedCuisineAggregation))
+
+        for (index in 1..2) {
+            val tampered = validResponse.copy(
+                results = candidates.mapIndexed { candidateIndex, candidate ->
+                    if (candidateIndex == index) candidate.copy(tags = listOf("川菜")) else candidate
+                },
+            )
+            assertFalse(validate(tampered, groupedCuisineRequest, groupedCuisineAggregation))
+        }
+    }
+
+    @Test
+    fun `grouped exclusion preserves unrelated tags and unknown facts for confirmation`() {
+        for (mode in DataRightsMode.entries) {
+            for (tags in listOf(emptyList(), listOf("未知菜系"), listOf("面食", "中式快餐"))) {
+                val candidate = result().copy(
+                    tags = tags,
+                    averageCostYuan = null,
+                    openStatus = OpenStatus.UNKNOWN,
+                    warnings = listOf("菜系、价格和营业状态待确认"),
+                )
+                assertTrue(
+                    "$mode: $tags",
+                    validate(
+                        response().copy(
+                            dataRightsMode = mode,
+                            aggregation = groupedCuisineAggregation,
+                            results = listOf(candidate),
+                        ),
+                        groupedCuisineRequest,
+                        groupedCuisineAggregation,
+                        expectedMode = mode,
+                    ),
+                )
+            }
+        }
+        assertFalse(
+            validate(
+                response().copy(
+                    aggregation = groupedCuisineAggregation,
+                    results = listOf(result().copy(tags = listOf(" "))),
+                ),
+                groupedCuisineRequest,
+                groupedCuisineAggregation,
+            ),
+        )
     }
 
     @Test

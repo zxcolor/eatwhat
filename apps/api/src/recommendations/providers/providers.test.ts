@@ -4,6 +4,7 @@ import { type AppConfig, loadAppConfig } from "../../config/app-config.js";
 import { startupOperationalConfig } from "../../operational-config/operational-config.types.js";
 import { getAmapFailureDiagnostic } from "../../providers/amap-response-status.js";
 import { toGcj02 } from "../domain/geo.js";
+import { rankCandidates } from "../domain/recommendation-engine.js";
 import {
 	buildRecommendationQueryPlan,
 	type RecommendationQueryPlan,
@@ -16,8 +17,8 @@ import {
 } from "./amap-place.provider.js";
 import { DemoPlaceProvider } from "./demo-place.provider.js";
 import { IntentCoordinator } from "./intent-coordinator.js";
-import { buildQwenSystemMessage } from "./qwen-intent-registry.js";
 import { QwenIntentProvider } from "./qwen-intent.provider.js";
+import { buildQwenSystemMessage } from "./qwen-intent-registry.js";
 import { buildRuleIntent, RuleIntentProvider } from "./rule-intent.provider.js";
 import { UnavailablePlaceProvider } from "./unavailable-place.provider.js";
 
@@ -65,6 +66,29 @@ describe("intent providers", () => {
 		expect(profile.speedPreference).toBe("FAST");
 		expect(profile.mealTypes).toContain("面食");
 	});
+
+	it.each(["MEAL", "COFFEE"] as const)(
+		"treats cuisine choices as an equal-weight set for %s",
+		(target) => {
+			const makeProfile = (preferredCuisines: readonly string[]) =>
+				buildRuleIntent(
+					RecommendationContextSchema.parse({
+						...recommendationContext,
+						target,
+						preferredCuisines,
+					}),
+				);
+			const expected = makeProfile(["面食", "米饭", "火锅"]);
+			expect(expected.cuisineWeights).toEqual({ 面食: 1, 米饭: 1, 火锅: 1 });
+			for (const choices of [
+				["火锅", "面食", "米饭"],
+				["米饭", "火锅", "面食"],
+				["米饭", "面食", "火锅", "面食"],
+			]) {
+				expect(makeProfile(choices)).toEqual(expected);
+			}
+		},
+	);
 
 	it("sends only privacy-minimal context to the Beijing Qwen workspace", async () => {
 		const fetchMock = vi.fn(
@@ -591,6 +615,182 @@ describe("place providers", () => {
 		expect(fetchMock).toHaveBeenCalledOnce();
 	});
 
+	it("carries mixed opening uncertainty through the live engine without removing unknown facts", async () => {
+		const context = RecommendationContextSchema.parse({
+			...recommendationContext,
+			availableMinutes: 15,
+			requestTime: "2026-09-08T04:00:00Z",
+		});
+		const origin = toGcj02(context.location);
+		const fixtures = [
+			{
+				id: "mixed-hours",
+				distance: "600",
+				cost: [],
+				opentime_today: "09:00-20:00 晚市待确认",
+			},
+			{
+				id: "closed-hours",
+				distance: "100",
+				cost: "20",
+				opentime_today: "09:00-11:00 18:00-22:00",
+			},
+			{
+				id: "known-hours",
+				distance: "200",
+				cost: "28",
+				opentime_today: "09:00-11:00 11:30-14:00",
+			},
+		];
+		const fetchMock = vi.fn(
+			async () =>
+				new Response(
+					JSON.stringify({
+						status: "1",
+						infocode: "10000",
+						pois: fixtures.map((fixture, index) => ({
+							id: fixture.id,
+							name: `合成测试餐厅${index}`,
+							address: "合成测试地址",
+							location: `${origin.longitude},${origin.latitude + index * 0.0001}`,
+							distance: fixture.distance,
+							type: "餐饮服务;中餐厅",
+							business: {
+								rating: "4.5",
+								tag: "面食",
+								cost: fixture.cost,
+								opentime_today: fixture.opentime_today,
+							},
+						})),
+					}),
+					{ status: 200 },
+				),
+		);
+		const provider = new AmapPlaceProvider(
+			loadAppConfig({
+				NODE_ENV: "test",
+				AMAP_ENABLED: "true",
+				AMAP_WEB_SERVICE_KEY: "test-key",
+			}),
+			fetchMock as typeof fetch,
+		);
+		const candidates = await provider.search(context, queryPlan(context));
+		expect(candidates.map((candidate) => candidate.openStatus)).toEqual([
+			"UNKNOWN",
+			"CLOSED",
+			"OPEN",
+		]);
+
+		const results = rankCandidates({
+			context,
+			intent: buildRuleIntent(context),
+			candidates,
+			dataRightsMode: "LIVE_DISPLAY_ONLY",
+		});
+		expect(results.map((result) => result.providerPlaceId)).toEqual([
+			"mixed-hours",
+			"known-hours",
+		]);
+		expect(results.map((result) => result.fitScore)).toEqual([null, null]);
+		expect(results[0]).toMatchObject({
+			openStatus: "UNKNOWN",
+			averageCostYuan: null,
+			aiAssisted: false,
+		});
+		expect(results[0]?.warnings).toEqual(
+			expect.arrayContaining([
+				"营业状态暂无可靠信息，请到店前确认",
+				"人均消费暂无可靠信息",
+			]),
+		);
+		expect(results[0]?.reasons.map((reason) => reason.code)).not.toContain(
+			"BUDGET_FIT",
+		);
+		expect(
+			results[1]?.reasons.find((reason) => reason.code === "BUDGET_FIT")?.text,
+		).toContain("来源参考人均约 28 元");
+		for (const result of results) {
+			expect(result.reasons.map((reason) => reason.code)).not.toContain(
+				"TIME_FIT",
+			);
+			expect(result.warnings).toEqual(
+				expect.arrayContaining([
+					"往返及用餐时间仅为估算，实际路线、等位、点餐与制作时间未确认",
+					"预计往返及用餐时间可能超出你的时间预算",
+				]),
+			);
+		}
+		expect(fetchMock).toHaveBeenCalledOnce();
+	});
+
+	it("keeps both midnight closing spellings through the live adapter and engine", async () => {
+		const context = RecommendationContextSchema.parse({
+			...recommendationContext,
+			requestTime: "2026-09-08T16:00:00Z",
+		});
+		const origin = toGcj02(context.location);
+		const schedules = ["22:00-00:00", "22:00-24:00", "22:00-24:00 00:00-02:00"];
+		const fetchMock = vi.fn(
+			async () =>
+				new Response(
+					JSON.stringify({
+						status: "1",
+						infocode: "10000",
+						pois: schedules.map((schedule, index) => ({
+							id: `midnight-${index}`,
+							name: `合成午夜测试餐厅${index}`,
+							address: "合成测试地址",
+							location: `${origin.longitude},${origin.latitude}`,
+							distance: "100",
+							type: "餐饮服务;中餐厅",
+							business: {
+								cost: "20",
+								tag: "面食",
+								opentime_today: schedule,
+							},
+						})),
+					}),
+					{ status: 200 },
+				),
+		);
+		const provider = new AmapPlaceProvider(
+			loadAppConfig({
+				NODE_ENV: "test",
+				AMAP_ENABLED: "true",
+				AMAP_WEB_SERVICE_KEY: "test-key",
+			}),
+			fetchMock as typeof fetch,
+		);
+		const candidates = await provider.search(context, queryPlan(context));
+		expect(candidates.map((candidate) => candidate.openStatus)).toEqual([
+			"UNKNOWN",
+			"UNKNOWN",
+			"OPEN",
+		]);
+		const results = rankCandidates({
+			context,
+			intent: buildRuleIntent(context),
+			candidates,
+			dataRightsMode: "LIVE_DISPLAY_ONLY",
+		});
+		expect(results.map((result) => result.providerPlaceId)).toEqual([
+			"midnight-0",
+			"midnight-1",
+			"midnight-2",
+		]);
+		expect(results.map((result) => result.fitScore)).toEqual([
+			null,
+			null,
+			null,
+		]);
+		for (const result of results.slice(0, 2)) {
+			expect(result.warnings).toContain("营业状态暂无可靠信息，请到店前确认");
+		}
+		expect(results[2]?.warnings).not.toContain(
+			"营业状态暂无可靠信息，请到店前确认",
+		);
+	});
+
 	it("drops unsafe keywords and treats blank numeric fields as unknown", async () => {
 		const fetchMock = vi.fn(async (input: URL | RequestInfo) => {
 			const url = new URL(String(input));
@@ -1002,6 +1202,46 @@ describe("place providers", () => {
 		expect(String(error)).not.toContain("secret");
 		expect(String(error)).not.toContain("116.3109");
 		expect(String(error)).not.toContain("39.9928");
+	});
+
+	it.each([
+		"09:00-11:00 晚市待确认",
+		"09:00-20:00 晚市待确认",
+		"09:00-20:00 歇业",
+		"歇业 09:00-20:00",
+		"周一 09:00-20:00",
+		"2026-09-09 09:00-20:00",
+		"09:00-20:00 24:30-02:00",
+		"09:00-11:00 18:00~22:00",
+		"00:00-00:00",
+		"12:00-12:00",
+		"24:00-02:00",
+		"09:00-20:00 12:00-12:00",
+		";；,，",
+	])("keeps the full unrecognised schedule unknown: %s", (schedule) => {
+		expect(interpretAmapOpenStatus(schedule, "2026-09-08T10:30:00Z")).toBe(
+			"UNKNOWN",
+		);
+	});
+
+	it.each([
+		["09:00-14:00", "2026-09-08T06:00:00Z", "UNKNOWN"],
+		["09:00-14:00", "2026-09-08T06:01:00Z", "CLOSED"],
+		["09:00-14:00 14:00-20:00", "2026-09-08T06:00:00Z", "OPEN"],
+		["22:00-02:00", "2026-09-08T18:00:00Z", "UNKNOWN"],
+		["22:00-02:00", "2026-09-08T17:59:00Z", "OPEN"],
+		["22:00-02:00", "2026-09-08T18:01:00Z", "CLOSED"],
+		["22:00-00:00", "2026-09-08T16:00:00Z", "UNKNOWN"],
+		["22:00-24:00", "2026-09-08T16:00:00Z", "UNKNOWN"],
+		["22:00-00:00 00:00-02:00", "2026-09-08T16:00:00Z", "OPEN"],
+		["22:00-24:00 00:00-02:00", "2026-09-08T16:00:00Z", "OPEN"],
+		["22:00-24:00", "2026-09-08T16:01:00Z", "CLOSED"],
+		["22:00-24:00", "2026-09-08T15:59:00Z", "OPEN"],
+		["00:00-24:00", "2026-09-08T16:00:00Z", "OPEN"],
+		["00:00-24:00", "2026-09-08T15:59:00Z", "OPEN"],
+		["09:00-20:00", "invalid-time", "UNKNOWN"],
+	])("uses conservative endpoints for %s at %s", (schedule, time, expected) => {
+		expect(interpretAmapOpenStatus(schedule, time)).toBe(expected);
 	});
 
 	it("interprets known, closed and malformed schedules conservatively", () => {
