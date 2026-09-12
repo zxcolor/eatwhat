@@ -3,10 +3,22 @@ package com.chishenme.app.feature.home
 import com.chishenme.app.data.remote.MealPeriod
 import com.chishenme.app.data.remote.RecommendationTarget
 import com.chishenme.app.data.remote.SpecialtyCapabilities
+import com.chishenme.app.data.remote.UserReportedWeatherPreference
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class SpecialtyOptionPolicyTest {
+    @Test
+    fun `revoked weather still offers explicit removal without enabling any preference`() {
+        for (capabilities in listOf(null, SpecialtyCapabilities.Disabled)) {
+            assertEquals(listOf(null to "不使用"), weatherPreferenceOptions(capabilities))
+        }
+        val enabled = weatherPreferenceOptions(
+            SpecialtyCapabilities.Disabled.copy(userReportedWeatherEnabled = true),
+        )
+        assertEquals(listOf(null) + UserReportedWeatherPreference.entries, enabled.map { it.first })
+    }
+
     @Test
     fun `missing capabilities expose no vertical targets and only lunch`() {
         assertEquals(emptyList<Pair<RecommendationTarget, String>>(), specialtyTargetOptions(null))

@@ -1,6 +1,7 @@
 import {
 	type Confidence,
 	type Coordinate,
+	CuisinePreferenceSchema,
 	type DataMode,
 	DataModeSchema,
 	type DataRightsMode,
@@ -16,6 +17,7 @@ import {
 	DEFAULT_RECOMMENDATION_RULES,
 	type RecommendationRules,
 } from "../../operational-config/operational-config.types.js";
+import { matchExplicitCuisines } from "./explicit-cuisine-preference.js";
 import type { PlaceCandidate } from "./place-candidate.js";
 
 export interface RankCandidatesInput {
@@ -178,7 +180,6 @@ function isCuisineExcluded(
 
 function hardFilter(input: RankCandidatesInput): PlaceCandidate[] {
 	const seenProviderIds = new Set<string>();
-	const seenPlaces = new Set<string>();
 	const accepted: PlaceCandidate[] = [];
 
 	for (const rawCandidate of input.candidates) {
@@ -189,7 +190,9 @@ function hardFilter(input: RankCandidatesInput): PlaceCandidate[] {
 			candidate.openStatus === "CLOSED"
 		)
 			continue;
-		if (candidate.distanceMeters > input.context.radiusMeters) continue;
+		// Presentation rounding must not admit a known distance outside the
+		// requested radius. The raw number was validated by sanitizeCandidate.
+		if (rawCandidate.distanceMeters > input.context.radiusMeters) continue;
 		if (
 			input.context.budgetMaxYuan !== null &&
 			candidate.averageCostYuan !== null &&
@@ -200,11 +203,10 @@ function hardFilter(input: RankCandidatesInput): PlaceCandidate[] {
 		if (isCuisineExcluded(candidate, input.context)) continue;
 
 		const providerKey = `${candidate.provider}:${candidate.providerPlaceId}`;
-		const physicalKey = `${normalize(candidate.name)}:${candidate.location.crs}:${candidate.location.latitude.toFixed(4)}:${candidate.location.longitude.toFixed(4)}`;
-		if (seenProviderIds.has(providerKey) || seenPlaces.has(physicalKey))
-			continue;
+		// A shared name and nearby coordinates do not establish shop identity.
+		// Keep different authoritative IDs, including IDs from different sources.
+		if (seenProviderIds.has(providerKey)) continue;
 		seenProviderIds.add(providerKey);
-		seenPlaces.add(physicalKey);
 		accepted.push(candidate);
 	}
 	return accepted;
@@ -241,7 +243,14 @@ function budgetScore(
 function mealMatchScore(
 	candidate: PlaceCandidate,
 	intent: IntentProfile,
+	context: RecommendationContext,
 ): number {
+	if (context.preferredCuisines.length > 0) {
+		return matchExplicitCuisines(candidate.tags, context.preferredCuisines)
+			.length > 0
+			? 15
+			: 4;
+	}
 	const normalizedTags = new Set(candidate.tags.map(normalize));
 	const mealTypeMatch = intent.mealTypes.some((mealType) =>
 		normalizedTags.has(normalize(mealType)),
@@ -274,10 +283,20 @@ function candidateConfidence(
 function candidateWarnings(
 	candidate: PlaceCandidate,
 	context: RecommendationContext,
+	dataRightsMode: DataRightsMode,
 ): string[] {
 	const warnings: string[] = [
 		"往返及用餐时间仅为估算，实际路线、等位、点餐与制作时间未确认",
 	];
+	if (
+		dataRightsMode === "LICENSED_ENRICHMENT" &&
+		context.preferredCuisines.length > 0 &&
+		matchExplicitCuisines(candidate.tags, context.preferredCuisines).length ===
+			0
+	)
+		warnings.push(
+			"来源分类尚未证实命中你明确选择的菜系，不代表已知不符合或附近没有合适餐厅",
+		);
 	if (candidate.openStatus === "UNKNOWN")
 		warnings.push("营业状态暂无可靠信息，请到店前确认");
 	if (candidate.averageCostYuan === null) warnings.push("人均消费暂无可靠信息");
@@ -311,6 +330,21 @@ function candidateReasons(
 			text: `距离约 ${candidate.distanceMeters} 米，${travelModeText(context.travelMode)}约 ${candidate.estimatedTravelMinutes} 分钟（按距离与固定速度估算，非实际路线用时）`,
 		},
 	];
+	// Reserve a visible slot: Android single results render the first three.
+	// A positive source-category match never asserts ingredients/certification.
+	const explicitMatch = describesProviderResult
+		? undefined
+		: matchExplicitCuisines(candidate.tags, context.preferredCuisines)[0];
+	if (
+		!describesProviderResult &&
+		explicitMatch !== undefined &&
+		context.preferenceVector.mealMatch > 0 &&
+		rules.intentWeight > 0
+	)
+		reasons.push({
+			code: "MEAL_FIT",
+			text: `来源分类“${explicitMatch.tag}”命中你选择的“${explicitMatch.cuisine}”，仅表示分类文字匹配`,
+		});
 	if (
 		context.budgetMaxYuan !== null &&
 		candidate.averageCostYuan !== null &&
@@ -339,6 +373,7 @@ function candidateReasons(
 		candidate.tags.some((tag) => normalize(tag) === normalize(type)),
 	);
 	if (
+		context.preferredCuisines.length === 0 &&
 		intentMatch !== undefined &&
 		reasons.length < 3 &&
 		(describesProviderResult ||
@@ -386,7 +421,8 @@ function scoreCandidate(
 			preferences.budget,
 		) +
 		applyPreference(
-			(mealMatchScore(candidate, input.intent) / 15) * rules.intentWeight,
+			(mealMatchScore(candidate, input.intent, input.context) / 15) *
+				rules.intentWeight,
 			preferences.mealMatch,
 		) +
 		applyPreference(diversity, preferences.diversity) +
@@ -399,7 +435,7 @@ function scoreCandidate(
 		candidate,
 		fitScore: Math.round(clamp(rawScore, 0, 100)),
 		confidence: candidateConfidence(candidate),
-		warnings: candidateWarnings(candidate, input.context),
+		warnings: candidateWarnings(candidate, input.context, input.dataRightsMode),
 		reasons: candidateReasons(
 			candidate,
 			input.context,
@@ -410,10 +446,6 @@ function scoreCandidate(
 	};
 }
 
-function primaryTag(candidate: PlaceCandidate): string {
-	return normalize(candidate.tags[0] ?? candidate.name);
-}
-
 function selectLicensedResults(
 	scored: readonly ScoredCandidate[],
 	context: RecommendationContext,
@@ -421,7 +453,16 @@ function selectLicensedResults(
 ): ScoredCandidate[] {
 	const remaining = [...scored];
 	const selected: ScoredCandidate[] = [];
-	const usedTags = new Set<string>();
+	const usedCuisines = new Set<string>();
+	const candidateCuisines = new Map(
+		scored.map((value) => [
+			value,
+			matchExplicitCuisines(
+				value.candidate.tags,
+				CuisinePreferenceSchema.options,
+			).map((match) => match.cuisine),
+		]),
+	);
 	const baseDuplicateTagPenalty =
 		context.explorationMode === "SAFE"
 			? 2
@@ -433,15 +474,20 @@ function selectLicensedResults(
 			(rules.diversityWeight / DEFAULT_RECOMMENDATION_RULES.diversityWeight),
 		context.preferenceVector.diversity,
 	);
+	// Explore confirmed category coverage, not the provider's first tag. Generic
+	// labels and unknown classifications cannot establish an additional cuisine.
+	const diversityPenalty = (value: ScoredCandidate) =>
+		selected.length > 0 &&
+		!(candidateCuisines.get(value) ?? []).some(
+			(cuisine) => !usedCuisines.has(cuisine),
+		)
+			? duplicateTagPenalty
+			: 0;
 
 	while (remaining.length > 0 && selected.length < 3) {
 		remaining.sort((a, b) => {
-			const adjustedA =
-				a.fitScore -
-				(usedTags.has(primaryTag(a.candidate)) ? duplicateTagPenalty : 0);
-			const adjustedB =
-				b.fitScore -
-				(usedTags.has(primaryTag(b.candidate)) ? duplicateTagPenalty : 0);
+			const adjustedA = a.fitScore - diversityPenalty(a);
+			const adjustedB = b.fitScore - diversityPenalty(b);
 			return (
 				adjustedB - adjustedA ||
 				a.candidate.providerRank - b.candidate.providerRank
@@ -450,7 +496,8 @@ function selectLicensedResults(
 		const next = remaining.shift();
 		if (next === undefined) break;
 		selected.push(next);
-		usedTags.add(primaryTag(next.candidate));
+		for (const cuisine of candidateCuisines.get(next) ?? [])
+			usedCuisines.add(cuisine);
 	}
 	return selected;
 }
@@ -475,7 +522,11 @@ export function rankCandidates(
 						// written enrichment rights are active.
 						fitScore: 0,
 						confidence: candidateConfidence(candidate),
-						warnings: candidateWarnings(candidate, input.context),
+						warnings: candidateWarnings(
+							candidate,
+							input.context,
+							input.dataRightsMode,
+						),
 						reasons: candidateReasons(
 							candidate,
 							input.context,

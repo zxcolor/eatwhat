@@ -29,7 +29,6 @@ class DecisionScenarioTest {
         budgetMaxYuan = null,
         availableMinutes = 60,
         radiusMeters = 2_000,
-        partySize = 2,
         excludedCuisines = setOf("火锅"),
         preferredCuisines = setOf("面食"),
     )
@@ -43,6 +42,7 @@ class DecisionScenarioTest {
             assertEquals(setOf("火锅"), applied.excludedCuisines)
             assertEquals(setOf("面食"), applied.preferredCuisines)
             assertEquals(InputValidation.Valid, DecisionInputValidator.validate(applied))
+            assertEquals(1, RecommendationRequestFactory().create(applied).partySize)
         }
     }
 
@@ -57,7 +57,6 @@ class DecisionScenarioTest {
         assertEquals(25, applied.budgetMaxYuan)
         assertEquals(45, applied.availableMinutes)
         assertEquals(1_500, applied.radiusMeters)
-        assertEquals(1, applied.partySize)
     }
 
     @Test
@@ -69,7 +68,6 @@ class DecisionScenarioTest {
         assertEquals(TravelMode.WALK, applied.travelMode)
         assertEquals(60, applied.availableMinutes)
         assertEquals(1_500, applied.radiusMeters)
-        assertEquals(1, applied.partySize)
     }
 
     @Test
@@ -83,20 +81,6 @@ class DecisionScenarioTest {
         assertEquals(25, applied.budgetMaxYuan)
         assertEquals(30, applied.availableMinutes)
         assertEquals(1_000, applied.radiusMeters)
-        assertEquals(1, applied.partySize)
     }
 
-    @Test
-    fun `friends gathering expands time distance and party size`() {
-        val applied = input.applyScenario(DecisionScenario.FRIENDS_GATHERING)
-
-        assertEquals(MealPeriod.DINNER, applied.mealPeriod)
-        assertEquals(DecisionMode.GUIDED, applied.decisionMode)
-        assertEquals(TravelMode.TRANSIT, applied.travelMode)
-        assertEquals(ExplorationMode.ADVENTUROUS, applied.explorationMode)
-        assertEquals(40, applied.budgetMaxYuan)
-        assertEquals(90, applied.availableMinutes)
-        assertEquals(3_000, applied.radiusMeters)
-        assertEquals(3, applied.partySize)
-    }
 }

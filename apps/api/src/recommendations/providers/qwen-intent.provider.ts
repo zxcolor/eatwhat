@@ -6,18 +6,23 @@ import {
 import { Inject, Injectable } from "@nestjs/common";
 import { APP_CONFIG, type AppConfig } from "../../config/app-config.js";
 import type { PromptSettings } from "../../operational-config/operational-config.types.js";
+import { constrainExplicitIntent } from "../domain/explicit-cuisine-preference.js";
+import {
+	buildRecommendationQueryPlan,
+	type RecommendationQueryPlan,
+} from "../domain/recommendation-query-plan.js";
 import {
 	buildQwenSystemMessage,
 	isRegisteredQwenModel,
 	qwenSafeContext,
 } from "./qwen-intent-registry.js";
+import { readBoundedJson } from "./bounded-json-response.js";
 import type { IntentProvider } from "./rule-intent.provider.js";
-import {
-	buildRecommendationQueryPlan,
-	type RecommendationQueryPlan,
-} from "../domain/recommendation-query-plan.js";
 
 export const QWEN_FETCH = Symbol("QWEN_FETCH");
+// Covers the response envelope as well as generated intent. max_tokens is not
+// a transport limit and cannot bound metadata, malformed or chunked responses.
+export const QWEN_RESPONSE_MAX_BYTES = 128 * 1_024;
 
 export class QwenIntentUnavailableError extends Error {
 	constructor() {
@@ -124,6 +129,7 @@ export class QwenIntentProvider implements IntentProvider {
 		>,
 	): Promise<IntentProfile> {
 		if (
+			!context.aiAssistanceEnabled ||
 			plan.profile.family !== "MEAL_LUNCH" ||
 			plan.weatherApplication.kind === "USER_REPORTED"
 		) {
@@ -164,7 +170,6 @@ export class QwenIntentProvider implements IntentProvider {
 		};
 
 		const deadline = Date.now() + timeoutMs;
-		let lastError: unknown;
 		for (let attempt = 0; attempt < 2; attempt += 1) {
 			const remaining = deadline - Date.now();
 			if (remaining < 100) break;
@@ -179,12 +184,11 @@ export class QwenIntentProvider implements IntentProvider {
 					requestBody,
 					attemptTimeout,
 				);
-				return parseQwenContent(response);
-			} catch (error) {
-				lastError = error;
+				return constrainExplicitIntent(context, parseQwenContent(response));
+			} catch {
+				// Retry within the shared deadline, retaining no upstream error text.
 			}
 		}
-		void lastError;
 		throw new QwenIntentUnavailableError();
 	}
 
@@ -207,9 +211,17 @@ export class QwenIntentProvider implements IntentProvider {
 				body: JSON.stringify(body),
 				signal: controller.signal,
 			});
-			if (!response.ok) throw new QwenIntentUnavailableError();
-			return await response.json();
+			if (!response.ok) {
+				void response.body?.cancel().catch(() => undefined);
+				throw new QwenIntentUnavailableError();
+			}
+			return await readBoundedJson(
+				response,
+				controller.signal,
+				QWEN_RESPONSE_MAX_BYTES,
+			);
 		} catch {
+			controller.abort();
 			throw new QwenIntentUnavailableError();
 		} finally {
 			clearTimeout(timeout);

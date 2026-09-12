@@ -56,12 +56,6 @@ enum class OpenStatus { OPEN, CLOSED, UNKNOWN }
 enum class RecommendationEventType { IMPRESSION, DETAIL, NAVIGATION, CALL, REROLL }
 
 @Serializable
-enum class SpeedPreference { FAST, NORMAL, RELAXED }
-
-@Serializable
-enum class IntentProvider { QWEN, RULE_FALLBACK }
-
-@Serializable
 enum class CoordinateReferenceSystem { WGS84, GCJ02 }
 
 @Serializable
@@ -122,12 +116,17 @@ data class RecommendationContext(
     val budgetMaxYuan: Int? = null,
     val availableMinutes: Int = 60,
     val radiusMeters: Int,
+    /** Retained only for v1 wire compatibility; all product decisions are individual. */
     val partySize: Int = 1,
     val excludedCuisines: List<String> = emptyList(),
     val preferredCuisines: List<String> = emptyList(),
     val preferenceVector: RecommendationPreferenceVector = RecommendationPreferenceVector.Default,
     val requestTime: String? = null,
-)
+) {
+    init {
+        require(partySize == 1) { "Only individual meal decisions are supported" }
+    }
+}
 
 @Serializable
 data class RecommendationReason(
@@ -257,16 +256,6 @@ data class RecommendationEvent(
 )
 
 @Serializable
-data class IntentProfile(
-    val cuisineWeights: Map<String, Double>,
-    val mealTypes: List<String>,
-    val speedPreference: SpeedPreference,
-    val diversityTarget: Double,
-    val explanationSeed: String,
-    val provider: IntentProvider,
-)
-
-@Serializable
 data class FeatureConfig(
     val coverageName: String,
     val dataRightsMode: DataRightsMode,
@@ -335,8 +324,6 @@ data class ServiceCapabilities(
     val recommendationsEnabled: Boolean = false,
     val locationSearchEnabled: Boolean = false,
     val placeSearchEnabled: Boolean = false,
-    /** Missing on older v1 config responses keeps the 2.x group path closed. */
-    val groupRecommendationsEnabled: Boolean = false,
 ) {
     companion object {
         val Disabled = ServiceCapabilities()

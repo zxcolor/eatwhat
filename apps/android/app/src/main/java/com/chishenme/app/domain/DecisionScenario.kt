@@ -16,7 +16,6 @@ import com.chishenme.app.data.remote.TravelMode
 enum class DecisionScenario {
     IN_A_HURRY,
     WORKDAY_LUNCH,
-    FRIENDS_GATHERING,
     BUSINESS_TRIP,
 }
 
@@ -28,7 +27,6 @@ fun DecisionInput.applyScenario(scenario: DecisionScenario): DecisionInput = whe
         budgetMaxYuan = 25,
         availableMinutes = 30,
         radiusMeters = 1_000,
-        partySize = 1,
     )
     DecisionScenario.WORKDAY_LUNCH -> copy(
         mealPeriod = MealPeriod.LUNCH,
@@ -38,16 +36,6 @@ fun DecisionInput.applyScenario(scenario: DecisionScenario): DecisionInput = whe
         budgetMaxYuan = 25,
         availableMinutes = 45,
         radiusMeters = 1_500,
-        partySize = 1,
-    )
-    DecisionScenario.FRIENDS_GATHERING -> copy(
-        decisionMode = DecisionMode.GUIDED,
-        travelMode = TravelMode.TRANSIT,
-        explorationMode = ExplorationMode.ADVENTUROUS,
-        budgetMaxYuan = 40,
-        availableMinutes = 90,
-        radiusMeters = 3_000,
-        partySize = 3,
     )
     DecisionScenario.BUSINESS_TRIP -> copy(
         decisionMode = DecisionMode.GUIDED,
@@ -56,6 +44,5 @@ fun DecisionInput.applyScenario(scenario: DecisionScenario): DecisionInput = whe
         budgetMaxYuan = 40,
         availableMinutes = 60,
         radiusMeters = 1_500,
-        partySize = 1,
     )
 }

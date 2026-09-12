@@ -4,6 +4,7 @@ import {
 	RecommendationContextSchema,
 } from "@chi-shen-me/contracts";
 import { describe, expect, it } from "vitest";
+import { DEFAULT_RECOMMENDATION_RULES } from "../../operational-config/operational-config.types.js";
 import { buildRuleIntent } from "../providers/rule-intent.provider.js";
 import type { PlaceCandidate } from "./place-candidate.js";
 import { rankCandidates } from "./recommendation-engine.js";
@@ -127,6 +128,173 @@ it("rejects malformed generic provider and action metadata", () => {
 });
 
 describe("rankCandidates", () => {
+	it("ranks an explicitly selected child category above an unselected inferred meal", () => {
+		const request = context({ preferredCuisines: ["川湘菜"] });
+		const results = rankCandidates({
+			context: request,
+			intent: buildRuleIntent(request),
+			dataRightsMode: "LICENSED_ENRICHMENT",
+			candidates: [
+				candidate({ providerPlaceId: "sichuan", tags: ["川菜"] }),
+				candidate({
+					providerPlaceId: "noodles",
+					name: "合成面馆",
+					tags: ["面食"],
+					providerRank: 2,
+				}),
+			],
+		});
+		expect(results.map((result) => result.providerPlaceId)).toEqual([
+			"sichuan",
+			"noodles",
+		]);
+		expect(results[0]?.fitScore).toBeGreaterThan(results[1]?.fitScore ?? 0);
+		expect(results[0]?.reasons.slice(0, 3)).toContainEqual({
+			code: "MEAL_FIT",
+			text: "来源分类“川菜”命中你选择的“川湘菜”，仅表示分类文字匹配",
+		});
+		expect(results[1]?.warnings).toContain(
+			"来源分类尚未证实命中你明确选择的菜系，不代表已知不符合或附近没有合适餐厅",
+		);
+	});
+
+	it("keeps equal explicit choices stable despite model reweighting and omissions", () => {
+		const request = context({ preferredCuisines: ["米饭", "面食"] });
+		const candidates = [
+			candidate({ tags: ["面食"] }),
+			candidate({
+				providerPlaceId: "rice",
+				name: "合成米饭店",
+				tags: ["米饭"],
+			}),
+			candidate({
+				providerPlaceId: "generic",
+				name: "合成快餐店",
+				tags: ["快餐"],
+			}),
+		];
+		const outcomes = [
+			{
+				...intent(),
+				cuisineWeights: { 面食: 0, 米饭: 1 },
+				mealTypes: ["快餐"],
+			},
+			{
+				...intent("QWEN"),
+				cuisineWeights: { 面食: 1, 米饭: 0 },
+				mealTypes: ["面食"],
+			},
+			{
+				...intent("QWEN"),
+				cuisineWeights: { 火锅: 1 },
+				mealTypes: ["米饭", "火锅"],
+			},
+		].map((profile) =>
+			rankCandidates({
+				context: request,
+				intent: profile,
+				candidates,
+				dataRightsMode: "LICENSED_ENRICHMENT",
+			}).map(({ providerPlaceId, fitScore, reasons, warnings }) => ({
+				providerPlaceId,
+				fitScore,
+				reasons,
+				warnings,
+			})),
+		);
+		for (const outcome of outcomes) expect(outcome).toEqual(outcomes[0]);
+		expect(outcomes[0]?.[0]?.fitScore).toBe(outcomes[0]?.[1]?.fitScore);
+		expect(outcomes[0]?.[2]?.fitScore).toBeLessThan(
+			outcomes[0]?.[0]?.fitScore ?? 0,
+		);
+	});
+
+	it.each(["rule", "preference"] as const)(
+		"does not claim explicit intent affected ranking when the %s weight is zero",
+		(zero) => {
+			const request = context({ preferredCuisines: ["面食"] });
+			if (zero === "preference") request.preferenceVector.mealMatch = 0;
+			const [result] = rankCandidates({
+				context: request,
+				intent: intent(),
+				candidates: [candidate()],
+				dataRightsMode: "LICENSED_ENRICHMENT",
+				rules:
+					zero === "rule"
+						? {
+								...DEFAULT_RECOMMENDATION_RULES,
+								intentWeight: 0,
+								qualityWeight: 40,
+							}
+						: DEFAULT_RECOMMENDATION_RULES,
+			});
+			expect(result?.reasons.some((reason) => reason.code === "MEAL_FIT")).toBe(
+				false,
+			);
+		},
+	);
+
+	it("does not make source-category assessment or reordering claims in LIVE mode", () => {
+		const results = rankCandidates({
+			context: context({ preferredCuisines: ["川湘菜"] }),
+			intent: intent("QWEN"),
+			dataRightsMode: "LIVE_DISPLAY_ONLY",
+			candidates: [
+				candidate({ providerPlaceId: "unknown", tags: [] }),
+				candidate({
+					providerPlaceId: "known",
+					name: "合成川菜店",
+					tags: ["川菜"],
+					providerRank: 2,
+				}),
+			],
+		});
+		expect(results.map((result) => result.providerPlaceId)).toEqual([
+			"unknown",
+			"known",
+		]);
+		for (const result of results) {
+			expect(result.fitScore).toBeNull();
+			expect(result.reasons.some((reason) => reason.code === "MEAL_FIT")).toBe(
+				false,
+			);
+			expect(
+				result.warnings.some((warning) => warning.includes("明确选择的菜系")),
+			).toBe(false);
+		}
+	});
+
+	it.each(["LIVE_DISPLAY_ONLY", "LICENSED_ENRICHMENT"] as const)(
+		"does not round an outside candidate into the radius under %s",
+		(dataRightsMode) => {
+			const results = rankCandidates({
+				context: context(),
+				intent: intent(),
+				dataRightsMode,
+				candidates: [
+					candidate({ providerPlaceId: "outside", distanceMeters: 1_500.01 }),
+					candidate({
+						providerPlaceId: "boundary",
+						name: "合成边界餐厅",
+						distanceMeters: 1_500,
+					}),
+					candidate({
+						providerPlaceId: "inside",
+						name: "合成范围内餐厅",
+						distanceMeters: 1_499.99,
+					}),
+				],
+			});
+			expect(results.map((result) => result.providerPlaceId).sort()).toEqual([
+				"boundary",
+				"inside",
+			]);
+			expect(results.every((result) => result.distanceMeters === 1_500)).toBe(
+				true,
+			);
+		},
+	);
+
 	it.each(["LIVE_DISPLAY_ONLY", "LICENSED_ENRICHMENT"] as const)(
 		"keeps source price and travel/time estimates explicitly qualified in %s",
 		(dataRightsMode) => {
@@ -586,7 +754,7 @@ describe("rankCandidates", () => {
 		expect(results).toHaveLength(1);
 	});
 
-	it("deduplicates provider IDs and physical places", () => {
+	it("deduplicates authoritative provider IDs while preserving different IDs", () => {
 		const base = candidate();
 		const results = rankCandidates({
 			context: context(),
@@ -598,7 +766,135 @@ describe("rankCandidates", () => {
 				candidate({ providerPlaceId: "another-id", providerRank: 3 }),
 			],
 		});
-		expect(results).toHaveLength(1);
+		expect(results.map((result) => result.providerPlaceId)).toEqual([
+			"place-1",
+			"another-id",
+		]);
+	});
+
+	it.each(["LIVE_DISPLAY_ONLY", "LICENSED_ENRICHMENT"] as const)(
+		"keeps same-name nearby shops and same textual IDs from distinct sources in %s",
+		(dataRightsMode) => {
+			const results = rankCandidates({
+				context: context(),
+				intent: intent(),
+				dataRightsMode,
+				candidates: [
+					candidate({
+						providerPlaceId: "a",
+						name: "同名小吃",
+						address: "合成A铺",
+					}),
+					candidate({
+						providerPlaceId: "b",
+						name: "同名小吃",
+						address: "合成B铺",
+						providerRank: 2,
+					}),
+					candidate({
+						provider: "AUTHORIZED_VENDOR",
+						providerPlaceId: "a",
+						name: "同名小吃",
+						address: "合成C铺",
+						providerRank: 3,
+					}),
+				],
+			});
+			expect(
+				results.map((result) => `${result.provider}:${result.providerPlaceId}`),
+			).toEqual(["DEMO:a", "DEMO:b", "AUTHORIZED_VENDOR:a"]);
+		},
+	);
+
+	it("keeps exploration stable when provider tags reorder or include generic labels", () => {
+		const request = context({
+			preferenceVector: {
+				quality: 100,
+				time: 0,
+				budget: 0,
+				mealMatch: 0,
+				diversity: 100,
+			},
+		});
+		const candidates = [
+			candidate({ providerPlaceId: "best", tags: ["面食"], sourceRating: 5 }),
+			candidate({
+				providerPlaceId: "same",
+				tags: ["面食"],
+				sourceRating: 4.8,
+				providerRank: 2,
+			}),
+			candidate({
+				providerPlaceId: "different",
+				tags: ["米饭"],
+				sourceRating: 4.1,
+				providerRank: 3,
+			}),
+		];
+		for (const dataRightsMode of [
+			"LIVE_DISPLAY_ONLY",
+			"LICENSED_ENRICHMENT",
+		] as const) {
+			for (const variant of [
+				candidates,
+				candidates.map((value) => ({
+					...value,
+					tags: ["餐饮服务", ...value.tags, "中餐厅"],
+				})),
+				candidates.map((value) => ({
+					...value,
+					tags: ["中餐厅", ...value.tags].reverse(),
+				})),
+			]) {
+				const results = rankCandidates({
+					context: request,
+					intent: intent(),
+					candidates: variant,
+					dataRightsMode,
+				});
+				expect(results.map((result) => result.providerPlaceId)).toEqual(
+					dataRightsMode === "LIVE_DISPLAY_ONLY"
+						? ["best", "same", "different"]
+						: ["best", "different", "same"],
+				);
+			}
+		}
+	});
+
+	it("does not promote an unknown category as a novel cuisine", () => {
+		const results = rankCandidates({
+			context: context({
+				preferenceVector: {
+					quality: 100,
+					time: 0,
+					budget: 0,
+					mealMatch: 0,
+					diversity: 100,
+				},
+			}),
+			intent: intent(),
+			dataRightsMode: "LICENSED_ENRICHMENT",
+			candidates: [
+				candidate({ providerPlaceId: "best", tags: ["面食"], sourceRating: 5 }),
+				candidate({
+					providerPlaceId: "same",
+					tags: ["面食"],
+					sourceRating: 4.8,
+					providerRank: 2,
+				}),
+				candidate({
+					providerPlaceId: "unknown",
+					tags: ["餐饮服务"],
+					sourceRating: 4.7,
+					providerRank: 3,
+				}),
+			],
+		});
+		expect(results.map((result) => result.providerPlaceId)).toEqual([
+			"best",
+			"same",
+			"unknown",
+		]);
 	});
 
 	it("drops structurally unsafe candidates and sanitizes optional fields", () => {

@@ -50,7 +50,7 @@ describe("public feature configuration compatibility", () => {
     });
   });
 
-  it("accepts current group and specialty fields while keeping a strict projection", () => {
+  it("accepts specialty fields and rejects enabling the retired group capability", () => {
     const specialty = {
       breakfastProfileEnabled: true,
       dinnerProfileEnabled: true,
@@ -61,10 +61,11 @@ describe("public feature configuration compatibility", () => {
     };
     const current = {
       ...legacyConfig,
-      serviceCapabilities: { recommendationsEnabled: true, groupRecommendationsEnabled: true },
+      serviceCapabilities: { recommendationsEnabled: true, groupRecommendationsEnabled: false },
       specialtyCapabilities: specialty
     };
-    expect(parseFeatureConfig(current)?.serviceCapabilities.groupRecommendationsEnabled).toBe(true);
+    expect(parseFeatureConfig(current)?.serviceCapabilities.groupRecommendationsEnabled).toBe(false);
+    expect(parseFeatureConfig({ ...current, serviceCapabilities: { ...current.serviceCapabilities, groupRecommendationsEnabled: true } })).toBeNull();
     expect(parseFeatureConfig(current)?.specialtyCapabilities).toEqual(specialty);
     expect(parseFeatureConfig({ ...current, specialtyCapabilities: { ...specialty, apiSecret: "rejected" } })).toBeNull();
     expect(parseFeatureConfig({ ...current, specialtyCapabilities: { ...specialty, coffeeEnabled: "true" } })).toBeNull();

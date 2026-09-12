@@ -8,7 +8,7 @@ import {
 } from "../../providers/amap-response-status.js";
 import {
 	estimateTravelMinutes,
-	haversineDistanceMeters,
+	haversineDistanceMetersUnrounded,
 	toGcj02,
 } from "../domain/geo.js";
 import type {
@@ -16,6 +16,10 @@ import type {
 	PlaceProvider,
 } from "../domain/place-candidate.js";
 import type { RecommendationQueryPlan } from "../domain/recommendation-query-plan.js";
+import {
+	BoundedJsonResponseError,
+	readBoundedJson,
+} from "./bounded-json-response.js";
 
 export const AMAP_FETCH = Symbol("AMAP_FETCH");
 export const AMAP_RESPONSE_MAX_BYTES = 512 * 1_024;
@@ -232,87 +236,6 @@ function safeMealKeywords(mealTypes: readonly string[]): string | null {
 	);
 }
 
-async function readWithAbort(
-	reader: ReadableStreamDefaultReader<Uint8Array>,
-	signal: AbortSignal,
-): Promise<ReadableStreamReadResult<Uint8Array>> {
-	if (signal.aborted) throw new PlaceProviderUnavailableError("TIMEOUT");
-	return await new Promise<ReadableStreamReadResult<Uint8Array>>(
-		(resolve, reject) => {
-			const onAbort = () =>
-				reject(new PlaceProviderUnavailableError("TIMEOUT"));
-			signal.addEventListener("abort", onAbort, { once: true });
-			reader
-				.read()
-				.then(resolve, reject)
-				.finally(() => {
-					signal.removeEventListener("abort", onAbort);
-				});
-		},
-	);
-}
-
-async function readBoundedJson(
-	response: Response,
-	signal: AbortSignal,
-): Promise<unknown> {
-	const declaredLength = response.headers.get("content-length")?.trim();
-	if (declaredLength !== undefined && /^\d+$/.test(declaredLength)) {
-		const parsedLength = Number(declaredLength);
-		if (
-			!Number.isSafeInteger(parsedLength) ||
-			parsedLength > AMAP_RESPONSE_MAX_BYTES
-		) {
-			void response.body?.cancel().catch(() => undefined);
-			throw new PlaceProviderUnavailableError("RESPONSE_TOO_LARGE");
-		}
-	}
-	if (response.body === null)
-		throw new PlaceProviderUnavailableError("INVALID_RESPONSE");
-
-	const reader = response.body.getReader();
-	const chunks: Uint8Array[] = [];
-	let totalBytes = 0;
-	while (true) {
-		let readResult: ReadableStreamReadResult<Uint8Array>;
-		try {
-			readResult = await readWithAbort(reader, signal);
-		} catch (error) {
-			if (error instanceof PlaceProviderUnavailableError) {
-				void reader.cancel().catch(() => undefined);
-				throw error;
-			}
-			if (signal.aborted) {
-				void reader.cancel().catch(() => undefined);
-				throw new PlaceProviderUnavailableError("TIMEOUT");
-			}
-			void reader.cancel().catch(() => undefined);
-			throw new PlaceProviderUnavailableError("INVALID_RESPONSE");
-		}
-		if (readResult.done) break;
-		totalBytes += readResult.value.byteLength;
-		if (totalBytes > AMAP_RESPONSE_MAX_BYTES) {
-			void reader.cancel().catch(() => undefined);
-			throw new PlaceProviderUnavailableError("RESPONSE_TOO_LARGE");
-		}
-		chunks.push(readResult.value);
-	}
-
-	const bytes = new Uint8Array(totalBytes);
-	let offset = 0;
-	for (const chunk of chunks) {
-		bytes.set(chunk, offset);
-		offset += chunk.byteLength;
-	}
-	try {
-		return JSON.parse(
-			new TextDecoder("utf-8", { fatal: true }).decode(bytes),
-		) as unknown;
-	} catch {
-		throw new PlaceProviderUnavailableError("INVALID_RESPONSE");
-	}
-}
-
 function estimateMealMinutes(tags: readonly string[]): number {
 	const joined = tags.join(";");
 	if (/火锅|烧烤|聚餐/.test(joined)) return 75;
@@ -398,7 +321,11 @@ export class AmapPlaceProvider implements PlaceProvider {
 				throw new PlaceProviderUnavailableError("UPSTREAM_HTTP");
 			}
 
-			const rawBody = await readBoundedJson(response, controller.signal);
+			const rawBody = await readBoundedJson(
+				response,
+				controller.signal,
+				AMAP_RESPONSE_MAX_BYTES,
+			);
 			const body = objectValue(rawBody) as AmapResponse | null;
 			if (body === null)
 				throw new PlaceProviderUnavailableError("INVALID_RESPONSE");
@@ -435,6 +362,8 @@ export class AmapPlaceProvider implements PlaceProvider {
 				.filter((candidate): candidate is PlaceCandidate => candidate !== null);
 		} catch (error) {
 			if (error instanceof PlaceProviderUnavailableError) throw error;
+			if (error instanceof BoundedJsonResponseError)
+				throw new PlaceProviderUnavailableError(error.reason);
 			if (controller.signal.aborted)
 				throw new PlaceProviderUnavailableError("TIMEOUT");
 			throw new PlaceProviderUnavailableError("NETWORK_ERROR");
@@ -459,14 +388,17 @@ export class AmapPlaceProvider implements PlaceProvider {
 		const legacyBusinessObject = objectValue(poi.biz_ext) ?? {};
 		const business: AmapBusiness = businessObject;
 		// Both operands are now explicitly GCJ02; mixed-CRS distances throw.
-		const calculatedDistance = haversineDistanceMeters(amapOrigin, location);
+		const calculatedDistance = haversineDistanceMetersUnrounded(
+			amapOrigin,
+			location,
+		);
 		const suppliedDistance = numericValue(poi.distance);
 		// Never let a malformed or unexpectedly small provider distance bypass the
 		// local hard radius. Route/supplied distance can be longer than straight-line
 		// distance, so the conservative maximum is safe for filtering.
 		const distanceMeters =
 			suppliedDistance !== null && suppliedDistance >= 0
-				? Math.max(Math.round(suppliedDistance), calculatedDistance)
+				? Math.max(suppliedDistance, calculatedDistance)
 				: calculatedDistance;
 		const rating =
 			numericValue(business.rating) ??

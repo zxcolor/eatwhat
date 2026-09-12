@@ -6,6 +6,7 @@ import {
 	type WeatherApplication,
 	type WeatherContextRequest,
 } from "@chi-shen-me/contracts";
+import { canonicalCuisinePreferences } from "./explicit-cuisine-preference.js";
 import {
 	type RecommendationProfileTerm,
 	resolveRecommendationProfile,
@@ -80,9 +81,9 @@ export function buildRecommendationQueryPlan(
 		context.target,
 		context.mealPeriod,
 	);
-	const supplementalCuisineTerms = Object.freeze([
-		...new Set(context.preferredCuisines),
-	]);
+	const supplementalCuisineTerms = Object.freeze(
+		canonicalCuisinePreferences(context.preferredCuisines),
+	);
 	const queryTerms = Object.freeze([
 		definition.preferredTerm,
 		...supplementalCuisineTerms,

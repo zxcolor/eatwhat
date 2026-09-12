@@ -37,11 +37,6 @@ import {
 	FavoritesPageSchema,
 	FeatureConfigSchema,
 	FeedbackIdPathSchema,
-	GroupConstraintAggregationSchema,
-	GroupMemberConstraintsSchema,
-	GroupRecommendationRequestSchema,
-	GroupRecommendationResponseSchema,
-	GroupRecommendationResultSchema,
 	IdentityBindingsResponseSchema,
 	LatestAccountExportResponseSchema,
 	ListFavoritesQuerySchema,
@@ -521,11 +516,6 @@ describe("OpenAPI v1", () => {
 			},
 			{
 				path: "/v1/recommendations",
-				method: "post",
-				statuses: ["200", "400", "413", "415", "429", "500", "503"],
-			},
-			{
-				path: "/v1/group-recommendations",
 				method: "post",
 				statuses: ["200", "400", "413", "415", "429", "500", "503"],
 			},
@@ -1140,19 +1130,6 @@ describe("OpenAPI v1", () => {
 			["RecommendationProfile", RecommendationProfileSchema, "output"],
 			["WeatherApplication", WeatherApplicationSchema, "output"],
 			["RecommendationResponse", RecommendationResponseSchema, "output"],
-			["GroupMemberConstraints", GroupMemberConstraintsSchema, "input"],
-			["GroupRecommendationRequest", GroupRecommendationRequestSchema, "input"],
-			[
-				"GroupConstraintAggregation",
-				GroupConstraintAggregationSchema,
-				"output",
-			],
-			["GroupRecommendationResult", GroupRecommendationResultSchema, "output"],
-			[
-				"GroupRecommendationResponse",
-				GroupRecommendationResponseSchema,
-				"output",
-			],
 			["SupportFeedbackCategory", SupportFeedbackCategorySchema, "input"],
 			["SupportFeedbackResponse", SupportFeedbackResponseSchema, "output"],
 			["AuthCapabilities", AuthCapabilitiesSchema, "output"],
@@ -1599,175 +1576,20 @@ describe("OpenAPI v1", () => {
 		).toEqual({ type: "string", const: "NATIONWIDE" });
 	});
 
-	it("documents strict anonymous group constraint intersection and display-only output", () => {
+	it("documents only individual dining and a permanently disabled legacy group signal", () => {
+		expect(openApi.paths).not.toHaveProperty("/v1/group-recommendations");
 		expect(
-			collectReferenceLocations(
-				openApi.paths,
-				"#/components/schemas/GroupRecommendationRequest",
-			),
-		).toEqual([
-			"/v1/group-recommendations.post.requestBody.content.application/json.schema.$ref",
-		]);
-
-		const operation = pathOperation("/v1/group-recommendations", "post");
-		expect(operation.parameters).toEqual([
-			{ $ref: "#/components/parameters/RequestCorrelationId" },
-			{ $ref: "#/components/parameters/ClientContractVersion" },
-		]);
-		expect(operation).not.toHaveProperty("security");
-		expect(objectValue(operation, "responses")["429"]).toEqual({
-			$ref: "#/components/responses/RateLimited",
-		});
-		expect(String(operation.description)).toContain("10 次/60 秒");
-		expect(
-			apiSource(
-				"apps/api/src/group-recommendations/group-recommendations.controller.ts",
-			),
-		).toContain("@RateLimit(10, 60_000)");
-
-		const request = documentedSchema("GroupRecommendationRequest");
-		expect(request.additionalProperties).toBe(false);
-		expect(request.required).toEqual(["location", "travelMode", "members"]);
-		const requestProperties = objectValue(request, "properties");
-		expect(Object.keys(requestProperties)).toEqual([
-			"location",
-			"travelMode",
-			"members",
-		]);
-		const location = objectValue(requestProperties, "location");
-		expect(location.writeOnly).toBe(true);
-		expect(location["x-sensitive"]).toBe("precise-location");
-		const strictLocation = dereference(location);
-		expect(strictLocation).toMatchObject({ additionalProperties: false });
-		if (!isObject(strictLocation)) {
-			throw new Error("GroupCoordinateInput must dereference to an object");
-		}
-		expect(objectValue(strictLocation, "properties")).toEqual(
-			objectValue(documentedSchema("CoordinateInput"), "properties"),
-		);
-		expect(objectValue(requestProperties, "travelMode").enum).toEqual([
-			"WALK",
-			"BIKE",
-			"TRANSIT",
-		]);
-		const members = objectValue(requestProperties, "members");
-		expect(members).toMatchObject({ type: "array", minItems: 2, maxItems: 8 });
-
-		const member = documentedSchema("GroupMemberConstraints");
-		expect(member.additionalProperties).toBe(false);
-		expect(member.required).toEqual([
-			"budgetMaxYuan",
-			"availableMinutes",
-			"radiusMeters",
-			"preferredCuisines",
-			"excludedCuisines",
-		]);
-		const memberProperties = objectValue(member, "properties");
-		expect(Object.keys(memberProperties)).toEqual(member.required);
-		for (const name of ["preferredCuisines", "excludedCuisines"] as const) {
-			expect(objectValue(memberProperties, name)).toMatchObject({
-				type: "array",
-				maxItems: 8,
-				uniqueItems: true,
-			});
-		}
-		expect(String(member.description)).toContain("不得同时");
-		expect(JSON.stringify(request)).not.toMatch(
-			/memberId|groupId|locationLabel|prompt|note|aiAssistance|weather|account|phone|email/iu,
-		);
-
-		const aggregation = documentedSchema("GroupConstraintAggregation");
-		const aggregationProperties = objectValue(aggregation, "properties");
-		expect(Object.keys(aggregationProperties)).toEqual([
-			"version",
-			"memberCount",
-			"effectiveBudgetMaxYuan",
-			"effectiveAvailableMinutes",
-			"effectiveRadiusMeters",
-			"preferredCuisines",
-			"excludedCuisines",
-		]);
-		expect(objectValue(aggregationProperties, "version").const).toBe(
-			"group-constraints-v1",
-		);
-		expect(objectValue(aggregationProperties, "memberCount")).toMatchObject({
-			type: "integer",
-			minimum: 2,
-			maximum: 8,
-		});
-
-		const result = documentedSchema("GroupRecommendationResult");
-		const resultProperties = objectValue(result, "properties");
-		expect(Object.keys(resultProperties)).toEqual([
-			"provider",
-			"dataMode",
-			"name",
-			"address",
-			"rank",
-			"fitScore",
-			"sourceRating",
-			"averageCostYuan",
-			"distanceMeters",
-			"estimatedTravelMinutes",
-			"estimatedMealMinutes",
-			"openStatus",
-			"tags",
-			"reasons",
-			"warnings",
-			"confidence",
-			"sourceAttribution",
-		]);
-		expect(result.required).toEqual(Object.keys(resultProperties));
-		expect(result.additionalProperties).toBe(false);
-		expect(JSON.stringify(resultProperties)).not.toMatch(
-			/resultToken|actions|location|phone|imageUrl|aiAssisted/iu,
-		);
-
-		const response = documentedSchema("GroupRecommendationResponse");
-		const responseProperties = objectValue(response, "properties");
-		expect(Object.keys(responseProperties)).toEqual([
-			"requestId",
-			"generatedAt",
-			"coverage",
-			"dataRightsMode",
-			"ruleVersion",
-			"aggregation",
-			"results",
-			"notice",
-			"rulesConfigVersion",
-		]);
-		expect(response.required).not.toContain("rulesConfigVersion");
-		expect(objectValue(responseProperties, "results").maxItems).toBe(3);
-		expect(JSON.stringify(responseProperties)).not.toMatch(
-			/aiFallbackUsed|promptVersion|modelVersion/iu,
-		);
-
-		const unavailable = dereference(objectValue(operation, "responses")["503"]);
-		if (!isObject(unavailable)) throw new Error("Invalid group 503 response");
-		const errorSchema = dereference(
 			objectValue(
-				objectValue(objectValue(unavailable, "content"), "application/json"),
-				"schema",
+				objectValue(documentedSchema("RecommendationContext"), "properties"),
+				"partySize",
 			),
-		);
-		if (!isObject(errorSchema))
-			throw new Error("Invalid group 503 error schema");
-		const errorProperties = objectValue(errorSchema, "properties");
-		expect(objectValue(errorProperties, "code").const).toBe(
-			"GROUP_RECOMMENDATIONS_UNAVAILABLE",
-		);
-		expect(objectValue(errorProperties, "message").const).toBe(
-			"群组推荐服务暂时不可用，请稍后重试",
-		);
-		const serviceSource = apiSource(
-			"apps/api/src/group-recommendations/group-recommendations.service.ts",
-		);
-		expect(serviceSource).toContain(
-			'code: "GROUP_RECOMMENDATIONS_UNAVAILABLE"',
-		);
-		expect(serviceSource).toContain(
-			'message: "群组推荐服务暂时不可用，请稍后重试"',
-		);
+		).toEqual({ type: "number", const: 1, default: 1 });
+		expect(
+			objectValue(
+				objectValue(documentedSchema("ServiceCapabilities"), "properties"),
+				"groupRecommendationsEnabled",
+			),
+		).toEqual({ type: "boolean", const: false, default: false });
 	});
 
 	it("documents nationwide recommendation coverage as the only value", () => {

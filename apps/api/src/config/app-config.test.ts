@@ -13,6 +13,12 @@ const productionDatabase = Object.freeze({
 });
 
 describe("application safety configuration", () => {
+	it("reports the executable rule version even if a stale environment supplies another label", () => {
+		for (const RULE_VERSION of [undefined, "recommendation-rules-v2", "arbitrary-label"]) {
+			expect(loadAppConfig({ NODE_ENV: "test", RULE_VERSION }).versions.rule).toBe("recommendation-rules-v3");
+		}
+	});
+
 	it("rejects administrator enablement or secrets in the public API process", () => {
 		expect(() =>
 			loadAppConfig({
@@ -56,22 +62,11 @@ describe("application safety configuration", () => {
 		expect(configured.features.privateFeedbackEnabled).toBe(true);
 	});
 
-	it("keeps anonymous group recommendations disabled unless explicitly enabled", () => {
+	it("ignores the retired group flag so stale environments cannot restore it", () => {
 		expect(
-			loadAppConfig({ NODE_ENV: "test" }).features.groupRecommendationsEnabled,
-		).toBe(false);
-		expect(
-			loadAppConfig({
-				NODE_ENV: "test",
-				GROUP_RECOMMENDATIONS_ENABLED: "true",
-			}).features.groupRecommendationsEnabled,
-		).toBe(true);
-		expect(() =>
-			loadAppConfig({
-				NODE_ENV: "test",
-				GROUP_RECOMMENDATIONS_ENABLED: "yes",
-			}),
-		).toThrow("GROUP_RECOMMENDATIONS_ENABLED");
+			loadAppConfig({ NODE_ENV: "test", GROUP_RECOMMENDATIONS_ENABLED: "true" })
+				.features,
+		).not.toHaveProperty("groupRecommendationsEnabled");
 	});
 
 	it("requires the startup minimum client version to match the public contract", () => {

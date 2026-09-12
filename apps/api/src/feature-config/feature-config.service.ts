@@ -198,12 +198,6 @@ export class FeatureConfigService {
 						? "PROMPT_DISABLED"
 						: "ENABLED";
 		const aiEnabled = aiStatus === "ENABLED";
-		const groupRecommendationsEnabled =
-			this.config.features.groupRecommendationsEnabled &&
-			recommendationsEnabled &&
-			// Keep the group capability tied to one concrete, currently supported
-			// MEAL/LUNCH/NONE plan. The endpoint repeats this check before any I/O.
-			this.supportsProfile(DEFAULT_RECOMMENDATION_PROBE);
 		return FeatureConfigSchema.parse({
 			coverageName:
 				operational.coverage.areaCode === "NATIONWIDE"
@@ -231,7 +225,7 @@ export class FeatureConfigService {
 					: this.config.versions.ruleFallbackModel,
 			serviceCapabilities: {
 				recommendationsEnabled,
-				groupRecommendationsEnabled,
+				groupRecommendationsEnabled: false,
 				locationSearchEnabled: this.locationSearch.dataSource !== "UNAVAILABLE",
 				placeSearchEnabled: this.placeSearch.dataSource !== "UNAVAILABLE",
 			},

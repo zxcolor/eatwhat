@@ -61,6 +61,7 @@ private fun ChiShenMeApp(
     val theme by consentViewModel.themePreference.collectAsStateWithLifecycle()
     val withdrawalPersistenceFailed by
         consentViewModel.withdrawalPersistenceFailed.collectAsStateWithLifecycle()
+    val acceptanceState by consentViewModel.acceptanceState.collectAsStateWithLifecycle()
     val systemDarkTheme = isSystemInDarkTheme()
     val darkTheme = when (theme) {
         ThemePreference.SYSTEM -> systemDarkTheme
@@ -92,6 +93,7 @@ private fun ChiShenMeApp(
             false -> ConsentScreen(
                 onAccept = consentViewModel::acceptPrivacy,
                 withdrawalPersistenceFailed = withdrawalPersistenceFailed,
+                acceptanceState = acceptanceState,
             )
             true -> AppNavigation(
                 onWithdrawPrivacy = {

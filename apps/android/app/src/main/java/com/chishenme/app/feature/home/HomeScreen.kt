@@ -36,7 +36,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.Settings
@@ -135,8 +134,6 @@ fun HomeScreen(
     onOpenSettings: () -> Unit,
     onReconnectService: () -> Unit,
     onRecommendationStarted: () -> Unit,
-    groupDecisionEnabled: Boolean,
-    onOpenGroupDecision: () -> Unit,
 ) {
     val context = LocalContext.current
     val activity = context.findActivity()
@@ -436,15 +433,6 @@ fun HomeScreen(
                     },
                 )
             }
-            if (groupDecisionEnabled) {
-                item {
-                    GroupDecisionEntryCard(
-                        location = state.input.location,
-                        onOpen = onOpenGroupDecision,
-                    )
-                }
-            }
-
             item {
                 HomeCard {
                     SectionTitle("怎么决定", "极速模式一键给答案，精细模式可调全部条件")
@@ -479,11 +467,15 @@ fun HomeScreen(
                 )
             }
 
-            if (availableSpecialtyTargets.isNotEmpty()) {
+            if (availableSpecialtyTargets.isNotEmpty() || state.input.target != RecommendationTarget.MEAL) {
                 item {
                     OptionSection(
                         title = "想决定什么",
-                        subtitle = "专项入口只在当前数据源明确支持时开放",
+                        subtitle = if (state.input.target != RecommendationTarget.MEAL &&
+                            availableSpecialtyTargets.none { it.first == state.input.target }
+                        ) {
+                            "已保留${recommendationTargetLabel(state.input.target)}；当前未开放，可重新连接或选择普通用餐。"
+                        } else "专项入口只在当前数据源明确支持时开放",
                         options = listOf(RecommendationTarget.MEAL to "普通用餐") +
                             availableSpecialtyTargets,
                         selected = state.input.target,
@@ -498,11 +490,11 @@ fun HomeScreen(
                     subtitle = when (state.input.mealPeriod) {
                         MealPeriod.BREAKFAST -> if (
                             specialtyCapabilities?.breakfastProfileEnabled == true
-                        ) "已启用早餐专项查询" else null
+                        ) "已启用早餐专项查询" else "已保留早餐；当前未开放，请选择可用餐段或重新连接。"
                         MealPeriod.LUNCH -> null
                         MealPeriod.DINNER -> if (
                             specialtyCapabilities?.dinnerProfileEnabled == true
-                        ) "已启用晚餐专项查询" else null
+                        ) "已启用晚餐专项查询" else "已保留晚餐；当前未开放，请选择可用餐段或重新连接。"
                     },
                     options = availableMealPeriods,
                     selected = state.input.mealPeriod,
@@ -510,17 +502,16 @@ fun HomeScreen(
                 )
             }
 
-            if (specialtyCapabilities?.userReportedWeatherEnabled == true) {
+            if (specialtyCapabilities?.userReportedWeatherEnabled == true ||
+                state.input.weatherContext.preference != null
+            ) {
                 item {
                     OptionSection(
                         title = "手动体感（可选）",
-                        subtitle = "只用你本次主动选择的体感；不读取天气、温度或后台位置",
-                        options = listOf<Pair<UserReportedWeatherPreference?, String>>(
-                            null to "不使用",
-                            UserReportedWeatherPreference.MINIMIZE_EXPOSURE to "少在户外停留",
-                            UserReportedWeatherPreference.WARMING to "想吃喝暖一点",
-                            UserReportedWeatherPreference.COOLING to "想吃喝清凉一点",
-                        ),
+                        subtitle = if (specialtyCapabilities?.userReportedWeatherEnabled != true) {
+                            "已保留“${weatherPreferenceLabel(state.input.weatherContext.preference)}”；当前未开放，可重新连接或选择不使用。"
+                        } else "只用你本次主动选择的体感；不读取天气、温度或后台位置",
+                        options = weatherPreferenceOptions(specialtyCapabilities),
                         selected = state.input.weatherContext.preference,
                         onSelected = viewModel::setUserReportedWeather,
                     )
@@ -608,12 +599,6 @@ fun HomeScreen(
                         onSelected = viewModel::setRadius,
                     )
                 }
-                item {
-                    PartySizeRow(
-                        partySize = state.input.partySize,
-                        onChange = viewModel::setPartySize,
-                    )
-                }
                 if (softPreferencesEnabled) {
                     item {
                         CuisineSection(
@@ -654,52 +639,6 @@ fun HomeScreen(
     }
 }
 
-@Composable
-private fun GroupDecisionEntryCard(
-    location: LocationChoice?,
-    onOpen: () -> Unit,
-) {
-    val colors = currentHomeVisualColors()
-    HomeCard {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(11.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            HomeIconTile(colors.blueSoft) {
-                Icon(
-                    AppIcons.Tune,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.secondary,
-                    modifier = Modifier.size(21.dp),
-                )
-            }
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    "多人一起选",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(
-                    "2–8 人在同一台手机轮流填写结构化条件；不创建房间、账号或成员档案。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-        Button(
-            onClick = onOpen,
-            enabled = location != null,
-            modifier = Modifier.fillMaxWidth().heightIn(min = HomeDimens.MinTouchTarget),
-        ) {
-            Text(if (location == null) "先选择共同出发地点" else "开始同机填写")
-        }
-        Text(
-            "成员条件不写入本地存储；提交时只随共同地点与交通方式发送给服务，用于本次求交。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
 
 internal fun remoteServiceStatusMessage(state: DecisionUiState): String? =
     when (val remote = state.remoteFeatureConfig) {
@@ -733,6 +672,30 @@ internal fun mealPeriodOptions(
     if (capabilities?.breakfastProfileEnabled == true) add(MealPeriod.BREAKFAST to "早餐")
     add(MealPeriod.LUNCH to "午餐")
     if (capabilities?.dinnerProfileEnabled == true) add(MealPeriod.DINNER to "晚餐")
+}
+
+internal fun weatherPreferenceOptions(
+    capabilities: SpecialtyCapabilities?,
+): List<Pair<UserReportedWeatherPreference?, String>> = buildList {
+    // Removing an old draft must remain possible after the capability is revoked.
+    add(null to "不使用")
+    if (capabilities?.userReportedWeatherEnabled == true) {
+        UserReportedWeatherPreference.entries.forEach { add(it to weatherPreferenceLabel(it)) }
+    }
+}
+
+private fun weatherPreferenceLabel(value: UserReportedWeatherPreference?): String = when (value) {
+    null -> "不使用"
+    UserReportedWeatherPreference.MINIMIZE_EXPOSURE -> "少在户外停留"
+    UserReportedWeatherPreference.WARMING -> "想吃喝暖一点"
+    UserReportedWeatherPreference.COOLING -> "想吃喝清凉一点"
+}
+
+private fun recommendationTargetLabel(value: RecommendationTarget): String = when (value) {
+    RecommendationTarget.MEAL -> "普通用餐"
+    RecommendationTarget.MILK_TEA -> "奶茶"
+    RecommendationTarget.COFFEE -> "咖啡"
+    RecommendationTarget.DESSERT -> "甜品"
 }
 
 @Composable
@@ -1232,61 +1195,6 @@ private fun <T> OptionSection(
     }
 }
 
-@Composable
-private fun PartySizeRow(partySize: Int, onChange: (Int) -> Unit) {
-    HomeCard {
-        SectionTitle("就餐人数")
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            OutlinedButton(
-                onClick = { onChange(partySize - 1) },
-                enabled = partySize > 1,
-                modifier = Modifier.size(HomeDimens.MinTouchTarget),
-                contentPadding = PaddingValues(0.dp),
-            ) {
-                Icon(
-                    AppIcons.Remove,
-                    contentDescription = "减少就餐人数",
-                    modifier = Modifier.size(22.dp),
-                )
-            }
-            Column(
-                modifier = Modifier.weight(1f),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text(
-                    "$partySize 人",
-                    modifier = Modifier.semantics {
-                        liveRegion = LiveRegionMode.Polite
-                        stateDescription = "当前 $partySize 人"
-                    },
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(
-                    "最多 30 人",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            OutlinedButton(
-                onClick = { onChange(partySize + 1) },
-                enabled = partySize < 30,
-                modifier = Modifier.size(HomeDimens.MinTouchTarget),
-                contentPadding = PaddingValues(0.dp),
-            ) {
-                Icon(
-                    Icons.Rounded.Add,
-                    contentDescription = "增加就餐人数",
-                    modifier = Modifier.size(22.dp),
-                )
-            }
-        }
-    }
-}
 
 @Composable
 private fun CuisineSection(title: String, selected: Set<String>, onToggle: (String) -> Unit) {
@@ -1605,6 +1513,5 @@ private fun explorationLabel(mode: ExplorationMode) = when (mode) {
 private fun scenarioLabel(scenario: DecisionScenario) = when (scenario) {
     DecisionScenario.IN_A_HURRY -> "赶时间"
     DecisionScenario.WORKDAY_LUNCH -> "工作日午餐"
-    DecisionScenario.FRIENDS_GATHERING -> "朋友聚餐"
     DecisionScenario.BUSINESS_TRIP -> "旅行出差"
 }

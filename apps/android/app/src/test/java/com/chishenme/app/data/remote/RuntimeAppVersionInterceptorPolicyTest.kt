@@ -48,12 +48,14 @@ class RuntimeAppVersionInterceptorPolicyTest {
     }
 
     @Test
-    fun `group route is available only under trusted compatible remote access`() {
+    fun `retired group route stays blocked even under trusted compatible remote access`() {
         val gate = RuntimeAppVersionGate("1.0.0")
         gate.markConfigurationUntrusted(1)
         gate.acceptTrustedConfiguration(1, "1.0.0")
 
-        assertTrue(runtimeRequestAllowed("POST", "/v1/group-recommendations", gate.currentState))
+        assertFalse(runtimeRequestAllowed("POST", "/v1/group-recommendations", gate.currentState))
+        assertFalse(runtimeRequestAllowed("POST", "/v1/group-recommendations/", gate.currentState))
+        assertTrue(runtimeRequestAllowed("POST", "/v1/recommendations", gate.currentState))
 
         gate.markConfigurationUntrusted(2)
         gate.markConfigurationUnavailable(2)

@@ -178,15 +178,15 @@ class DecisionFeatureConfigRefreshLifecycleTest {
             val viewModel = viewModel(api)
             viewModel.startConsentSession()
             advanceUntilIdle()
-            viewModel.applyScenario(DecisionScenario.FRIENDS_GATHERING)
+            viewModel.applyScenario(DecisionScenario.BUSINESS_TRIP)
             api.config = radiusConfig(PublicRecommendationDefaults("NATIONWIDE", 750, 1_000))
             viewModel.startConsentSession()
             advanceUntilIdle()
             viewModel.setMealPeriod(MealPeriod.DINNER)
             viewModel.setLocation(BuiltInQuickLocations.choices.first())
-            assertEquals(3_000, viewModel.uiState.value.input.radiusMeters)
+            assertEquals(1_500, viewModel.uiState.value.input.radiusMeters)
             assertFalse(viewModel.recommend())
-            assertTrue(requireNotNull(viewModel.uiState.value.formError).contains("3000 米"))
+            assertTrue(requireNotNull(viewModel.uiState.value.formError).contains("1500 米"))
             assertEquals(0, api.recommendCalls)
 
             viewModel.clearForPrivacyWithdrawal()
@@ -252,7 +252,7 @@ class DecisionFeatureConfigRefreshLifecycleTest {
     }
 
     @Test
-    fun `trusted specialty config permits bounded request and refresh revokes the draft`() = runTest {
+    fun `trusted specialty refresh preserves draft while revoking result authority`() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         try {
             val api = SpecialtyRecommendationApi(
@@ -289,10 +289,12 @@ class DecisionFeatureConfigRefreshLifecycleTest {
             viewModel.startConsentSession()
 
             val reset = viewModel.uiState.value.input
-            assertEquals(com.chishenme.app.data.remote.MealPeriod.LUNCH, reset.mealPeriod)
-            assertEquals(RecommendationTarget.MEAL, reset.target)
-            assertEquals(WeatherContextRequest.None, reset.weatherContext)
+            assertEquals(MealPeriod.DINNER, reset.mealPeriod)
+            assertEquals(RecommendationTarget.COFFEE, reset.target)
+            assertEquals(UserReportedWeatherPreference.WARMING, reset.weatherContext.preference)
             assertEquals(RecommendationLoadState.Idle, viewModel.uiState.value.loadState)
+            assertFalse(viewModel.recommend())
+            assertEquals(1, api.recommendCalls)
 
             advanceUntilIdle()
             viewModel.retry()
@@ -300,9 +302,9 @@ class DecisionFeatureConfigRefreshLifecycleTest {
 
             assertEquals(2, api.recommendCalls)
             val retried = requireNotNull(api.lastRecommendation)
-            assertEquals(MealPeriod.LUNCH, retried.mealPeriod)
-            assertEquals(RecommendationTarget.MEAL, retried.target)
-            assertEquals(WeatherContextRequest.None, retried.weatherContext)
+            assertEquals(MealPeriod.DINNER, retried.mealPeriod)
+            assertEquals(RecommendationTarget.COFFEE, retried.target)
+            assertEquals(UserReportedWeatherPreference.WARMING, retried.weatherContext.preference)
         } finally {
             advanceUntilIdle()
             Dispatchers.resetMain()
@@ -343,6 +345,81 @@ class DecisionFeatureConfigRefreshLifecycleTest {
                 assertEquals(1, api.recommendCalls)
                 assertEquals(enabledTarget, requireNotNull(api.lastRecommendation).target)
             }
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `revoked specialty leaves draft visible and blocks requests until user adjusts it`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val api = SpecialtyRecommendationApi(radiusConfig(null).copy(
+                specialtyCapabilities = SpecialtyCapabilities.Disabled.copy(
+                    dinnerProfileEnabled = true,
+                    coffeeEnabled = true,
+                    userReportedWeatherEnabled = true,
+                ),
+            ))
+            val viewModel = viewModel(api)
+            viewModel.startConsentSession()
+            advanceUntilIdle()
+            viewModel.setLocation(BuiltInQuickLocations.choices.first())
+            viewModel.setMealPeriod(MealPeriod.DINNER)
+            viewModel.setRecommendationTarget(RecommendationTarget.COFFEE)
+            viewModel.setUserReportedWeather(UserReportedWeatherPreference.WARMING)
+            val draft = viewModel.uiState.value.input
+
+            api.config = currentFeatureConfig()
+            viewModel.startConsentSession()
+            advanceUntilIdle()
+            assertEquals(draft, viewModel.uiState.value.input)
+            assertEquals(SPECIALTY_DRAFT_UNSUPPORTED_MESSAGE, viewModel.uiState.value.formError)
+            assertFalse(viewModel.recommend())
+            viewModel.retry()
+            advanceUntilIdle()
+            assertEquals(0, api.recommendCalls)
+
+            viewModel.setMealPeriod(MealPeriod.LUNCH)
+            viewModel.setRecommendationTarget(RecommendationTarget.MEAL)
+            viewModel.setUserReportedWeather(null)
+            assertTrue(viewModel.recommend())
+            advanceUntilIdle()
+            assertEquals(1, api.recommendCalls)
+            assertEquals(MealPeriod.LUNCH, requireNotNull(api.lastRecommendation).mealPeriod)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `offline refresh preserves dinner draft without granting guest specialty access`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val api = SpecialtyRecommendationApi(radiusConfig(null))
+            val viewModel = viewModel(api)
+            viewModel.startConsentSession()
+            advanceUntilIdle()
+            viewModel.setLocation(BuiltInQuickLocations.choices.first())
+            viewModel.setMealPeriod(MealPeriod.DINNER)
+            val draft = viewModel.uiState.value.input
+
+            api.configurationUnavailable = true
+            viewModel.startConsentSession()
+            advanceUntilIdle()
+            assertEquals(draft, viewModel.uiState.value.input)
+            assertFalse(viewModel.recommend())
+            assertEquals(0, api.recommendCalls)
+
+            api.configurationUnavailable = false
+            viewModel.startConsentSession()
+            advanceUntilIdle()
+            assertTrue(viewModel.recommend())
+            advanceUntilIdle()
+            assertEquals(MealPeriod.DINNER, requireNotNull(api.lastRecommendation).mealPeriod)
+            viewModel.clearForPrivacyWithdrawal()
+            assertEquals(MealPeriod.LUNCH, viewModel.uiState.value.input.mealPeriod)
+            assertNull(viewModel.uiState.value.input.location)
         } finally {
             Dispatchers.resetMain()
         }
@@ -888,8 +965,10 @@ private class SpecialtyRecommendationApi(
 ) : RecommendationApi {
     var recommendCalls = 0
     var lastRecommendation: RecommendationContext? = null
+    var configurationUnavailable = false
 
-    override suspend fun featureConfig(): FeatureConfig = config
+    override suspend fun featureConfig(): FeatureConfig =
+        if (configurationUnavailable) throw IOException("offline") else config
 
     override suspend fun recommend(context: RecommendationContext): RecommendationResponse {
         recommendCalls += 1

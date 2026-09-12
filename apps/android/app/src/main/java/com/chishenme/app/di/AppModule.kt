@@ -17,7 +17,6 @@ import com.chishenme.app.data.remote.AccountExportApi
 import com.chishenme.app.data.remote.AccountExportContentApi
 import com.chishenme.app.data.remote.AuthApi
 import com.chishenme.app.data.remote.LocationSearchApi
-import com.chishenme.app.data.remote.GroupRecommendationApi
 import com.chishenme.app.data.remote.RecommendationApi
 import com.chishenme.app.data.remote.RuntimeAppVersionInterceptor
 import com.chishenme.app.data.remote.SavedResourcesApi
@@ -84,24 +83,6 @@ object AppModule {
     @Singleton
     fun provideRecommendationApi(retrofit: Retrofit): RecommendationApi =
         retrofit.create(RecommendationApi::class.java)
-
-    @Provides
-    @Singleton
-    @OptIn(ExperimentalSerializationApi::class)
-    fun provideGroupRecommendationApi(
-        json: Json,
-        client: OkHttpClient,
-    ): GroupRecommendationApi {
-        // The member serializer emits its required nullable budget explicitly,
-        // while optional coordinate nulls retain the app-wide omission policy.
-        val groupJson = strictGroupRecommendationJson(json)
-        return Retrofit.Builder()
-            .baseUrl(BuildConfig.API_BASE_URL)
-            .client(client)
-            .addConverterFactory(groupJson.asConverterFactory("application/json".toMediaType()))
-            .build()
-            .create(GroupRecommendationApi::class.java)
-    }
 
     @Provides
     @Singleton
@@ -172,11 +153,4 @@ object AppModule {
     fun provideSupportFeedbackActions(
         repository: SupportFeedbackRepository,
     ): SupportFeedbackActions = repository
-}
-
-@OptIn(ExperimentalSerializationApi::class)
-internal fun strictGroupRecommendationJson(base: Json): Json = Json(base) {
-    // This display-only response must reject any accidental token, action,
-    // location, phone, image or AI field instead of hiding it.
-    ignoreUnknownKeys = false
 }

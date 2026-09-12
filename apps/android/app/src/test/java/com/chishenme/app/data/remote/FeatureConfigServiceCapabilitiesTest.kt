@@ -20,7 +20,6 @@ class FeatureConfigServiceCapabilitiesTest {
         assertFalse(capabilities.recommendationsEnabled)
         assertFalse(capabilities.locationSearchEnabled)
         assertFalse(capabilities.placeSearchEnabled)
-        assertFalse(capabilities.groupRecommendationsEnabled)
     }
 
     @Test
@@ -31,11 +30,10 @@ class FeatureConfigServiceCapabilitiesTest {
         assertFalse(capabilities.recommendationsEnabled)
         assertFalse(capabilities.locationSearchEnabled)
         assertFalse(capabilities.placeSearchEnabled)
-        assertFalse(capabilities.groupRecommendationsEnabled)
     }
 
     @Test
-    fun `explicit provider capabilities are preserved independently`() {
+    fun `legacy group capability is ignored while individual capabilities remain available`() {
         val config = json.decodeFromString<FeatureConfig>(
             featureConfigJson(
                 """{
@@ -51,11 +49,10 @@ class FeatureConfigServiceCapabilitiesTest {
         assertTrue(capabilities.recommendationsEnabled)
         assertFalse(capabilities.locationSearchEnabled)
         assertTrue(capabilities.placeSearchEnabled)
-        assertTrue(capabilities.groupRecommendationsEnabled)
     }
 
     @Test
-    fun `older service object without group field keeps only group closed`() {
+    fun `older service object remains compatible without retired fields`() {
         val config = json.decodeFromString<FeatureConfig>(
             featureConfigJson(
                 """{
@@ -70,7 +67,6 @@ class FeatureConfigServiceCapabilitiesTest {
         assertTrue(capabilities.recommendationsEnabled)
         assertTrue(capabilities.locationSearchEnabled)
         assertTrue(capabilities.placeSearchEnabled)
-        assertFalse(capabilities.groupRecommendationsEnabled)
     }
 
     private fun featureConfigJson(serviceCapabilities: String?): String {

@@ -5,6 +5,7 @@ import type {
 import { Inject, Injectable } from "@nestjs/common";
 import { APP_CONFIG, type AppConfig } from "../../config/app-config.js";
 import type { OperationalConfigSnapshot } from "../../operational-config/operational-config.types.js";
+import { constrainExplicitIntent } from "../domain/explicit-cuisine-preference.js";
 import {
 	buildRecommendationQueryPlan,
 	type RecommendationQueryPlan,
@@ -34,7 +35,11 @@ export class IntentCoordinator {
 		const prompt = operational?.prompt;
 		const rulesRequired =
 			plan.profile.family !== "MEAL_LUNCH" ||
-			plan.weatherApplication.kind === "USER_REPORTED";
+			plan.weatherApplication.kind === "USER_REPORTED" ||
+			// Explicit choices fully determine cuisine scoring and explanations.
+			// Query plans also come directly from the request, so a model call
+			// cannot improve this path. AI permission does not require AI use.
+			context.preferredCuisines.length > 0;
 		const operationallyEnabled =
 			(operational?.aiAssistanceEnabled ?? true) && (prompt?.enabled ?? true);
 		if (
@@ -44,20 +49,29 @@ export class IntentCoordinator {
 			!operationallyEnabled
 		) {
 			return {
-				profile: await this.rules.resolve(context, plan),
+				profile: constrainExplicitIntent(
+					context,
+					await this.rules.resolve(context, plan),
+				),
 				fallbackUsed: false,
 				modelVersion: this.config.versions.ruleFallbackModel,
 			};
 		}
 		try {
 			return {
-				profile: await this.qwen.resolve(context, plan, prompt),
+				profile: constrainExplicitIntent(
+					context,
+					await this.qwen.resolve(context, plan, prompt),
+				),
 				fallbackUsed: false,
 				modelVersion: prompt?.modelVersion ?? this.config.qwen.model,
 			};
 		} catch {
 			return {
-				profile: await this.rules.resolve(context, plan),
+				profile: constrainExplicitIntent(
+					context,
+					await this.rules.resolve(context, plan),
+				),
 				fallbackUsed: true,
 				modelVersion: this.config.versions.ruleFallbackModel,
 			};

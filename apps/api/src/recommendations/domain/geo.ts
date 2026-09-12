@@ -135,7 +135,11 @@ export function toGcj02(coordinate: Coordinate): Coordinate {
 		: wgs84ToGcj02(coordinate);
 }
 
-export function haversineDistanceMeters(a: Coordinate, b: Coordinate): number {
+/** Spherical distance estimate without presentation rounding, for radius checks. */
+export function haversineDistanceMetersUnrounded(
+	a: Coordinate,
+	b: Coordinate,
+): number {
 	const firstCrs = coordinateReferenceSystem(a);
 	const secondCrs = coordinateReferenceSystem(b);
 	if (firstCrs !== secondCrs) {
@@ -151,11 +155,16 @@ export function haversineDistanceMeters(a: Coordinate, b: Coordinate): number {
 		Math.cos(latitudeA) *
 			Math.cos(latitudeB) *
 			Math.sin(longitudeDelta / 2) ** 2;
-	return Math.round(
+	return (
 		EARTH_RADIUS_METERS *
-			2 *
-			Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine)),
+		2 *
+		Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine))
 	);
+}
+
+/** Legacy display helper; callers needing a hard radius must use the raw estimate. */
+export function haversineDistanceMeters(a: Coordinate, b: Coordinate): number {
+	return Math.round(haversineDistanceMetersUnrounded(a, b));
 }
 
 export function estimateTravelMinutes(

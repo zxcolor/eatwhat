@@ -150,7 +150,7 @@ try {
         NODE_ENV = 'development'
         AMAP_ENABLED = 'true'
         AMAP_WEB_SERVICE_KEY = ''
-        GROUP_RECOMMENDATIONS_ENABLED = 'true'
+        FAVORITES_ENABLED = 'true'
     }
     $runtimeFixture = New-RuntimeChildEnvironment -Entries $isolationFixture
     $buildFixture = New-MinimalChildEnvironment
@@ -164,9 +164,9 @@ try {
     if ($buildFixture.Contains('AMAP_WEB_SERVICE_KEY')) {
         throw '本机启动器把运行时高德密钥泄漏给了构建进程。'
     }
-    if ($runtimeFixture['GROUP_RECOMMENDATIONS_ENABLED'] -cne 'true' -or
-        $buildFixture.Contains('GROUP_RECOMMENDATIONS_ENABLED')) {
-        throw '本机启动器没有把群组能力开关只注入运行进程。'
+    if ($runtimeFixture['FAVORITES_ENABLED'] -cne 'true' -or
+        $buildFixture.Contains('FAVORITES_ENABLED')) {
+        throw '本机启动器没有把个人收藏能力开关只注入运行进程。'
     }
 } finally {
     $env:CHISHENME_PARENT_SECRET_DECOY = $previousDecoySecret
@@ -829,9 +829,17 @@ for (const invalid of [
 }
 process.stdout.write("AUTH_CONFIG_FIXTURE=OK\n");
 '@
-node --input-type=module --eval $authConfigFixture
-if ($LASTEXITCODE -ne 0) {
-    throw "ECS 生产认证配置夹具失败，Node 退出码：$LASTEXITCODE"
+$previousFixtureOutputEncoding = $OutputEncoding
+try {
+    # Windows PowerShell 5.1 strips quotes from native --eval arguments and
+    # defaults pipeline text to ASCII. UTF-8 stdin preserves both JS and Chinese.
+    $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+    $authConfigFixture | node --input-type=module
+    if ($LASTEXITCODE -ne 0) {
+        throw "ECS 生产认证配置夹具失败，Node 退出码：$LASTEXITCODE"
+    }
+} finally {
+    $OutputEncoding = $previousFixtureOutputEncoding
 }
 
 Write-Host '== ECS: immutable deployment bundle and operational gates =='
@@ -1316,6 +1324,9 @@ try {
                 throw "$Label APK 缺少运行时类：$requiredClass"
             }
         }
+        if ($definedClasses | Select-String -Pattern '^C\s+.*\scom\.chishenme\.app\.(?:feature\.group\.|data\.GroupRecommendationRepository|data\.remote\.GroupRecommendation|domain\.GroupDecision|MainActivityGroupDecisionLocalFixtureTest)' -Quiet) {
+            throw "$Label APK 仍包含已退役的多人用餐实现。"
+        }
     }
 
     function Get-ApkManifestEvidence {
@@ -1364,8 +1375,7 @@ try {
         'com.chishenme.app.MainActivityRuntimeVersionRaiseTest',
         'com.chishenme.app.MainActivityAuthLocalFixtureTest',
         'com.chishenme.app.MainActivityAmapLiveFixtureTest',
-        'com.chishenme.app.MainActivitySupportFeedbackLocalFixtureTest',
-        'com.chishenme.app.MainActivityGroupDecisionLocalFixtureTest'
+        'com.chishenme.app.MainActivitySupportFeedbackLocalFixtureTest'
     )
     Assert-ApkDexClasses -Label 'Alpha' -Path $alphaApkPath -RequiredClasses @(
         'com.chishenme.app.ChiShenMeApplication',

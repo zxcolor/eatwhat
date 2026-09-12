@@ -54,6 +54,7 @@ fun ConsentScreen(
     onAccept: () -> Unit,
     modifier: Modifier = Modifier,
     withdrawalPersistenceFailed: Boolean = false,
+    acceptanceState: ConsentAcceptanceState = ConsentAcceptanceState.IDLE,
 ) {
     var document by remember { mutableStateOf<ConsentDocument?>(null) }
     var showDeclineExplanation by remember { mutableStateOf(false) }
@@ -140,7 +141,20 @@ fun ConsentScreen(
                 )
             }
 
-            AppPrimaryButton(text = "同意并继续", onClick = onAccept)
+            if (acceptanceState == ConsentAcceptanceState.FAILED) {
+                AppStatusBanner(
+                    title = "暂未完成同意",
+                    body = "无法确认本机安全存储，推荐和登录仍保持关闭。请稍后重试。",
+                    tone = AppTone.ERROR,
+                    icon = Icons.Rounded.Lock,
+                )
+            }
+            AppPrimaryButton(
+                text = if (acceptanceState == ConsentAcceptanceState.SAVING) "正在保存…" else "同意并继续",
+                onClick = onAccept,
+                enabled = acceptanceState != ConsentAcceptanceState.SAVING &&
+                    acceptanceState != ConsentAcceptanceState.ACCEPTED,
+            )
             OutlinedButton(
                 onClick = { showDeclineExplanation = true },
                 modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp),

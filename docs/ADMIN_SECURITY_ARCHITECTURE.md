@@ -236,7 +236,7 @@ bootstrap、独立 `admin_api_runtime` Secret/网络、完整 step-up、真实 P
 运行状态单独投影为 `operationalConfig`：来源、最近成功读取时间、5 秒缓存与固定五键
 修订号以及 AI 原因；不含任意 JSON。`DATABASE` 的版本匹配只证明该次响应实例已读取，
 后台页面不能写成所有实例或客户端均已生效。读库失败时返回 `STALE_CACHE` 或
-`SAFE_FALLBACK`，保留的范围和版本只用于诊断与最低版本保护，AI、单人、群组及专项
+`SAFE_FALLBACK`，保留的范围和版本只用于诊断与最低版本保护，AI、单人及专项
 推荐失败关闭，不能继续用旧值提供推荐。算法 `ruleVersion` 与数据库 `rulesConfigVersion`
 彼此独立。AI 仍受部署开关、运营开关、提示词开关、单人午餐范围及用户同意共同约束。
 
