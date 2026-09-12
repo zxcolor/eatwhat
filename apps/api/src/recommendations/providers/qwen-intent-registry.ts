@@ -3,6 +3,7 @@ import {
 	REGISTERED_QWEN_MODEL_VERSIONS,
 	type RecommendationContext,
 } from "@chi-shen-me/contracts";
+import { canonicalCuisinePreferences } from "../domain/explicit-cuisine-preference.js";
 
 export type IntentSystemPromptRegistry = Readonly<Record<string, string>>;
 
@@ -47,8 +48,7 @@ export function qwenSafeContext(
 		budgetMaxYuan: context.budgetMaxYuan,
 		availableMinutes: context.availableMinutes,
 		radiusBandMeters: Math.ceil(context.radiusMeters / 500) * 500,
-		partySize: context.partySize,
-		excludedCuisines: context.excludedCuisines,
-		preferredCuisines: context.preferredCuisines,
+		excludedCuisines: canonicalCuisinePreferences(context.excludedCuisines),
+		preferredCuisines: canonicalCuisinePreferences(context.preferredCuisines),
 	};
 }

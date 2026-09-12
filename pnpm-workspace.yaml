@@ -2,6 +2,13 @@ packages:
   - apps/*
   - packages/*
 
+# Security patches for transitive dependencies until upstream ranges catch up.
+# GHSA-4mjr-xmp4-gh2g, GHSA-wc9g-mqfw-jrwm, GHSA-rgj7-g3m4-5g8c.
+overrides:
+  qs: 6.16.0
+  multer: 2.3.0
+  sharp: 0.35.4
+
 # pnpm 11 fails closed when dependency lifecycle scripts are not reviewed.
 # These two packages are already pinned by pnpm-lock.yaml and their install
 # scripts select the compatible Alibaba SDK build and verify the esbuild binary.

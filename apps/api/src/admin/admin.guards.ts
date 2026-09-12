@@ -50,6 +50,7 @@ export const RequireAdminPermission = (permission: AdminPermissionCode) =>
 	SetMetadata(REQUIRED_ADMIN_PERMISSION, permission);
 
 const ADMIN_RATE_LIMIT_POLICY = Symbol("ADMIN_RATE_LIMIT_POLICY");
+const MAX_ADMIN_RATE_BUCKETS = 5_000;
 
 interface AdminRateLimitPolicy {
 	readonly maximum: number;
@@ -165,6 +166,8 @@ export class AdminPermissionGuard implements CanActivate {
 export class AdminRateLimitGuard implements CanActivate {
 	private readonly buckets = new Map<string, AdminRateBucket>();
 	private lastCleanupAt = 0;
+	private capacityRetryAt = 0;
+	private capacityScanAvailableAt = 0;
 
 	constructor(
 		private readonly reflector: Reflector,
@@ -190,26 +193,62 @@ export class AdminRateLimitGuard implements CanActivate {
 		const key = `${context.getClass().name}:${context.getHandler().name}:${addressHash}`;
 		const bucket = this.buckets.get(key);
 		if (bucket === undefined || bucket.resetAt <= now) {
-			this.buckets.set(key, { count: 1, resetAt: now + policy.windowMs });
+			if (bucket === undefined) {
+				const retryAt = this.capacityLimit(now);
+				if (retryAt !== null) this.reject(response, retryAt, now);
+			}
+			const resetAt = now + policy.windowMs;
+			this.buckets.set(key, { count: 1, resetAt });
+			// Reclaimed space may receive a shorter policy than the remaining
+			// buckets. Its expiry must shorten the cached capacity retry as well.
+			this.capacityRetryAt = Math.min(
+				this.capacityRetryAt,
+				Math.max(resetAt, this.capacityScanAvailableAt),
+			);
 			return true;
 		}
 		if (bucket.count >= policy.maximum) {
-			const retryAfterSeconds = Math.max(
-				1,
-				Math.ceil((bucket.resetAt - now) / 1_000),
-			);
-			response.setHeader("Retry-After", String(retryAfterSeconds));
-			throw new HttpException(
-				{
-					code: "ADMIN_RATE_LIMITED",
-					message: "管理员请求过于频繁，请稍后重试",
-					retryAfterSeconds,
-				},
-				HttpStatus.TOO_MANY_REQUESTS,
-			);
+			this.reject(response, bucket.resetAt, now);
 		}
 		bucket.count += 1;
 		return true;
+	}
+
+	private reject(
+		response: { setHeader(name: string, value: string): void },
+		resetAt: number,
+		now: number,
+	): never {
+		const retryAfterSeconds = Math.max(1, Math.ceil((resetAt - now) / 1_000));
+		response.setHeader("Retry-After", String(retryAfterSeconds));
+		throw new HttpException(
+			{
+				code: "ADMIN_RATE_LIMITED",
+				message: "管理员请求过于频繁，请稍后重试",
+				retryAfterSeconds,
+			},
+			HttpStatus.TOO_MANY_REQUESTS,
+		);
+	}
+
+	private capacityLimit(now: number): number | null {
+		if (this.buckets.size < MAX_ADMIN_RATE_BUCKETS) return null;
+		if (now >= this.capacityRetryAt) {
+			this.cleanup(now, 0);
+			this.capacityScanAvailableAt = now + 1_000;
+			let firstExpiry = Number.POSITIVE_INFINITY;
+			for (const bucket of this.buckets.values()) {
+				firstExpiry = Math.min(firstExpiry, bucket.resetAt);
+			}
+			// Bound scans under a burst of new addresses, including staggered expiry.
+			this.capacityRetryAt = Number.isFinite(firstExpiry)
+				? Math.max(this.capacityScanAvailableAt, firstExpiry)
+				: this.capacityScanAvailableAt;
+		}
+		// Never evict an active bucket: doing so would reset an existing limit.
+		return this.buckets.size >= MAX_ADMIN_RATE_BUCKETS
+			? this.capacityRetryAt
+			: null;
 	}
 
 	private cleanup(now: number, windowMs: number): void {
@@ -217,14 +256,6 @@ export class AdminRateLimitGuard implements CanActivate {
 		this.lastCleanupAt = now;
 		for (const [key, bucket] of this.buckets) {
 			if (bucket.resetAt <= now) this.buckets.delete(key);
-		}
-		if (this.buckets.size > 5_000) {
-			for (const key of [...this.buckets.keys()].slice(
-				0,
-				this.buckets.size - 5_000,
-			)) {
-				this.buckets.delete(key);
-			}
 		}
 	}
 }

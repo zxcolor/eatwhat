@@ -34,7 +34,6 @@ data class DecisionInput(
     val budgetMaxYuan: Int?,
     val availableMinutes: Int,
     val radiusMeters: Int,
-    val partySize: Int,
     val excludedCuisines: Set<String>,
     val preferredCuisines: Set<String>,
 )
@@ -53,7 +52,6 @@ object DecisionInputValidator {
             InputValidation.Invalid("可用时间需在 15–240 分钟之间")
         input.radiusMeters !in 200..10_000 ->
             InputValidation.Invalid("搜索距离需在 200 米–10 公里之间")
-        input.partySize !in 1..30 -> InputValidation.Invalid("就餐人数需在 1–30 人之间")
         input.preferredCuisines.size > 20 || input.excludedCuisines.size > 20 ->
             InputValidation.Invalid("菜系选项最多各 20 项")
         input.preferredCuisines.any(input.excludedCuisines::contains) ->
@@ -89,7 +87,7 @@ class RecommendationRequestFactory(
             budgetMaxYuan = input.budgetMaxYuan,
             availableMinutes = input.availableMinutes,
             radiusMeters = input.radiusMeters,
-            partySize = input.partySize,
+            partySize = 1,
             excludedCuisines = input.excludedCuisines.sorted(),
             preferredCuisines = input.preferredCuisines.sorted(),
             preferenceVector = preferenceVector,

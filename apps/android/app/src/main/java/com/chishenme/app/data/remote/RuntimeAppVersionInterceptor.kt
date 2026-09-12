@@ -19,13 +19,16 @@ internal fun runtimeRequestAllowed(
     method: String,
     path: String,
     state: RuntimeAppVersionGate.State,
-): Boolean =
-    (method == "GET" && path == FEATURE_CONFIG_PATH) ||
+): Boolean {
+    // Retirement is permanent, even when an older server advertises the capability.
+    if (path.trimEnd('/') == "/v1/group-recommendations") return false
+    return (method == "GET" && path == FEATURE_CONFIG_PATH) ||
         (method to path) in LOCAL_SAFETY_REQUESTS ||
         state.remoteFeaturesAllowed ||
         (method == "POST" &&
             path == RECOMMENDATION_PATH &&
             state.failClosedGuestDecisionAllowed)
+}
 
 /**
  * Defense-in-depth: without a current compatible gate, only config rechecks,

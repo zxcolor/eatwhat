@@ -433,6 +433,7 @@ export class PostgresAuthRepository extends AuthRepository {
 				 WHERE destination_dedup_hash = $1 AND purpose = $2 AND device_hash = $3
 				   AND delivery_status = 'SENT' AND consumed_at IS NULL
 				   AND expires_at > $4 AND created_at >= $5
+				   AND target_user_id IS NOT DISTINCT FROM $6
 				 ORDER BY created_at DESC LIMIT 1`,
 				[
 					draft.destinationDedup.value,
@@ -440,6 +441,7 @@ export class PostgresAuthRepository extends AuthRepository {
 					draft.deviceHash,
 					draft.createdAt,
 					new Date(draft.createdAt.getTime() - resendDelayMs),
+					draft.targetUserId,
 				],
 			);
 			const existingRow = existing.rows[0];

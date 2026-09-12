@@ -8,7 +8,7 @@ import { Injectable } from "@nestjs/common";
 import {
 	coordinateReferenceSystem,
 	estimateTravelMinutes,
-	haversineDistanceMeters,
+	haversineDistanceMetersUnrounded,
 } from "../domain/geo.js";
 import type {
 	PlaceCandidate,
@@ -347,7 +347,7 @@ export class DemoPlaceProvider implements PlaceProvider {
 					template.northMeters,
 					template.eastMeters,
 				);
-				const distanceMeters = haversineDistanceMeters(
+				const distanceMeters = haversineDistanceMetersUnrounded(
 					context.location,
 					location,
 				);

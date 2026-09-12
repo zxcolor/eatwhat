@@ -30,6 +30,8 @@ describe("public HTTP API", () => {
 		DATA_RIGHTS_MODE: "LIVE_DISPLAY_ONLY",
 		AMAP_ENABLED: "false",
 		QWEN_ENABLED: "false",
+		// Stale deployment configuration must not restore retired functionality.
+		GROUP_RECOMMENDATIONS_ENABLED: "true",
 	});
 	const operationalConfig = Object.freeze({
 		...startupOperationalConfig(appConfig),
@@ -113,7 +115,6 @@ describe("public HTTP API", () => {
 		"/v1/location-search",
 		"/v1/place-search",
 		"/v1/recommendations",
-		"/v1/group-recommendations",
 		"/v1/recommendation-events",
 		"/v1/support-feedback",
 	])("rejects unsupported Content-Type on POST %s", async (path) => {
@@ -155,7 +156,6 @@ describe("public HTTP API", () => {
 		"/v1/location-search",
 		"/v1/place-search",
 		"/v1/recommendations",
-		"/v1/group-recommendations",
 		"/v1/recommendation-events",
 		"/v1/support-feedback",
 	])(
@@ -188,7 +188,6 @@ describe("public HTTP API", () => {
 		"/v1/location-search",
 		"/v1/place-search",
 		"/v1/recommendations",
-		"/v1/group-recommendations",
 		"/v1/recommendation-events",
 		"/v1/support-feedback",
 	])(
@@ -258,7 +257,7 @@ describe("public HTTP API", () => {
 		});
 	});
 
-	it("POST /v1/group-recommendations fails closed while its explicit switch is disabled", async () => {
+	it("does not expose the retired group endpoint even with the old flag enabled", async () => {
 		const registry = app.get(RecommendationRequestRegistry);
 		const before = registry.diagnostics();
 		const response = await fetch(`${baseUrl}/v1/group-recommendations`, {
@@ -286,10 +285,30 @@ describe("public HTTP API", () => {
 			}),
 		});
 
-		expect(response.status).toBe(503);
+		expect(response.status).toBe(404);
 		await expect(response.json()).resolves.toMatchObject({
-			code: "GROUP_RECOMMENDATIONS_UNAVAILABLE",
-			message: "群组推荐服务暂时不可用，请稍后重试",
+			code: "ROUTE_NOT_FOUND",
+			message: "请求的接口不存在",
+		});
+		expect(registry.diagnostics()).toEqual(before);
+	});
+
+	it("rejects multiple diners at the public recommendation boundary without recording a request", async () => {
+		const registry = app.get(RecommendationRequestRegistry);
+		const before = registry.diagnostics();
+		const response = await fetch(`${baseUrl}/v1/recommendations`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				location: { latitude: 39.9928, longitude: 116.3109 },
+				mealPeriod: "LUNCH",
+				radiusMeters: 1_000,
+				partySize: 2,
+			}),
+		});
+		expect(response.status).toBe(400);
+		await expect(response.json()).resolves.toMatchObject({
+			code: "INVALID_REQUEST",
 		});
 		expect(registry.diagnostics()).toEqual(before);
 	});

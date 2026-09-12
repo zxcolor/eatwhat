@@ -343,6 +343,7 @@ export function parseFeatureConfig(value: unknown): FeatureConfig | null {
     persistenceCapabilities === null ||
     authCapabilities === null ||
     serviceCapabilities === null ||
+    serviceCapabilities.groupRecommendationsEnabled !== false ||
     specialtyCapabilities === null ||
     recommendationDefaults === null ||
     minimumSupportedVersions === null

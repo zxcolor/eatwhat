@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	CoordinateReferenceSystemMismatchError,
 	haversineDistanceMeters,
+	haversineDistanceMetersUnrounded,
 	isOutsideMainlandChina,
 	toGcj02,
 	wgs84ToGcj02,
@@ -45,11 +46,32 @@ describe("WGS84 to GCJ02 conversion", () => {
 	});
 
 	it("rejects distance calculations that mix coordinate systems", () => {
-		expect(() =>
-			haversineDistanceMeters(
-				{ latitude: 39.9, longitude: 116.4, crs: "WGS84" },
-				{ latitude: 39.9, longitude: 116.4, crs: "GCJ02" },
-			),
-		).toThrow(CoordinateReferenceSystemMismatchError);
+		for (const distance of [
+			haversineDistanceMeters,
+			haversineDistanceMetersUnrounded,
+		])
+			expect(() =>
+				distance(
+					{ latitude: 39.9, longitude: 116.4, crs: "WGS84" },
+					{ latitude: 39.9, longitude: 116.4, crs: "GCJ02" },
+				),
+			).toThrow(CoordinateReferenceSystemMismatchError);
+	});
+
+	it("retains sub-metre boundary evidence while preserving the rounded display helper", () => {
+		const origin = { latitude: 0, longitude: 0, crs: "WGS84" as const };
+		const outside = {
+			latitude: (1500.4 / 6371000) * (180 / Math.PI),
+			longitude: 0,
+			crs: "WGS84" as const,
+		};
+		expect(haversineDistanceMetersUnrounded(origin, outside)).toBeCloseTo(
+			1500.4,
+			8,
+		);
+		expect(haversineDistanceMetersUnrounded(origin, outside)).toBeGreaterThan(
+			1500,
+		);
+		expect(haversineDistanceMeters(origin, outside)).toBe(1500);
 	});
 });

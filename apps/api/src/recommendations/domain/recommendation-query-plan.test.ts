@@ -1,4 +1,7 @@
-import { RecommendationContextSchema } from "@chi-shen-me/contracts";
+import {
+	CuisinePreferenceSchema,
+	RecommendationContextSchema,
+} from "@chi-shen-me/contracts";
 import { describe, expect, it } from "vitest";
 import { buildRecommendationQueryPlan } from "./recommendation-query-plan.js";
 
@@ -15,6 +18,46 @@ const context = (
 	});
 
 describe("recommendation query plan", () => {
+	it.each(["MEAL", "MILK_TEA", "COFFEE", "DESSERT"] as const)(
+		"canonicalizes supplemental cuisine sets without displacing the %s profile",
+		(target) => {
+			const original = context({
+				target,
+				preferredCuisines: ["川湘菜", "火锅", "面食", "米饭", "面食"],
+			});
+			const before = structuredClone(original);
+			const a = buildRecommendationQueryPlan(original);
+			const b = buildRecommendationQueryPlan(
+				context({
+					target,
+					preferredCuisines: ["米饭", "面食", "火锅", "川湘菜"],
+				}),
+			);
+			expect(a).toEqual(b);
+			expect(a.supplementalCuisineTerms).toEqual([
+				"面食",
+				"米饭",
+				"火锅",
+				"川湘菜",
+			]);
+			expect(a.queryTerms[0]).toBe(a.preferredTerm);
+			expect(a.queryTerms.slice(1)).toEqual(a.supplementalCuisineTerms);
+			expect(original).toEqual(before);
+			expect(Object.isFrozen(a.queryTerms)).toBe(true);
+		},
+	);
+	it("retains all eight choices after the leading profile query term", () => {
+		const plan = buildRecommendationQueryPlan(
+			context({
+				mealPeriod: "BREAKFAST",
+				preferredCuisines: [...CuisinePreferenceSchema.options].reverse(),
+			}),
+		);
+		expect(plan.queryTerms).toEqual([
+			"早餐",
+			...CuisinePreferenceSchema.options,
+		]);
+	});
 	it("keeps breakfast and dinner profile terms ahead of user cuisines", () => {
 		const breakfast = buildRecommendationQueryPlan(
 			context({

@@ -32,7 +32,6 @@ class DecisionInputTest {
         budgetMaxYuan = 25,
         availableMinutes = 45,
         radiusMeters = 1_500,
-        partySize = 1,
         excludedCuisines = setOf("火锅"),
         preferredCuisines = setOf("面食"),
     )
@@ -54,6 +53,7 @@ class DecisionInputTest {
         assertEquals(39.9928, request.location.latitude, 0.00001)
         assertEquals(CoordinateReferenceSystem.WGS84, request.location.crs)
         assertEquals(25, request.budgetMaxYuan)
+        assertEquals(1, request.partySize)
         assertEquals(listOf("火锅"), request.excludedCuisines)
         assertEquals(listOf("面食"), request.preferredCuisines)
         assertEquals(false, request.aiAssistanceEnabled)
@@ -159,6 +159,16 @@ class DecisionInputTest {
     fun `rejects location missing`() {
         val validation = DecisionInputValidator.validate(validInput.copy(location = null))
         assertTrue(validation is InputValidation.Invalid)
+    }
+
+    @Test
+    fun `v1 compatibility field cannot create a multiple diner request`() {
+        val request = RecommendationRequestFactory().create(validInput)
+        for (invalid in listOf(0, 2, 30)) {
+            assertThrows(IllegalArgumentException::class.java) {
+                request.copy(partySize = invalid)
+            }
+        }
     }
 
     @Test

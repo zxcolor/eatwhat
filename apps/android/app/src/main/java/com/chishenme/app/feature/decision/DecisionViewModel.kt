@@ -61,6 +61,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+internal const val SPECIALTY_DRAFT_UNSUPPORTED_MESSAGE =
+    "当前餐段、目标或体感条件已不受服务支持。已保留你的选择，请调整后再试。"
+
 sealed interface RecommendationLoadState {
     data object Idle : RecommendationLoadState
     data object Loading : RecommendationLoadState
@@ -142,7 +145,6 @@ private fun defaultDecisionInput() = DecisionInput(
     budgetMaxYuan = 25,
     availableMinutes = 60,
     radiusMeters = 1_500,
-    partySize = 1,
     excludedCuisines = emptySet(),
     preferredCuisines = emptySet(),
 )
@@ -195,15 +197,11 @@ class DecisionViewModel @Inject constructor(
         lastSubmittedInput = null
         // A foreground refresh must revoke every remotely controlled capability
         // and every response issued under the prior configuration before network
-        // work begins. Baseline location/budget constraints stay intact, while
-        // versioned meal/target/weather fields reset until new authority arrives.
+        // work begins. The user's in-memory draft is independent of that lease:
+        // preserve explicit choices and validate them against the new config
+        // before permitting another request. Never silently turn dinner into lunch.
         _uiState.update {
             it.copy(
-                input = it.input.copy(
-                    mealPeriod = MealPeriod.LUNCH,
-                    target = RecommendationTarget.MEAL,
-                    weatherContext = WeatherContextRequest.None,
-                ),
                 loadState = RecommendationLoadState.Idle,
                 remoteFeatureConfig = RemoteFeatureConfigState.Loading(generation),
                 locationChooserOpen = false,
@@ -252,6 +250,10 @@ class DecisionViewModel @Inject constructor(
                             nextRadius,
                             outcome.config.recommendationDefaults,
                         )
+                        val draftMessage = if (specialtyDraftSupported(
+                            state.input,
+                            outcome.config.effectiveSpecialtyCapabilities(),
+                        )) null else SPECIALTY_DRAFT_UNSUPPORTED_MESSAGE
                         state.copy(
                             input = state.input.copy(radiusMeters = nextRadius),
                             remoteFeatureConfig = if (
@@ -269,13 +271,14 @@ class DecisionViewModel @Inject constructor(
                             // generation may remain in the restored Home UI.
                             formError = if (
                                 gateStatus == RuntimeAppVersionGate.Status.COMPATIBLE
-                            ) radiusMessage else state.formError,
+                            ) draftMessage ?: radiusMessage else state.formError,
                             transientMessage = when (gateStatus) {
                                 RuntimeAppVersionGate.Status.UPDATE_REQUIRED ->
                                     requiredUpdateMessage()
                                 RuntimeAppVersionGate.Status.UNKNOWN ->
                                     "服务端最低版本配置无效，远程能力已按安全默认值关闭"
                                 RuntimeAppVersionGate.Status.COMPATIBLE -> when {
+                                    draftMessage != null -> draftMessage
                                     radiusMessage != null -> radiusMessage
                                     nextRadius != state.input.radiusMeters ->
                                         "已按当前服务建议将最远距离调整为 $nextRadius 米。"
@@ -403,7 +406,6 @@ class DecisionViewModel @Inject constructor(
             )
         }
     }
-    fun setPartySize(value: Int) = updateInput { copy(partySize = value.coerceIn(1, 30)) }
 
     fun toggleCuisine(cuisine: String, preferred: Boolean) = updateInput {
         if (preferred) {
@@ -701,7 +703,7 @@ class DecisionViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     loadState = RecommendationLoadState.Idle,
-                    formError = "专项推荐能力已关闭，请重新选择普通用餐模式",
+                    formError = SPECIALTY_DRAFT_UNSUPPORTED_MESSAGE,
                 )
             }
             return false
@@ -862,7 +864,17 @@ class DecisionViewModel @Inject constructor(
         val usesUserReportedWeather = input.weatherContext.kind == WeatherContextKind.USER_REPORTED
         if (!usesSpecialtyTarget && !usesSpecialtyMealProfile && !usesUserReportedWeather) return true
         if (!trustedCompatibleConfiguration) return false
-        val capabilities = trustedSpecialtyCapabilities() ?: return false
+        return specialtyDraftSupported(input, trustedSpecialtyCapabilities())
+    }
+
+    private fun specialtyDraftSupported(
+        input: DecisionInput,
+        capabilities: com.chishenme.app.data.remote.SpecialtyCapabilities?,
+    ): Boolean {
+        if (input.mealPeriod == MealPeriod.LUNCH && input.target == RecommendationTarget.MEAL &&
+            input.weatherContext.kind == WeatherContextKind.NONE
+        ) return true
+        capabilities ?: return false
         val mealProfileEnabled = when (input.mealPeriod) {
             MealPeriod.BREAKFAST -> capabilities.breakfastProfileEnabled
             MealPeriod.LUNCH -> true
@@ -870,7 +882,7 @@ class DecisionViewModel @Inject constructor(
         }
         return mealProfileEnabled &&
             capabilities.enables(input.target) &&
-            (!usesUserReportedWeather || capabilities.userReportedWeatherEnabled)
+            (input.weatherContext.kind == WeatherContextKind.NONE || capabilities.userReportedWeatherEnabled)
     }
 
     private fun recommendationAccessIsCurrent(

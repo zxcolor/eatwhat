@@ -55,6 +55,12 @@ class ConsentViewModel @Inject constructor(
     )
 
     val privacyAccepted: StateFlow<Boolean?> = privacyConsent.privacyAccepted
+    private val acceptanceController = ConsentAcceptanceController(
+        scope = viewModelScope,
+        accept = privacyConsent::acceptPrivacy,
+        onAccepted = { mutableWithdrawalPersistenceFailed.value = false },
+    )
+    val acceptanceState: StateFlow<ConsentAcceptanceState> = acceptanceController.state
     val withdrawalPersistenceFailed: StateFlow<Boolean> =
         mutableWithdrawalPersistenceFailed.asStateFlow()
 
@@ -62,17 +68,14 @@ class ConsentViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ThemePreference.SYSTEM)
 
     fun acceptPrivacy() {
-        viewModelScope.launch {
-            if (privacyConsent.acceptPrivacy()) {
-                mutableWithdrawalPersistenceFailed.value = false
-            }
-        }
+        acceptanceController.submit()
     }
 
     fun withdrawPrivacy(cancelExternalAuthorization: () -> Unit) {
         // The UI gate closes synchronously, before any provider/backend callback
         // can regain commit authority or this method returns to the dialog.
         val operation = privacyConsent.beginWithdrawal(cancelExternalAuthorization)
+        acceptanceController.resetForWithdrawal()
         viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
             mutableWithdrawalPersistenceFailed.value =
                 !privacyConsent.persistWithdrawalAndClear(operation)

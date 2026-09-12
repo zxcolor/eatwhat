@@ -37,6 +37,7 @@ class RecommendationContractsTest {
 
         assertEquals("LUNCH", parsed.getValue("mealPeriod").toString().trim('"'))
         assertEquals("QUICK", parsed.getValue("decisionMode").toString().trim('"'))
+        assertEquals("1", parsed.getValue("partySize").toString())
         assertTrue("budgetMaxYuan" !in parsed)
         assertTrue("location" in parsed)
         assertEquals(
@@ -82,6 +83,21 @@ class RecommendationContractsTest {
         assertEquals(setOf("kind", "preference"), weather.keys)
         assertEquals("USER_REPORTED", weather.getValue("kind").toString().trim('"'))
         assertEquals("WARMING", weather.getValue("preference").toString().trim('"'))
+    }
+
+    @Test
+    fun `wire decoder rejects retired multiple diner contexts`() {
+        val request = RecommendationContext(
+            location = Coordinate(39.9928, 116.3109, crs = CoordinateReferenceSystem.WGS84),
+            mealPeriod = MealPeriod.LUNCH,
+            radiusMeters = 1_500,
+        )
+        val encoded = json.encodeToString(request)
+        for (count in listOf(0, 2, 30)) {
+            assertThrows(IllegalArgumentException::class.java) {
+                json.decodeFromString<RecommendationContext>(encoded.replace("\"partySize\":1", "\"partySize\":$count"))
+            }
+        }
     }
 
     @Test

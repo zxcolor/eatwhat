@@ -1,6 +1,8 @@
 # 实施状态
 
-更新日期：2026-09-06
+> 产品范围（2026-09-12）：只服务一个人的用餐决策，永久取消多人用餐。历史群组方案与验收记录仅作追溯，不属于当前或未来待实施功能。
+
+范围更新日期：2026-09-12；下文既有部署和设备证据仍保留原始日期。
 
 本轮配置中心集成属于代码与测试候选，未执行生产迁移、管理员启用或客户端分发。
 下文保留的历史部署记录不能当作本轮现网复验；本轮实际交付证据以 PR 当前提交和 CI 为准。
@@ -17,13 +19,13 @@
 - Android 1.2 候选已为早餐、午餐、晚餐建立独立版本化 profile，并为奶茶、咖啡、甜品建立独立目标/profile。`/v1/config` 以早餐、晚餐、三个垂类和用户主动体感六个完整布尔字段原子声明当前 provider 能力；对象缺失时 Android 全部失败关闭，对象存在但缺少任一字段则契约拒绝。首页只展示明确为 `true` 的入口，配置刷新会撤销旧能力与在途结果并重置到午餐、普通用餐和无体感。
 - 当前 AMAP 仅接受三餐 profile 与 `weatherContext.kind=NONE`，不会把通用餐饮关键词冒充为奶茶、咖啡、甜品分类，也不会接受用户体感；development/test DEMO 可覆盖全部候选 profile 与有界体感，但 production 从代码层禁止 DEMO。用户体感只是本次请求中主动选择的“少在户外/偏暖/偏清凉”，不读取实时天气、温度或后台位置，不持久化，也不代表已经接入天气服务。
 - 早餐、晚餐、三个垂类及任何用户体感路径均强制确定性规则且 AI 关闭。服务端在响应中回显 profile 与 weather application；Android 在展示前校验目标、餐段、版本、provider capability 标记和体感映射是否与请求一致。该扩展不改变 `LIVE_DISPLAY_ONLY`：仍保持 provider 顺序、`fitScore=null`，不做自有重排或跨请求 POI 持久化。
-- Android 2.x 首个同设备匿名群组候选已落入共享契约、API 和 Compose：2–8 人依次填写固定约束，客户端与服务端按 `group-constraints-v1` 分别重算共同预算、时间、半径与菜系交集，回显不一致即拒绝展示。该路径固定普通午餐、无体感、默认偏好向量和 AI 关闭，使用独立 display-only 响应，不签发 `resultToken`，也不接入事件、详情、账号、历史、收藏、反馈或分享。Activity 级内存状态只跨配置重建保留，真实后台、隐私撤回、强制更新、可信配置代际变化、显式退出或进程死亡会清空。
+- 本轮审查移除多人用餐：普通请求固定单人、群组接口与 UI 退出产品，部署开关取消，公开旧兼容字段固定关闭。本轮最终验证以审查报告和当前 HEAD 结果为准。
 - 已实现供应商无关的 `POST /v1/location-search`：关键词只进入自有 JSON POST body；服务端在全国范围内最多返回 5 个带显式 CRS 的地点，不返回稳定 POI ID；Android 支持加载、空结果、错误、取消旧请求和丢弃晚到响应，内置测试点始终可用。地点选择器、输入草稿、加载和成功结果只保留在 Activity 级内存 ViewModel 中，配置重建可恢复，显式关闭、真正退到后台、隐私撤回、配置代际失效或进程死亡会清除；旧请求即使不配合取消也不能写回。高德启用时由服务端 `v5/place/text` adapter 处理，默认开发模式使用清楚标记的虚构 DEMO 地点。
 - Android 1.0 的产品目标是完成选择而不是提供餐厅搜索：自动定位、内置快捷地点和地点关键词手动选址继续作为推荐起点；直接餐厅关键词搜索不展示入口、不注册列表或详情路由，也不会构造或发送 `/v1/place-search` 请求。
 - 一次推荐返回最多 3 个候选，并展示来源评分、可选适合度、距离、时间、置信度、警告和结果说明。`LIVE_DISPLAY_ONLY` 只称“首个候选/其他候选”并明确保持数据源原始顺序；只有 `LICENSED_ENRICHMENT` 才表达主推荐、备选和自有排序。
 - 推荐公共契约已把来源改为受约束、可扩展的代码，并为每条结果携带 `dataMode: LIVE | DEMO` 和导航、拨号、复制地址、分享四项布尔 `actions`。为保持 API v1 兼容暂时保留 `share`，但当前 AMAP/DEMO provider 统一返回 `false`，Android 1.0 也不会展示或执行它。推荐引擎与 Android 不根据供应商名称分支；当前仅有 AMAP 和 development/test 的 DEMO adapter，没有虚构美团或大众点评接口。
 - 推荐与地点关键词搜索共用通用 provider registry/selector，但分别以 `PLACE_RECOMMENDATION`、`LOCATION_TEXT_SEARCH` 真实能力注册，并分别配置 `RECOMMENDATION_PROVIDER_PRIORITY`、`LOCATION_SEARCH_PROVIDER_PRIORITY`。禁用、能力不匹配或无可用 adapter 时安全跳过或失败，不跨能力推断，也不伪造未来供应商。
-- `/v1/config` 已增加供应商无关的 `serviceCapabilities`，分别声明推荐、同设备群组、地点搜索和餐厅关键词搜索当前是否可用；共享契约与服务端继续保留 `placeSearchEnabled`，`/v1/place-search`、OpenAPI 和 provider 也继续作为独立 API 能力维护。Android 1.0 只消费推荐与地点搜索字段，2.x 群组入口额外要求 `groupRecommendationsEnabled` 在可信配置中明确为 `true`；旧配置缺少新增字段时按 `false` 关闭，并继续无条件忽略 `placeSearchEnabled`。所有消费方都把能力与可信配置 generation 绑定，旧 generation 的开放状态不能取得新 generation 的远程访问 lease。
+- `/v1/config` 的 `serviceCapabilities` 声明推荐、地点搜索和餐厅关键词搜索；Android 只消费推荐与地点搜索，忽略服务端独立搜索和旧群组字段。v1 的 `groupRecommendationsEnabled` 固定为 `false`。所有开放能力仍与可信配置 generation 绑定，旧状态不能取得新代次的远程访问 lease。
 - `/v1/config` 还返回当前运行配置的脱敏 `recommendationDefaults`（固定 `NATIONWIDE`、客户端建议半径、服务端最大半径）与 `minimumSupportedVersions`（Android 及可选 iOS/小程序）。建议半径不是服务端自动默认，推荐请求仍必须显式提交 `radiusMeters`。为兼容已部署旧响应，两个新对象在共享契约中可缺省，但当前服务总是发出。旧 `minimumSupportedVersion` 继续等于 Android 值。公开投影不含坐标、供应商身份、Secret、管理员或版本历史，也不代表上游健康/readiness。
 - 公开推荐结果已移除稳定 `providerPlaceId`，只返回两小时、请求作用域的 43 字符 HMAC `resultToken`。推荐事件只提交 `requestId/resultToken/type/occurredAt`；服务端从短期映射解析真实来源，同一 token 的同类事件只能接受一次。
 - 客户端在展示前再次拒绝明确停业、超半径、已知超预算和明确命中排除菜系的响应；未知价格或营业信息只做风险提示，不伪造事实。
@@ -54,7 +56,7 @@
 - Android 已实现进程级最低版本门禁：只有可信且兼容的远程配置才能开放普通接口；首次配置不可用且尚未确认更新要求时，游客只能取得关闭 AI 的规则推荐 lease，结果仅可展示或按相同条件重新请求（结果可能相同），不能进入详情、执行出站动作或上报事件；该操作不宣称跨请求反重复，也不新增稳定 POI ID 的上传、暴露或持久化。一旦确认需要更新，加载失败、配置暂不可用或不兼容响应都不能把旧导航图或游客回退短暂恢复。锁定态仅放行配置复查、必要的 refresh、退出登录、账号注销和本机隐私撤回；已有会话的数据权利入口独立于普通账号产品入口。配置刷新代际由进程级单调门禁统一分配，旧 Activity/ViewModel 的晚到配置响应不能倒退代际或发布 UI；代际变化还会撤销推荐、地点搜索、账号、收藏与反馈的在途结果，旧推荐详情、动作和事件会话随即失效。运行中从强制更新恢复到可信兼容配置时会清除旧 `transientMessage` 与 `formError`，避免更新 Snackbar 重新遮挡主操作，但不会复活旧结果会话。
 - 分享卡底层渲染、只读 FileProvider、单次生成租约、生命周期清理及其测试代码仍在仓库中封存，但 Android 1.0 由唯一的 `BuildConfig.SHARE_FEATURE_ENABLED=false` 编译期常量关闭入口，provider 同时统一返回 `share=false`，且不存在 Gradle 属性或远程开关。这些代码不再作为 1.0 能力、缺口或发布门禁；2.0 重新启用前必须重新完成产品、数据权利、隐私、安全和设备验证评审。
 - Android Studio API 36 模拟器已通过 8 条核心 Activity 用例和 2 条分享封藏负例：兼容态 3 条、配置不可用 1 条、同进程最低版本提高 1 条、启动即强制更新 1 条；账号设备内合成 API 夹具 1 条覆盖手机号登录→邮箱绑定→退出→邮箱登录→退出及 15 个请求严格顺序；高德合成 `LIVE_DISPLAY_ONLY` 展示夹具 1 条覆盖实时来源标注、无自有评分、保持供应商顺序、出站动作关闭及 WGS84/25 元/1500 米/AI 关闭请求边界；分享负例 2 条继续证明 Android 1.0 无入口、Intent 或临时文件。账号与高德夹具均不调用真实外部供应商，不得作为真实凭据或真实数据验收。最终同签名 APK 先通过冷启动强制更新 1 条和恢复兼容 3 条，再通过运行中提高、配置不可用、账号、高德各 1 条及分享封藏 2 条；`scripts/run-android-instrumentation.ps1` 对设备内夹具执行类/参数精确白名单、按设备端口互斥、映射前后复核和外部变更拒绝覆盖。
-- 本批次新增 `MainActivitySupportFeedbackLocalFixtureTest` 的 1 个 `@Test`，使用设备进程内回环 API 验证游客纠错正文只进入 JSON body、URL 无 query/Authorization，以及能力运行时关闭后不再提交；另新增 `MainActivityGroupDecisionLocalFixtureTest` 的 3 个 `@Test`，验证同机匿名两人完整提交、Activity 配置重建后继续、真实后台返回后清空且不提交，并核对 LIVE 结果卡没有详情或任何出站点击目标。2026-09-04 两类用例完成测试侧懒加载控件定位修复，并在重启后的 4 GB / 4 核 / GPU auto 独立 API 36 / Pixel 6 模拟器 `emulator-5560` 最终通过严格运行器：群组为 `OK (3 tests)` / `58.286s`、支持反馈为 `OK (1 test)` / `26.615s`，逐项 status 和严格退出码均为 `0` 且映射恢复。此前系统对话框遮挡轮次及截图作为失败证据保留，没有将系统组件 ANR 误记为本 App ANR；增加截图前活动窗口 `packageName` 断言后，最终群组截图已逐张确认无遮挡、中文和只读 / 实时权利说明完整，本次 boot 的 `am_anr` / `am_crash` 计数均为 `0`。结果仅覆盖本轮单台合成环境的断言与群组截图复验，不并入历史通过数，不等于真机、长期稳定性或完整设备矩阵通过。
+- 历史设备证据：2026-09-04 的支持反馈与群组测试记录保留在 [验证报告](VERIFICATION_REPORT.md)。支持反馈继续维护；群组专属类已随功能退休，历史通过数和截图不计入本轮或未来验收。
 - ECS 的真实高德技术 smoke 是独立证据：隔离容器、活动容器和工作站公网均得到 5 条地点结果与 3 条推荐结果；这不改变 Android 模拟器夹具仍为合成数据，也不能替代关闭 Wi-Fi 真机与商业授权验收。
 - 普通 Android Debug 已改为默认直连 `https://api.unfinished-era.com/`，并与 Alpha 复用当前单实例 API/PostgreSQL；不新增 Debug 服务容器、端口、域名或数据库。Debug 地址门禁只接受公网 HTTPS，主 Debug APK 使用全局禁止明文的 network security config。确定性 AndroidTest 已迁移到独立 `fixture` build type：它固定使用 `127.0.0.1:3001`、输出到独立路径、不可分发，也不会成为日常 Debug 的隐式回退。当前云端 `accountsEnabled=false`；Debug 的微信/QQ AppID 继续为空，单实例服务端支持受批准的多 AppID 绑定前不得开放。
 - Android `0.1.2-alpha01-internal` 已完整移除直接餐厅关键词搜索的入口、路由、页面、ViewModel、repository 和 client；手动地点搜索只用于选择推荐起点。此前在 API 36 模拟器全新安装后，选中“北京电子科技学院”取得 3 条真实高德推荐；2026-08-24 完整门禁构建的 Alpha APK SHA-256 `DD7257BCE3098DD658D30A8E7D6EAFECB980D627CCCB9C3B516BF7B32DCCEC07` 属于迁移前 Debug signer 历史基线，不能再作为当前固定签名 Alpha 工件或平台登记依据。
@@ -79,7 +81,7 @@
 - 跨设备收藏、跨设备历史、账号注销和备份滚动清除的真实环境验收；本机白名单决策历史已经完成，账号导出代码链路已完成但仍受上述 RDS/OSS/RAM 门禁约束。
 - App 内地图浏览/筛选，以及真实电话、外部地图导航、复制动作的数据授权及全设备验证。高德 Web Service 基础地点搜索、独立餐厅关键词搜索和推荐技术链路由服务端继续维护，但商业许可、详情字段和动作矩阵仍未完成；其中直接餐厅关键词搜索不属于 Android 1.0 产品能力，不能因服务端接口仍存在而恢复客户端入口。分享推荐卡同样不属于 Android 1.0 待交付或待验收范围，不能把封存代码或契约字段存在解释为已开放外传能力。
 - 300 家餐厅人工核验、200 个黄金场景、50–100 人 Beta 和 30 天稳定性数据。
-- Android 1.1 的其余产品项及真机/生产/发布闭环；Android 1.2 候选的新增设备流程、生产部署、真实供应商垂类分类授权和天气服务闭环；Android 2.x 同设备群组候选的 API 26–36 目标设备矩阵、无障碍、弱网、真实 provider、数据权利和生产开放验收，以及其余 2.x、微信小程序和 iOS。群组已通过的 API 36 单台模拟器合成夹具不补足上述缺口，生产开关仍默认关闭；已落地候选均不代表对应版本全部完成。
+- Android 1.1 的其余个人体验与真机/生产/发布闭环；1.2 的设备流程、真实供应商垂类分类授权和天气服务；区域模型与商户认领的独立候选、微信小程序和 iOS。候选代码不等于完整版本已交付，多人功能已取消而非等待验收。
 
 ## 当前运行模式
 
@@ -95,4 +97,4 @@
 
 1. 登录主线：完成 PHONE_ONLY 契约/API/数据库/Android/ECS 改造和完整门禁后，才从当前 HEAD 产出候选镜像；先复核 RAM/IMDSv2、控制台当前签名/模板和失败关闭，再做真实短信发送/校验及 ARM64 + 中国大陆 SIM 真机闭环。微信/QQ/邮箱保持“仅已绑定登录”，未具备真实材料和验收时各自关闭，不伪造外部验收。
 2. 高德主线：ECS root-only 凭据、固定出口 IP 白名单、readiness、真实地点搜索/推荐、release 切换、独立 API 子域与公网 HTTPS 已通过。下一步只做关闭 Wi-Fi 的外部真机、弱网/配额/故障恢复和授权边界复验；Key/私钥继续不得写入 Android、仓库、APK、日志、报告或聊天记录。
-3. 除登录与高德之外的 Android 1.0/后续功能开发暂缓；现有成果和发布门禁继续保留，不在这两条主线推进期间顺带扩展。
+3. 本轮代码优化按单人产品范围推进。区域治理、商户认领、小程序与其他工作树的未合并成果继续独立保留，不把其存在当作主线已完成。

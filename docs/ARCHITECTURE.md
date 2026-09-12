@@ -1,5 +1,7 @@
 # 架构与隐私边界
 
+> 产品范围（2026-09-12）：只服务一个人的用餐决策，永久取消多人用餐。历史群组方案与验收记录仅作追溯，不属于当前或未来待实施功能。
+
 ## 产品原则
 
 “吃什么”解决的是“现在这一顿选哪家”，而不是提供无限餐厅信息流。客户端应优先呈现一个主答案和两个备选；任何分数都不能绕过营业、预算、距离、排除项和数据权利等硬规则。
@@ -86,43 +88,21 @@ API Schema 校验 -> 全国坐标、半径和用户约束校验
 1 主推荐 + 2 备选 + 原因 + 置信度 + 版本信息
 ```
 
-## 同设备匿名群组数据流（Android 2.x 候选）
+## 单人产品边界
 
-群组路径与普通推荐共享受控 provider 和硬过滤领域规则，但不复用普通公开响应或 token registry：
-
-```text
-2–8 份匿名固定约束 + 一个共同坐标/交通方式
-        |
-        v
-严格 GroupRecommendationRequest -> 服务端重算 group-constraints-v1
-        |
-        v
-固定 MEAL/LUNCH/NONE + GUIDED/BALANCED + 默认向量 + AI 关闭
-        |
-        v
-独立 capability/query-plan 复查 -> provider -> 数据权利门禁 -> 最多 3 个候选
-        |
-        v
-display-only GroupRecommendationResponse
-无 resultToken/actions/坐标/电话/图片/AI/模型字段
-```
-
-Android 在展示前独立重算并逐字段核对聚合摘要。`LIVE_DISPLAY_ONLY` 保持 provider 顺序且
-`fitScore=null`；只有逐来源授权完整时才可使用既有透明规则排序。页面没有详情或出站动作，
-路由不携带成员、位置或结果，状态只存在 Activity 级内存中。完整规范见
-[同设备匿名群组决策架构](./GROUP_DECISION_ARCHITECTURE.md)。
+`RecommendationContext.partySize` 只接受数值 `1`，缺省也为 `1`。群组路由、聚合领域与客户端流程已取消；旧环境开关无法恢复服务。公开 v1 配置仅为旧客户端保留 `groupRecommendationsEnabled=false`，不存在可开启的群组能力。
 
 ## 不可信边界
 
 - Android 输入、第三方 API 和 AI 输出均视为不可信，进入领域层前必须校验。
 - Android 系统定位和内置手动测试点标记为 WGS84；高德 around 请求前只转换一次为 GCJ-02，高德 POI 响应也显式标记为 GCJ-02。距离函数拒绝混合坐标系，禁止用未标记或重复偏移的坐标计算距离。
 - 精确坐标不得进入自有客户端/API URL、事件、错误信息或持久化日志。若获授权的数据供应商官方接口强制使用 HTTPS query，只能作为经过 PIA 和书面授权的出站例外，并必须在代理、APM、SLS 和诊断层禁止采集完整 URL；否则更换支持请求体的供应商。
-- 千问只接收餐段、预算、可用分钟、人数、交通、主动菜系及主动模式标签；不接收手机号、第三方账号、设备标识或精确位置。Android 1.2 候选中只有普通午餐且 `weatherContext.kind=NONE` 可进入既有千问路径；早餐、晚餐、三个垂类和任何用户主动体感均强制确定性规则，不向千问发送这些新语义。
+- 千问只接收餐段、预算、可用分钟、交通、主动菜系及主动模式标签；不接收手机号、第三方账号、设备标识或精确位置。Android 1.2 候选中只有普通午餐且 `weatherContext.kind=NONE` 可进入既有千问路径；早餐、晚餐、三个垂类和任何用户主动体感均强制确定性规则，不向千问发送这些新语义。
 - 在未获得书面授权前，第三方餐厅名称、评分、图片和 POI 属性不得发送给千问。
 - 客户端不保存服务端、高德、千问、短信或社交平台 Secret。
 - `DEMO` 数据只用于 development/test；production 会拒绝启用。未配置合法供应商时推荐接口安全失败。
 - Android 为所有 API 请求发送固定的 v1 契约版本并要求响应恰好确认同一版本；缺失、重复或不匹配会在反序列化前关闭响应。网络层即使包装该异常，也只通过有深度上限和循环检测的 cause 链归类，不读取或展示异常、URL、请求体或响应元数据。远程配置在客户端内部明确区分成功、暂不可用和契约不兼容，后两者都保持 AI 关闭并给出不同提示。
-- `/v1/config.serviceCapabilities` 只声明当前推荐、同设备群组、地点搜索和餐厅关键词搜索 adapter 的本地可用性，不执行上游网络探测，也不暴露供应商身份。Android 1.0 只消费推荐与地点搜索字段并无条件忽略 `placeSearchEnabled`；2.x 群组入口还要求新增字段明确为 `true`。旧配置缺少 `groupRecommendationsEnabled` 时按 `false`，群组端点仍在每次 provider I/O 前独立复查开关和 `MEAL/LUNCH/NONE` query plan。能力与可信配置 generation 绑定，旧 generation 的开放值不能取得新 generation 的远程访问 lease。Android 1.2 的 `specialtyCapabilities` 是单独的六字段原子对象，分别声明早餐、晚餐、奶茶、咖啡、甜品和用户主动体感；整个对象缺失时全部关闭，部分字段缺失时配置无效，客户端不能从 provider 名称或其他能力推断开放状态。
+- `/v1/config.serviceCapabilities` 声明当前推荐、地点搜索和餐厅关键词搜索 adapter 的本地可用性，不执行上游网络探测或暴露供应商身份。Android 只消费推荐与地点搜索字段，无条件忽略 `placeSearchEnabled` 与已退休的群组信号。能力与可信配置 generation 绑定，旧开放值不能取得新代次的远程访问 lease。`specialtyCapabilities` 是早餐、晚餐、奶茶、咖啡、甜品和用户主动体感六字段原子对象；整个对象缺失时全部关闭，部分字段缺失时配置无效，不得从 provider 名称推断开放状态。
 
 ## 版本化专项查询与主动体感
 
@@ -169,8 +149,8 @@ Android 在展示前独立重算并逐字段核对聚合摘要。`LIVE_DISPLAY_O
 - `0013_admin_config_control.sql` 只开放五个非 Secret 配置键：`features.ai-assistance`、`recommendations.rules`、`recommendations.prompt`、`coverage.default` 和 `clients.minimum-version`。普通 runtime 与管理员 runtime 都无配置基表权限，只能分别调用固定 `SECURITY DEFINER` 读取/管理函数；schema、分类和 JSON 形状由服务端映射与数据库同时验证。普通 runtime 只把已采用的覆盖默认值与最低版本形成上述公开脱敏投影，不公开整条活动记录。
 - 配置写入采用逐键 `expectedActiveVersion` 乐观锁（PUT 首次发布为 `null`、已有活动版本时精确匹配；rollback 始终为正整数活动版本）。发布追加新活动版本并 retire 旧版本；回滚复制目标历史值发布更高的新版本，不复活或覆盖旧行。两个 GET 要求 `ALGORITHM_CONFIG_READ`，PUT/rollback 要求 `ALGORITHM_CONFIG_WRITE`，409 表示并发版本冲突而不是可忽略告警。`features.ai-assistance` 的值严格只有全局 `enabled` 布尔开关，不含灰度百分比或任意扩展字段。
 - 后台明确区分“已保存”与本次 API 实例实际读取的配置：公开 `operationalConfig` 仅含固定五键修订号、来源、最近成功读库时间、5 秒缓存时长和 AI 关闭原因。只有 `DATABASE` 且修订号匹配才表明该次响应已读取保存值，不能推断全部节点、客户端或上游状态。`ruleVersion` 保持代码算法版本，`rulesConfigVersion` 独立表示数据库规则修订，避免命名碰撞。
-- 配置读库失败时立即关闭 AI 与提示词，单人、群组及专项能力失败关闭；推荐端点在模型、provider、权益或 registry 操作前返回 503。旧快照仅供诊断与保留最低版本门禁，不继续使用过期规则提供推荐。首次失败以 `SAFE_FALLBACK` 缓存 5 秒，已有成功快照以 `STALE_CACHE` 缓存 5 秒后再试；恢复成功才恢复可用状态。
-- 权重与用户偏好共同作用于已授权的 `LICENSED_ENRICHMENT`，零权重维度不充当排序理由，多样性惩罚同时遵守运营权重；LIVE 路径仍只做过滤/去重并保持供应商顺序、`fitScore=null`。单人请求与群组重新计算的共同半径均受当前最大范围约束。Android 未主动设置的半径采用服务器建议，主动设置和场景选择保留，超限明确提示并由用户决定调整。
+- 配置读库失败时立即关闭 AI 与提示词，单人及专项能力失败关闭；推荐端点在模型、provider、权益或 registry 操作前返回 503。旧快照仅供诊断与保留最低版本门禁，不继续使用过期规则提供推荐。首次失败以 `SAFE_FALLBACK` 缓存 5 秒，已有成功快照以 `STALE_CACHE` 缓存 5 秒后再试；恢复成功才恢复可用状态。
+- 权重与用户偏好共同作用于已授权的 `LICENSED_ENRICHMENT`，零权重维度不充当排序理由，多样性惩罚同时遵守运营权重；LIVE 路径仍只做过滤/去重并保持供应商顺序、`fitScore=null`。单人请求半径受当前最大范围约束。Android 未主动设置的半径采用服务器建议，主动设置和场景选择保留，超限明确提示并由用户决定调整。
 - 最低版本尚无可信发布清单：UI 与数据库同时拒绝首次配置、提高现有平台门槛或增加平台，发布与历史回滚均受同一原子检查。拒绝使用 `CLIENT_RELEASE_UNVERIFIED` / 409，且不新增配置或审计行；允许已有门槛等值/降低和移除可选平台。Android 实际最低版本始终取部署安全下限与数据库值较高者，不能通过配置降低已部署的安全下限。
 - 初始 schema 覆盖账号身份、OTP、session/token、OAuth state、收藏/历史/私有反馈、导出/注销、配置、后台角色/MFA、append-only audit、数据权利及广义覆盖区域。除覆盖区域几何外不存用户坐标；凭据、身份目的地、设备/IP 与第三方证据只存哈希或密文。
 - `lookup_hash` 使用可轮换查询 key；`dedup_hash` 使用独立稳定 key。稳定 key 的任何变更必须经过双读、全量冲突审计与事务重键，禁止直接切换版本后继续写入。

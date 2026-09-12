@@ -25,11 +25,6 @@ import {
 	FavoriteMutationRequestSchema,
 	FavoriteRecordSchema,
 	FeatureConfigSchema,
-	GroupConstraintAggregationSchema,
-	GroupMemberConstraintsSchema,
-	GroupRecommendationRequestSchema,
-	GroupRecommendationResponseSchema,
-	GroupRecommendationResultSchema,
 	IdentityBindingSchema,
 	LatestAccountExportResponseSchema,
 	ListFavoritesQuerySchema,
@@ -62,6 +57,41 @@ import {
 	WeatherApplicationSchema,
 	WeatherContextRequestSchema,
 } from "./index.js";
+
+describe("Individual dining product boundary", () => {
+	const request = {
+		location: { latitude: 39.9928, longitude: 116.3109 },
+		mealPeriod: "LUNCH",
+		radiusMeters: 1_500,
+	};
+
+	it("defaults legacy requests to one person and accepts an explicit one", () => {
+		expect(RecommendationContextSchema.parse(request).partySize).toBe(1);
+		expect(
+			RecommendationContextSchema.parse({ ...request, partySize: 1 }).partySize,
+		).toBe(1);
+	});
+
+	it.each([0, 2, 8, 30, 1.5, "1", null])(
+		"rejects partySize %s",
+		(partySize) => {
+			expect(
+				RecommendationContextSchema.safeParse({ ...request, partySize })
+					.success,
+			).toBe(false);
+		},
+	);
+
+	it("cannot advertise group dining through the legacy capability field", () => {
+		expect(
+			ServiceCapabilitiesSchema.safeParse({ groupRecommendationsEnabled: true })
+				.success,
+		).toBe(false);
+		expect(
+			ServiceCapabilitiesSchema.parse({}).groupRecommendationsEnabled,
+		).toBe(false);
+	});
+});
 
 describe("Administrator configuration contracts", () => {
 	const publishedAt = "2026-08-30T00:00:00.000Z";
@@ -647,224 +677,6 @@ describe("Recommendation contracts", () => {
 			RecommendationEventSchema.safeParse({
 				...event,
 				resultToken: `${VALID_RESULT_TOKEN}=`,
-			}).success,
-		).toBe(false);
-	});
-});
-
-describe("Anonymous group recommendation contracts", () => {
-	const validMember = {
-		budgetMaxYuan: 80,
-		availableMinutes: 60,
-		radiusMeters: 1_500,
-		preferredCuisines: ["面食"] as const,
-		excludedCuisines: ["火锅"] as const,
-	};
-	const validRequest = {
-		location: { latitude: 39.9928, longitude: 116.3109 },
-		travelMode: "WALK" as const,
-		members: [validMember, { ...validMember, budgetMaxYuan: null }],
-	};
-	const validResult = {
-		provider: "AUTHORIZED_VENDOR",
-		dataMode: "LIVE" as const,
-		name: "测试餐厅",
-		address: "测试地址",
-		rank: 1,
-		fitScore: null,
-		sourceRating: 4.5,
-		averageCostYuan: 45,
-		distanceMeters: 500,
-		estimatedTravelMinutes: 8,
-		estimatedMealMinutes: 35,
-		openStatus: "OPEN" as const,
-		tags: ["面食"],
-		reasons: [{ code: "DISTANCE_FIT" as const, text: "距离适合全组" }],
-		warnings: [],
-		confidence: "HIGH" as const,
-		sourceAttribution: "已授权数据源",
-	};
-	const validAggregation = {
-		version: "group-constraints-v1" as const,
-		memberCount: 2,
-		effectiveBudgetMaxYuan: 80,
-		effectiveAvailableMinutes: 60,
-		effectiveRadiusMeters: 1_500,
-		preferredCuisines: ["面食"] as const,
-		excludedCuisines: ["火锅"] as const,
-	};
-
-	it("accepts only two to eight complete anonymous member constraints", () => {
-		const parsed = GroupRecommendationRequestSchema.parse(validRequest);
-		expect(parsed.location.crs).toBe("WGS84");
-		expect(parsed.members[1]?.budgetMaxYuan).toBeNull();
-		expect(
-			GroupRecommendationRequestSchema.parse({
-				...validRequest,
-				members: Array.from({ length: 8 }, () => ({ ...validMember })),
-			}).members,
-		).toHaveLength(8);
-
-		for (const invalid of [
-			{ ...validRequest, travelMode: "DRIVE" },
-			{ ...validRequest, members: [validMember] },
-			{ ...validRequest, members: Array(9).fill(validMember) },
-			{
-				...validRequest,
-				members: [{ ...validMember, budgetMaxYuan: undefined }, validMember],
-			},
-			{
-				...validRequest,
-				members: [{ ...validMember, budgetMaxYuan: 0 }, validMember],
-			},
-			{
-				...validRequest,
-				members: [{ ...validMember, availableMinutes: 241 }, validMember],
-			},
-			{
-				...validRequest,
-				members: [{ ...validMember, radiusMeters: 199 }, validMember],
-			},
-		]) {
-			expect(GroupRecommendationRequestSchema.safeParse(invalid).success).toBe(
-				false,
-			);
-		}
-	});
-
-	it("rejects duplicate, conflicting, free-form, and identifying member data", () => {
-		for (const member of [
-			{
-				...validMember,
-				preferredCuisines: ["面食", "面食"],
-			},
-			{
-				...validMember,
-				preferredCuisines: ["面食"],
-				excludedCuisines: ["面食"],
-			},
-			{ ...validMember, preferredCuisines: ["联系电话"] },
-			{ ...validMember, memberId: "member-1" },
-			{ ...validMember, name: "小明" },
-			{ ...validMember, note: "不要告诉别人" },
-			{ ...validMember, location: validRequest.location },
-			{ ...validMember, aiAssistanceEnabled: true },
-			{ ...validMember, weatherContext: { kind: "NONE" } },
-			{ ...validMember, accountId: VALID_UUID },
-		]) {
-			expect(GroupMemberConstraintsSchema.safeParse(member).success).toBe(
-				false,
-			);
-		}
-
-		for (const forbidden of [
-			{ groupId: VALID_UUID },
-			{ name: "午餐小组" },
-			{ prompt: "帮我们选" },
-			{ locationLabel: "公司" },
-			{ aiAssistanceEnabled: true },
-			{ weatherContext: { kind: "NONE" } },
-			{ accountId: VALID_UUID },
-		]) {
-			expect(
-				GroupRecommendationRequestSchema.safeParse({
-					...validRequest,
-					...forbidden,
-				}).success,
-			).toBe(false);
-		}
-		expect(
-			GroupRecommendationRequestSchema.safeParse({
-				...validRequest,
-				location: { ...validRequest.location, label: "公司" },
-			}).success,
-		).toBe(false);
-	});
-
-	it("requires an exact bounded group-constraints-v1 aggregation summary", () => {
-		expect(
-			GroupConstraintAggregationSchema.safeParse(validAggregation).success,
-		).toBe(true);
-		for (const invalid of [
-			{ ...validAggregation, version: "group-constraints-v2" },
-			{ ...validAggregation, memberCount: 1 },
-			{ ...validAggregation, effectiveBudgetMaxYuan: 2_001 },
-			{ ...validAggregation, effectiveAvailableMinutes: 14 },
-			{ ...validAggregation, effectiveRadiusMeters: 10_001 },
-			{
-				...validAggregation,
-				preferredCuisines: ["面食", "面食"],
-			},
-			{
-				...validAggregation,
-				preferredCuisines: ["面食"],
-				excludedCuisines: ["面食"],
-			},
-			{ ...validAggregation, algorithm: "ai" },
-		]) {
-			expect(GroupConstraintAggregationSchema.safeParse(invalid).success).toBe(
-				false,
-			);
-		}
-	});
-
-	it("keeps group responses display-only, strict, and capped at three results", () => {
-		expect(GroupRecommendationResultSchema.safeParse(validResult).success).toBe(
-			true,
-		);
-		const response = {
-			requestId: VALID_UUID,
-			generatedAt: "2026-09-03T00:00:00.000Z",
-			coverage: "NATIONWIDE" as const,
-			dataRightsMode: "LIVE_DISPLAY_ONLY" as const,
-			ruleVersion: "group-rules-v1",
-			aggregation: validAggregation,
-			results: [validResult],
-			notice: null,
-		};
-		expect(GroupRecommendationResponseSchema.safeParse(response).success).toBe(
-			true,
-		);
-
-		for (const forbiddenResultField of [
-			{ resultToken: VALID_RESULT_TOKEN },
-			{ actions: { navigate: true } },
-			{ location: validRequest.location },
-			{ phone: "010-00000000" },
-			{ imageUrl: "https://example.com/restaurant.jpg" },
-			{ aiAssisted: false },
-		]) {
-			expect(
-				GroupRecommendationResultSchema.safeParse({
-					...validResult,
-					...forbiddenResultField,
-				}).success,
-			).toBe(false);
-		}
-
-		for (const forbiddenResponseField of [
-			{ aiFallbackUsed: false },
-			{ promptVersion: "prompt-v1" },
-			{ modelVersion: "rules" },
-		]) {
-			expect(
-				GroupRecommendationResponseSchema.safeParse({
-					...response,
-					...forbiddenResponseField,
-				}).success,
-			).toBe(false);
-		}
-		expect(
-			GroupRecommendationResponseSchema.safeParse({
-				...response,
-				dataRightsMode: "LICENSED_ENRICHMENT",
-				results: Array(3).fill({ ...validResult, fitScore: 90 }),
-			}).success,
-		).toBe(true);
-		expect(
-			GroupRecommendationResponseSchema.safeParse({
-				...response,
-				results: Array(4).fill(validResult),
 			}).success,
 		).toBe(false);
 	});

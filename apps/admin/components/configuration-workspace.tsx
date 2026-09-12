@@ -1237,7 +1237,7 @@ export function ConfigurationWorkspace({ runtimeConfig }: { runtimeConfig: Confi
 						configKey="features.ai-assistance"
 						title="AI 辅助开关"
 						description="控制 AI 辅助是否参与决策。当前没有稳定用户分桶，因此不提供灰度比例。"
-						impact="仅适用于允许 AI 的单人午餐。还须通过服务器 AI 开关、提示词开关与用户同意；早餐、晚餐、专项、体感和群组决策继续使用规则。"
+						impact="仅适用于尚未明确菜系的午餐。还须通过服务器 AI 开关、提示词开关与用户同意；早餐、晚餐、专项、体感及明确菜系的请求使用规则。"
 						defaultValue={DEFAULT_AI}
 						record={recordFor(records, "features.ai-assistance")}
 						canWrite={canWrite}
@@ -1299,7 +1299,7 @@ export function ConfigurationWorkspace({ runtimeConfig }: { runtimeConfig: Confi
 						configKey="coverage.default"
 						title="默认覆盖范围"
 						description="配置客户端建议半径、服务端最大扩圈边界与固定全国区域编码。"
-						impact="最大半径约束单人及群组查询。建议半径仅向客户端提供建议值，采用情况需客户端验证；不会改变数据权益模式。"
+						impact="最大半径约束个人推荐查询。建议半径仅向客户端提供建议值，采用情况需客户端验证；不会改变数据权益模式。"
 						defaultValue={DEFAULT_COVERAGE}
 						record={recordFor(records, "coverage.default")}
 						canWrite={canWrite}

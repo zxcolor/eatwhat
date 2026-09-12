@@ -45,7 +45,6 @@ class DecisionHistoryTest {
             budgetMaxYuan = 42,
             availableMinutes = 55,
             radiusMeters = 2_000,
-            partySize = 2,
             excludedCuisines = setOf("不应写入的排除偏好"),
             preferredCuisines = setOf("不应写入的菜系偏好"),
         )

@@ -68,7 +68,6 @@ export default async function IntegrationsPage() {
         : "推荐或地点搜索至少一项未由公开配置启用",
       capabilities: [
         `推荐：${service.recommendationsEnabled ? "已启用" : "未启用"}`,
-        `同设备群组决策：${service.groupRecommendationsEnabled ? "已启用" : "未启用"}（仅提供只读候选，不使用 AI）`,
         `地点搜索：${service.locationSearchEnabled ? "已启用" : "未启用"}`,
         `餐厅关键词接口：${service.placeSearchEnabled ? "已启用" : "未启用"}`,
         config.recommendationDefaults === undefined
@@ -89,7 +88,7 @@ export default async function IntegrationsPage() {
         config.operationalConfig === undefined
           ? "未提供 AI 多门禁诊断，不能判断具体未启用原因"
           : AI_STATUS_LABELS[config.operationalConfig.aiStatus],
-        "早餐、晚餐、专项、用户体感和群组决策使用规则；AI 还须请求级用户同意",
+        "早餐、晚餐、专项、用户体感和已明确菜系的请求使用规则；其余午餐请求经用户同意后可使用 AI",
         `提示词版本：${config.promptVersion}`,
         `规则代码版本：${config.ruleVersion}`,
         `运营规则修订：${config.rulesConfigVersion === undefined ? "未提供" : config.rulesConfigVersion === null ? "使用部署默认值" : `v${config.rulesConfigVersion}`}`

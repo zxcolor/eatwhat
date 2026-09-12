@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
@@ -29,9 +30,6 @@ import com.chishenme.app.feature.account.AccountViewModel
 import com.chishenme.app.feature.detail.DetailSessionExpiredScreen
 import com.chishenme.app.feature.detail.RestaurantDetailScreen
 import com.chishenme.app.feature.home.HomeScreen
-import com.chishenme.app.feature.group.GroupDecisionPhase
-import com.chishenme.app.feature.group.GroupDecisionScreen
-import com.chishenme.app.feature.group.GroupDecisionViewModel
 import com.chishenme.app.feature.results.ResultsScreen
 import com.chishenme.app.feature.config.RemoteFeatureConfigState
 import com.chishenme.app.feature.config.RuntimeAppVersionGate
@@ -46,7 +44,6 @@ import com.chishenme.app.feature.update.UpdateRequiredScreen
 import com.chishenme.app.data.remote.FeatureConfig
 import com.chishenme.app.data.remote.DataRightsMode
 import com.chishenme.app.data.remote.RecommendationEventType
-import com.chishenme.app.data.remote.effectiveServiceCapabilities
 
 private object Routes {
     const val Home = "home"
@@ -56,14 +53,12 @@ private object Routes {
     const val Account = "account"
     const val SavedResources = "saved-resources"
     const val SupportFeedback = "support-feedback"
-    const val GroupDecision = "group-decision"
 }
 
 @Composable
 fun AppNavigation(
     onWithdrawPrivacy: () -> Unit,
     decisionViewModel: DecisionViewModel = hiltViewModel(),
-    groupDecisionViewModel: GroupDecisionViewModel = hiltViewModel(),
 ) {
     val decisionState by decisionViewModel.uiState.collectAsStateWithLifecycle()
     val runtimeVersionGateState by
@@ -78,30 +73,16 @@ fun AppNavigation(
     )
     val lifecycleOwner = LocalLifecycleOwner.current
     val activity = LocalContext.current.findActivity()
-    val groupDecisionState by groupDecisionViewModel.state.collectAsStateWithLifecycle()
     val supportFeedbackEnabled = effectiveFeatureConfig?.supportFeedbackEnabled == true
-    val effectiveServiceCapabilities = effectiveFeatureConfig?.effectiveServiceCapabilities()
-    val groupDecisionEnabled = effectiveServiceCapabilities?.recommendationsEnabled == true &&
-        effectiveServiceCapabilities.groupRecommendationsEnabled
     val refreshConfigAndInvalidateResultSessions: () -> Unit = {
         decisionViewModel.clearSelectedResult()
-        groupDecisionViewModel.clear()
         decisionViewModel.startConsentSession()
     }
 
     LaunchedEffect(decisionViewModel) {
         decisionViewModel.ensureConsentSessionStarted()
     }
-    LaunchedEffect(
-        effectiveFeatureConfig,
-        runtimeVersionGateState.trustedConfigurationGeneration,
-    ) {
-        groupDecisionViewModel.applyFeatureConfig(
-            effectiveFeatureConfig,
-            runtimeVersionGateState.trustedConfigurationGeneration,
-        )
-    }
-    DisposableEffect(lifecycleOwner, decisionViewModel, groupDecisionViewModel, activity) {
+    DisposableEffect(lifecycleOwner, decisionViewModel, activity) {
         // Adding an observer to an already-started Lifecycle immediately replays
         // ON_START. Only an ON_START preceded by an observed ON_STOP is a real
         // foreground return; the initial request remains owned by LaunchedEffect.
@@ -110,9 +91,6 @@ fun AppNavigation(
             when (event) {
                 Lifecycle.Event.ON_STOP -> {
                     foregroundRefreshGate.onStopped()
-                    if (activity?.isChangingConfigurations != true) {
-                        groupDecisionViewModel.clearForBackground()
-                    }
                 }
                 Lifecycle.Event.ON_START -> if (foregroundRefreshGate.onStarted()) {
                     refreshConfigAndInvalidateResultSessions()
@@ -127,14 +105,12 @@ fun AppNavigation(
     LaunchedEffect(runtimeVersionGateState.status) {
         if (runtimeVersionGateState.status == RuntimeAppVersionGate.Status.UPDATE_REQUIRED) {
             decisionViewModel.clearSelectedResult()
-            groupDecisionViewModel.clear()
         }
     }
 
     val withdrawPrivacy: () -> Unit = {
         decisionViewModel.clearSelectedResult()
         decisionViewModel.clearForPrivacyWithdrawal()
-        groupDecisionViewModel.clearForPrivacyWithdrawal()
         onWithdrawPrivacy()
     }
 
@@ -163,7 +139,9 @@ fun AppNavigation(
     // This call site leaves composition while UPDATE_REQUIRED is shown. A later
     // compatible recheck therefore creates a fresh controller at Home instead
     // of reviving an old account/detail back stack.
-    val navController = rememberNavController()
+    // Old saved back stacks may name the retired group destination. Give this
+    // graph its own saved-state scope while keeping same-version rotation intact.
+    val navController = key("individual-navigation-v1") { rememberNavController() }
 
     NavHost(
         navController = navController,
@@ -192,37 +170,6 @@ fun AppNavigation(
                 onOpenSettings = { navController.navigate(Routes.Settings) },
                 onReconnectService = refreshConfigAndInvalidateResultSessions,
                 onRecommendationStarted = { navController.navigate(Routes.Results) },
-                groupDecisionEnabled = groupDecisionEnabled,
-                onOpenGroupDecision = {
-                    val location = decisionState.input.location
-                    if (location != null) {
-                        groupDecisionViewModel.applyFeatureConfig(
-                            effectiveFeatureConfig,
-                            runtimeVersionGateState.trustedConfigurationGeneration,
-                        )
-                        if (groupDecisionViewModel.start()) {
-                            groupDecisionViewModel.setLocation(location.coordinate)
-                            groupDecisionViewModel.setTravelMode(decisionState.input.travelMode)
-                            navController.navigate(Routes.GroupDecision)
-                        }
-                    }
-                },
-            )
-        }
-        composable(Routes.GroupDecision) {
-            LaunchedEffect(groupDecisionState.phase) {
-                if (groupDecisionState.phase == GroupDecisionPhase.CLOSED) {
-                    navController.popBackStack(Routes.Home, inclusive = false)
-                }
-            }
-            GroupDecisionScreen(
-                state = groupDecisionState,
-                viewModel = groupDecisionViewModel,
-                locationLabel = decisionState.input.location?.label ?: "共同出发地点",
-                onBack = {
-                    groupDecisionViewModel.clearForExit()
-                    navController.popBackStack()
-                },
             )
         }
         composable(Routes.Results) {

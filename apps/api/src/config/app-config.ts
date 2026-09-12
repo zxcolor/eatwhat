@@ -26,6 +26,8 @@ import {
 import { REGISTERED_PROVIDER_CODES } from "../providers/provider-catalog.js";
 
 export const APP_CONFIG = Symbol("APP_CONFIG");
+// Executable behavior is a build identity, not an operator-editable label.
+export const EXECUTABLE_RECOMMENDATION_RULE_VERSION = "recommendation-rules-v3";
 
 export interface AppConfig {
 	readonly nodeEnv: "development" | "test" | "production";
@@ -69,7 +71,6 @@ export interface AppConfig {
 		readonly ruleFallbackModel: string;
 	};
 	readonly features: {
-		readonly groupRecommendationsEnabled: boolean;
 		readonly accountsEnabled: boolean;
 		readonly favoritesEnabled: boolean;
 		readonly historyEnabled: boolean;
@@ -469,7 +470,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 			),
 		}),
 		versions: Object.freeze({
-			rule: env.RULE_VERSION?.trim() || "recommendation-rules-v2",
+			rule: EXECUTABLE_RECOMMENDATION_RULE_VERSION,
 			prompt: readRegisteredVersion(
 				env.PROMPT_VERSION,
 				REGISTERED_INTENT_PROMPT_VERSIONS[0],
@@ -479,10 +480,6 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 			ruleFallbackModel: "rule-fallback-v1",
 		}),
 		features: Object.freeze({
-			groupRecommendationsEnabled: readBoolean(
-				env.GROUP_RECOMMENDATIONS_ENABLED,
-				"GROUP_RECOMMENDATIONS_ENABLED",
-			),
 			accountsEnabled,
 			favoritesEnabled: readBoolean(env.FAVORITES_ENABLED, "FAVORITES_ENABLED"),
 			historyEnabled: readBoolean(env.HISTORY_ENABLED, "HISTORY_ENABLED"),

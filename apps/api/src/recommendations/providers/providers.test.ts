@@ -193,7 +193,10 @@ describe("intent providers", () => {
 			qwen,
 			new RuleIntentProvider(),
 		);
-		const result = await coordinator.resolve(recommendationContext);
+		const result = await coordinator.resolve({
+			...recommendationContext,
+			preferredCuisines: [],
+		});
 		expect(result.profile.provider).toBe("RULE_FALLBACK");
 		expect(result.fallbackUsed).toBe(true);
 		expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -240,7 +243,7 @@ describe("intent providers", () => {
 				...recommendationContext,
 				target: "COFFEE",
 			}),
-			expectedFirstTerm: "咖啡店",
+			expectedFirstTerm: "面食",
 		},
 		{
 			name: "user-reported weather",
@@ -264,6 +267,9 @@ describe("intent providers", () => {
 
 		expect(result.profile.provider).toBe("RULE_FALLBACK");
 		expect(result.profile.mealTypes[0]).toBe(entry.expectedFirstTerm);
+		expect(plan.queryTerms[0]).toBe(plan.preferredTerm);
+		if (entry.context.target === "COFFEE")
+			expect(plan.queryTerms[0]).toBe("咖啡店");
 		expect(result.fallbackUsed).toBe(false);
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
@@ -614,6 +620,113 @@ describe("place providers", () => {
 		await provider.search(gcjContext, queryPlan(gcjContext));
 		expect(fetchMock).toHaveBeenCalledOnce();
 	});
+
+	it.each(["LIVE_DISPLAY_ONLY", "LICENSED_ENRICHMENT"] as const)(
+		"keeps provider distance precision until the %s radius filter has run",
+		async (dataRightsMode) => {
+			const request = RecommendationContextSchema.parse({
+				...recommendationContext,
+				location: { latitude: 0, longitude: 0, crs: "GCJ02" },
+			});
+			const fetchMock = vi.fn(
+				async () =>
+					new Response(
+						JSON.stringify({
+							status: "1",
+							infocode: "10000",
+							pois: ["1500.4", "1500", "1499.9"].map((distance, index) => ({
+								id: `radius-${index}`,
+								name: `合成边界餐厅${index}`,
+								location: "0,0",
+								distance,
+								type: "餐饮服务;中餐厅",
+								business: { cost: "20", opentime_today: "全天" },
+							})),
+						}),
+						{ status: 200 },
+					),
+			);
+			const provider = new AmapPlaceProvider(
+				loadAppConfig({
+					NODE_ENV: "test",
+					AMAP_ENABLED: "true",
+					AMAP_WEB_SERVICE_KEY: "synthetic-test-key",
+				}),
+				fetchMock as typeof fetch,
+			);
+			const candidates = await provider.search(request, queryPlan(request));
+			expect(candidates.map((candidate) => candidate.distanceMeters)).toEqual([
+				1500.4, 1500, 1499.9,
+			]);
+			const results = rankCandidates({
+				context: request,
+				intent: buildRuleIntent(request),
+				candidates,
+				dataRightsMode,
+			});
+			expect(results.map((result) => result.providerPlaceId)).toEqual([
+				"radius-1",
+				"radius-2",
+			]);
+			expect(results.every((result) => result.distanceMeters === 1500)).toBe(
+				true,
+			);
+		},
+	);
+
+	it.each([undefined, "0", "100"])(
+		"keeps an independently calculated outside distance outside when supplied distance is %s",
+		async (suppliedDistance) => {
+			const request = RecommendationContextSchema.parse({
+				...recommendationContext,
+				location: { latitude: 0, longitude: 0, crs: "GCJ02" },
+			});
+			const fetchMock = vi.fn(
+				async () =>
+					new Response(
+						JSON.stringify({
+							status: "1",
+							infocode: "10000",
+							pois: [1500.4, 1499.6].map((distance, index) => ({
+								id: `calculated-${index}`,
+								name: `合成计算半径餐厅${index}`,
+								location: `0,${(distance / 6371000) * (180 / Math.PI)}`,
+								distance: suppliedDistance,
+								type: "餐饮服务;中餐厅",
+								business: { cost: "20", opentime_today: "全天" },
+							})),
+						}),
+						{ status: 200 },
+					),
+			);
+			const provider = new AmapPlaceProvider(
+				loadAppConfig({
+					NODE_ENV: "test",
+					AMAP_ENABLED: "true",
+					AMAP_WEB_SERVICE_KEY: "synthetic-test-key",
+				}),
+				fetchMock as typeof fetch,
+			);
+			const candidates = await provider.search(request, queryPlan(request));
+			expect(candidates[0]?.distanceMeters).toBeGreaterThan(1500);
+			expect(candidates[1]?.distanceMeters).toBeLessThan(1500);
+			for (const dataRightsMode of [
+				"LIVE_DISPLAY_ONLY",
+				"LICENSED_ENRICHMENT",
+			] as const) {
+				const results = rankCandidates({
+					context: request,
+					intent: buildRuleIntent(request),
+					candidates,
+					dataRightsMode,
+				});
+				expect(results.map((result) => result.providerPlaceId)).toEqual([
+					"calculated-1",
+				]);
+				expect(results[0]?.distanceMeters).toBe(1500);
+			}
+		},
+	);
 
 	it("carries mixed opening uncertainty through the live engine without removing unknown facts", async () => {
 		const context = RecommendationContextSchema.parse({
@@ -1152,6 +1265,7 @@ describe("place providers", () => {
 
 	it("cancels the response reader after an unexpected body read failure", async () => {
 		const cancel = vi.fn(async () => undefined);
+		const releaseLock = vi.fn();
 		const response = {
 			ok: true,
 			headers: new Headers(),
@@ -1161,6 +1275,7 @@ describe("place providers", () => {
 						throw new Error("private upstream stream failure");
 					},
 					cancel,
+					releaseLock,
 				}),
 			},
 		} as unknown as Response;
@@ -1177,6 +1292,7 @@ describe("place providers", () => {
 			provider.search(recommendationContext, queryPlan()),
 		).rejects.toMatchObject({ reason: "INVALID_RESPONSE" });
 		expect(cancel).toHaveBeenCalledOnce();
+		expect(releaseLock).toHaveBeenCalledOnce();
 	});
 
 	it("discards network error details that could contain the request URL", async () => {
