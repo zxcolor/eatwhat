@@ -43,6 +43,94 @@ function enabledConfig(): AdminProcessConfig {
 }
 
 describe("administrator HTTP guards", () => {
+	it("reclaims a new short-lived bucket before the remaining administrator long window expires", () => {
+		const clock = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+		try {
+			let windowMs = 60_000;
+			const guard = new AdminRateLimitGuard(
+				{
+					getAllAndOverride: () => ({ maximum: 1, windowMs }),
+				} as unknown as Reflector,
+				{
+					currentHash: (_domain: string, address: string) => ({
+						value: Buffer.from(address).toString("hex").padEnd(64, "0"),
+						keyVersion: "v1",
+					}),
+				} as unknown as AdminCrypto,
+			);
+			const request = (ip: string, duration: number) => {
+				windowMs = duration;
+				return guard.canActivate(executionContext({ headers: {}, ip }));
+			};
+			for (let index = 0; index < 5_000; index += 1) {
+				request(
+					`2001:db8::${index.toString(16)}`,
+					index < 2 ? 60_000 : 600_000,
+				);
+			}
+			clock.mockReturnValue(1_060_000);
+			expect(request("2001:db8::fffd", 600_000)).toBe(true);
+			expect(request("2001:db8::fffe", 60_000)).toBe(true);
+			clock.mockReturnValue(1_120_000);
+			expect(request("2001:db8::ffff", 600_000)).toBe(true);
+			expect(() => request("2001:db8::2", 600_000)).toThrow(
+				expect.objectContaining({ status: 429 }),
+			);
+		} finally {
+			clock.mockRestore();
+		}
+	});
+
+	it("bounds distinct IPs without letting newcomers erase an administrator rate limit", () => {
+		const clock = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+		try {
+			const reflector = {
+				getAllAndOverride: () => ({ maximum: 1, windowMs: 600_000 }),
+			} as unknown as Reflector;
+			const crypto = {
+				currentHash: (_domain: string, address: string) => ({
+					value: Buffer.from(address).toString("hex").padEnd(64, "0"),
+					keyVersion: "v1",
+				}),
+			} as unknown as AdminCrypto;
+			const guard = new AdminRateLimitGuard(reflector, crypto);
+			for (let index = 0; index < 5_000; index += 1) {
+				guard.canActivate(
+					executionContext({
+						headers: {},
+						ip: `2001:db8::${index.toString(16)}`,
+					}),
+				);
+			}
+			const setHeader = vi.fn();
+			const newcomer = executionContext(
+				{ headers: {}, ip: "2001:db8::ffff" },
+				setHeader,
+			);
+			expect(() => guard.canActivate(newcomer)).toThrow(
+				expect.objectContaining({ status: 429 }),
+			);
+			expect(setHeader).toHaveBeenCalledWith("Retry-After", "600");
+			expect(() =>
+				guard.canActivate(
+					executionContext({
+						headers: {},
+						ip: "2001:db8::0",
+					}),
+				),
+			).toThrow(expect.objectContaining({ status: 429 }));
+			const buckets = (guard as unknown as { buckets: Map<string, unknown> })
+				.buckets;
+			expect(buckets.size).toBe(5_000);
+
+			clock.mockReturnValue(1_600_000);
+			expect(guard.canActivate(newcomer)).toBe(true);
+			expect(buckets.size).toBe(1);
+		} finally {
+			clock.mockRestore();
+		}
+	});
+
 	it("strictly rejects malformed and ordinary-user bearer values", async () => {
 		const contexts = {
 			sessionProofCandidates: vi.fn(() => [PROOF]),

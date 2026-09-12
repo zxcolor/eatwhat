@@ -19,6 +19,7 @@ interface Bucket {
 }
 
 const RATE_LIMIT_POLICY = Symbol("RATE_LIMIT_POLICY");
+const MAX_RATE_BUCKETS = 20_000;
 
 export const RateLimit = (maximum: number, windowMs: number) =>
 	SetMetadata(RATE_LIMIT_POLICY, Object.freeze({ maximum, windowMs }));
@@ -27,6 +28,8 @@ export const RateLimit = (maximum: number, windowMs: number) =>
 export class IpRateLimitGuard implements CanActivate {
 	private readonly buckets = new Map<string, Bucket>();
 	private lastCleanupAt = 0;
+	private capacityRetryAt = 0;
+	private capacityScanAvailableAt = 0;
 
 	constructor(private readonly reflector: Reflector) {}
 
@@ -55,26 +58,60 @@ export class IpRateLimitGuard implements CanActivate {
 		const current = this.buckets.get(key);
 
 		if (current === undefined || current.resetAt <= now) {
-			this.buckets.set(key, { count: 1, resetAt: now + policy.windowMs });
+			if (current === undefined) {
+				const retryAt = this.capacityLimit(now);
+				if (retryAt !== null) this.reject(response, retryAt, now);
+			}
+			const resetAt = now + policy.windowMs;
+			this.buckets.set(key, { count: 1, resetAt });
+			// Reclaimed space may receive a shorter policy than the remaining
+			// buckets. Its expiry must shorten the cached capacity retry as well.
+			this.capacityRetryAt = Math.min(
+				this.capacityRetryAt,
+				Math.max(resetAt, this.capacityScanAvailableAt),
+			);
 			return true;
 		}
 		if (current.count >= policy.maximum) {
-			const retryAfterSeconds = Math.max(
-				1,
-				Math.ceil((current.resetAt - now) / 1_000),
-			);
-			response.setHeader("Retry-After", String(retryAfterSeconds));
-			throw new HttpException(
-				{
-					code: "RATE_LIMITED",
-					message: "请求过于频繁，请稍后重试",
-					retryAfterSeconds,
-				},
-				HttpStatus.TOO_MANY_REQUESTS,
-			);
+			this.reject(response, current.resetAt, now);
 		}
 		current.count += 1;
 		return true;
+	}
+
+	private reject(
+		response: { setHeader(name: string, value: string): void },
+		resetAt: number,
+		now: number,
+	): never {
+		const retryAfterSeconds = Math.max(1, Math.ceil((resetAt - now) / 1_000));
+		response.setHeader("Retry-After", String(retryAfterSeconds));
+		throw new HttpException(
+			{
+				code: "RATE_LIMITED",
+				message: "请求过于频繁，请稍后重试",
+				retryAfterSeconds,
+			},
+			HttpStatus.TOO_MANY_REQUESTS,
+		);
+	}
+
+	private capacityLimit(now: number): number | null {
+		if (this.buckets.size < MAX_RATE_BUCKETS) return null;
+		if (now >= this.capacityRetryAt) {
+			this.cleanupExpired(now, 0);
+			this.capacityScanAvailableAt = now + 1_000;
+			let firstExpiry = Number.POSITIVE_INFINITY;
+			for (const bucket of this.buckets.values()) {
+				firstExpiry = Math.min(firstExpiry, bucket.resetAt);
+			}
+			// Bound scans under a burst of new addresses, including staggered expiry.
+			this.capacityRetryAt = Number.isFinite(firstExpiry)
+				? Math.max(this.capacityScanAvailableAt, firstExpiry)
+				: this.capacityScanAvailableAt;
+		}
+		// Never evict an active bucket: doing so would reset an existing limit.
+		return this.buckets.size >= MAX_RATE_BUCKETS ? this.capacityRetryAt : null;
 	}
 
 	private cleanupExpired(now: number, windowMs: number): void {
@@ -82,16 +119,6 @@ export class IpRateLimitGuard implements CanActivate {
 		this.lastCleanupAt = now;
 		for (const [key, bucket] of this.buckets) {
 			if (bucket.resetAt <= now) this.buckets.delete(key);
-		}
-		// A hard cap prevents unbounded memory growth if a future trusted proxy
-		// configuration exposes many distinct client IPs.
-		if (this.buckets.size > 20_000) {
-			for (const key of [...this.buckets.keys()].slice(
-				0,
-				this.buckets.size - 20_000,
-			)) {
-				this.buckets.delete(key);
-			}
 		}
 	}
 }
