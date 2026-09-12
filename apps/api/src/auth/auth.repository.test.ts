@@ -424,6 +424,84 @@ const bindingOAuthProof: OAuthProof = {
 };
 
 describe("PostgresAuthRepository transaction workflows", () => {
+	it.each([
+		{
+			name: "reuses the same account's email binding challenge",
+			targetUserId: "20000000-0000-4000-8000-000000000001",
+			expectedKind: "EXISTING",
+		},
+		{
+			name: "creates a separate email binding challenge after switching accounts on the same device",
+			targetUserId: "20000000-0000-4000-8000-000000000002",
+			expectedKind: "CREATED",
+		},
+	])("$name", async ({ targetUserId, expectedKind }) => {
+		const originalOwner = "20000000-0000-4000-8000-000000000001";
+		const originalCreatedAt = new Date("2026-08-21T04:00:00.000Z");
+		const now = new Date(originalCreatedAt.getTime() + 15_000);
+		const draft: OtpChallengeDraft = {
+			...otpDraft(now),
+			channel: "EMAIL",
+			purpose: "BIND",
+			targetUserId,
+			operationTargetHash: "a".repeat(64),
+			verificationMethod: "LOCAL_HASH",
+			codeHash: { value: "synthetic-email-code-hash", keyVersion: "v1" },
+			maskedDestination: "a****@example.invalid",
+		};
+		let insertedTarget: unknown;
+		const database = new ScriptedDatabase((text, values) => {
+			if (text.includes("pg_advisory_xact_lock")) return empty();
+			if (text.includes("SELECT id, masked_destination, expires_at")) {
+				// The same destination, purpose and installation are insufficient:
+				// a BIND proof is usable only by the account that requested it.
+				expect(text).toMatch(/target_user_id IS NOT DISTINCT FROM \$6/u);
+				expect(values[5]).toBe(targetUserId);
+				return values[5] === originalOwner
+					? result({
+							id: "10000000-0000-4000-8000-000000000099",
+							masked_destination: draft.maskedDestination,
+							created_at: originalCreatedAt,
+							expires_at: new Date(originalCreatedAt.getTime() + 300_000),
+						})
+					: empty();
+			}
+			if (text.includes("destination_day_count")) {
+				return result({
+					destination_hour_count: 1,
+					destination_day_count: 1,
+					device_count: 1,
+					ip_count: 1,
+					pending_count: 0,
+					destination_hour_oldest: originalCreatedAt,
+					destination_day_oldest: originalCreatedAt,
+					device_oldest: originalCreatedAt,
+					ip_oldest: originalCreatedAt,
+					pending_oldest: null,
+				});
+			}
+			if (text.includes("INSERT INTO public.otp_challenges")) {
+				insertedTarget = values[9];
+				return empty(1);
+			}
+			throw new Error("unexpected email binding challenge SQL");
+		});
+		const repository = new PostgresAuthRepository(
+			database as unknown as DatabasePool,
+		);
+
+		const outcome = await repository.createOtpChallenge(draft);
+		expect(outcome.kind).toBe(expectedKind);
+		if (expectedKind === "EXISTING") {
+			expect(outcome).toMatchObject({
+				challengeId: "10000000-0000-4000-8000-000000000099",
+			});
+			expect(insertedTarget).toBeUndefined();
+		} else {
+			expect(insertedTarget).toBe(targetUserId);
+		}
+	});
+
 	it("enforces the ten-per-24-hour OTP recipient ceiling with an accurate retry", async () => {
 		const now = new Date("2026-08-21T04:00:00.000Z");
 		const database = new ScriptedDatabase((text, values) => {
