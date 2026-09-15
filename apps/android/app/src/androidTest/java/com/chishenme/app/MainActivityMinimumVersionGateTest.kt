@@ -115,7 +115,7 @@ class MainActivityMinimumVersionGateTest {
         private const val OPT_IN_ARGUMENT = "minimumVersionGate"
 
         private val REMOTE_PRODUCT_TEXTS = listOf(
-            "帮我决定",
+            "现在决定",
             "搜索附近餐厅 / 菜系 / 食物",
             "账号与安全",
             "收藏与账号记录",
