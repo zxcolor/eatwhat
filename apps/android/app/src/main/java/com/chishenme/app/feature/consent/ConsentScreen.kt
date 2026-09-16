@@ -47,7 +47,7 @@ import com.chishenme.app.ui.AppPrimaryButton
 import com.chishenme.app.ui.AppStatusBanner
 import com.chishenme.app.ui.AppTone
 
-private enum class ConsentDocument { PRIVACY, TERMS, SDK, AI }
+internal enum class ConsentDocument { PRIVACY, TERMS, SDK, AI }
 
 @Composable
 fun ConsentScreen(
@@ -212,7 +212,7 @@ private fun ConsentFeature(
 }
 
 @Composable
-private fun DocumentDialog(document: ConsentDocument, onDismiss: () -> Unit) {
+internal fun DocumentDialog(document: ConsentDocument, onDismiss: () -> Unit) {
     val title: String
     val content: String
     when (document) {

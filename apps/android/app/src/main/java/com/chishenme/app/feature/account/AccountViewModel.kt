@@ -49,6 +49,8 @@ import kotlinx.coroutines.launch
 
 enum class AccountStatus { CHECKING, GUEST, SIGNED_IN }
 enum class AccountAuthStep { CHOOSE, OTP_LOGIN, PHONE_REGISTER, WECHAT_LOGIN, QQ_LOGIN, BIND_EMAIL, BIND_WECHAT, BIND_QQ }
+enum class AccountEntryMode { LOGIN, REGISTER }
+enum class AccountRegistrationStep { PHONE, WECHAT, SUCCESS }
 
 data class PendingOtpChallenge(
     val type: AuthIdentityType,
@@ -64,6 +66,7 @@ data class AccountUiState(
     val busy: Boolean = false,
     val challenge: PendingOtpChallenge? = null,
     val identities: List<AuthIdentityBinding> = emptyList(),
+    val identitiesLoaded: Boolean = false,
     val sessions: List<AuthSessionSummary> = emptyList(),
     val message: String? = null,
     val export: AccountExportStatusResponse? = null,
@@ -73,6 +76,9 @@ data class AccountUiState(
     val wechatClientConfigured: Boolean = false,
     val qqClientConfigured: Boolean = false,
     val authStep: AccountAuthStep = AccountAuthStep.CHOOSE,
+    /** Presentation-only guidance: a successful phone proof already creates a real session. */
+    val entryMode: AccountEntryMode = AccountEntryMode.LOGIN,
+    val registrationStep: AccountRegistrationStep = AccountRegistrationStep.PHONE,
     val localSessionMaterialPresent: Boolean = false,
     /** Input drafts stay in process memory and are never copied to SavedStateHandle or disk. */
     val otpInputType: AuthIdentityType? = null,
@@ -264,6 +270,8 @@ class AccountViewModel @Inject constructor(
                     busy = false,
                     challenge = null,
                     authStep = AccountAuthStep.CHOOSE,
+                    entryMode = AccountEntryMode.LOGIN,
+                    registrationStep = AccountRegistrationStep.PHONE,
                     otpInputType = null,
                     otpTargetDraft = "",
                     otpCodeDraft = "",
@@ -271,6 +279,7 @@ class AccountViewModel @Inject constructor(
                     otpSecondsUntilExpiry = 0,
                     otpCanResend = false,
                     identities = emptyList(),
+                    identitiesLoaded = false,
                     sessions = emptyList(),
                 )
             }
@@ -326,6 +335,8 @@ class AccountViewModel @Inject constructor(
                 busy = false,
                 challenge = null,
                 authStep = AccountAuthStep.CHOOSE,
+                entryMode = AccountEntryMode.LOGIN,
+                registrationStep = AccountRegistrationStep.PHONE,
                 otpInputType = null,
                 otpTargetDraft = "",
                 otpCodeDraft = "",
@@ -333,6 +344,7 @@ class AccountViewModel @Inject constructor(
                 otpSecondsUntilExpiry = 0,
                 otpCanResend = false,
                 identities = emptyList(),
+                identitiesLoaded = false,
                 sessions = emptyList(),
             )
         }
@@ -384,7 +396,14 @@ class AccountViewModel @Inject constructor(
                 otpSecondsUntilResend = if (preserveExternalAuthorization) it.otpSecondsUntilResend else 0,
                 otpSecondsUntilExpiry = if (preserveExternalAuthorization) it.otpSecondsUntilExpiry else 0,
                 otpCanResend = preserveExternalAuthorization && it.otpCanResend,
+                entryMode = if (preserveExternalAuthorization) it.entryMode else AccountEntryMode.LOGIN,
+                registrationStep = if (preserveExternalAuthorization) {
+                    it.registrationStep
+                } else {
+                    AccountRegistrationStep.PHONE
+                },
                 identities = emptyList(),
+                identitiesLoaded = false,
                 sessions = emptyList(),
             )
         }
@@ -444,7 +463,9 @@ class AccountViewModel @Inject constructor(
                 it.copy(status = AccountStatus.CHECKING, busy = true, message = null)
             }
             cancelExportJob()
-            updateRemoteState(generation) { it.copy(identities = emptyList(), sessions = emptyList()) }
+            updateRemoteState(generation) {
+                it.copy(identities = emptyList(), identitiesLoaded = false, sessions = emptyList())
+            }
             when (val outcome = repository.restoreSession()) {
                 is AuthOutcome.Success -> {
                     updateRemoteState(generation) {
@@ -466,7 +487,13 @@ class AccountViewModel @Inject constructor(
                 }
                 is AuthOutcome.Failure -> {
                     updateRemoteState(generation) {
-                        it.copy(status = AccountStatus.GUEST, busy = false, message = outcome.message)
+                        it.copy(
+                            status = AccountStatus.GUEST,
+                            busy = false,
+                            entryMode = AccountEntryMode.LOGIN,
+                            registrationStep = AccountRegistrationStep.PHONE,
+                            message = outcome.message,
+                        )
                     }
                     if (remoteAccessIsCurrent(generation)) {
                         reconcileOtpChallengeForStatus(AccountStatus.GUEST)
@@ -495,6 +522,8 @@ class AccountViewModel @Inject constructor(
                 busy = true,
                 challenge = null,
                 authStep = AccountAuthStep.CHOOSE,
+                entryMode = AccountEntryMode.LOGIN,
+                registrationStep = AccountRegistrationStep.PHONE,
                 otpInputType = null,
                 otpTargetDraft = "",
                 otpCodeDraft = "",
@@ -502,6 +531,7 @@ class AccountViewModel @Inject constructor(
                 otpSecondsUntilExpiry = 0,
                 otpCanResend = false,
                 identities = emptyList(),
+                identitiesLoaded = false,
                 sessions = emptyList(),
                 dataExportEnabled = false,
                 export = null,
@@ -562,6 +592,34 @@ class AccountViewModel @Inject constructor(
                     mutableState.update { it.copy(busy = false) }
                 }
             }
+        }
+    }
+
+    fun showLogin() = selectEntryMode(AccountEntryMode.LOGIN)
+
+    fun showRegistration() = selectEntryMode(AccountEntryMode.REGISTER)
+
+    private fun selectEntryMode(mode: AccountEntryMode) {
+        val current = mutableState.value
+        if (
+            current.status != AccountStatus.GUEST || current.busy ||
+            remoteActionJob?.isCompleted == false || current.entryMode == mode
+        ) return
+        clearChallenge()
+        mutableState.update {
+            it.copy(
+                entryMode = mode,
+                registrationStep = AccountRegistrationStep.PHONE,
+                otpInputType = AuthIdentityType.PHONE,
+                message = null,
+            )
+        }
+    }
+
+    /** Leaving optional guidance never clears or fabricates the authenticated session. */
+    fun finishRegistration() {
+        mutableState.update {
+            it.copy(entryMode = AccountEntryMode.LOGIN, registrationStep = AccountRegistrationStep.PHONE)
         }
     }
 
@@ -755,6 +813,8 @@ class AccountViewModel @Inject constructor(
                 is AuthOutcome.Success -> signedIn(
                     outcome.value,
                     generation,
+                    continueRegistration = challenge.type == AuthIdentityType.PHONE &&
+                        mutableState.value.entryMode == AccountEntryMode.REGISTER,
                     message = if (challenge.type == AuthIdentityType.PHONE) {
                         "手机号验证成功，已登录"
                     } else "登录成功",
@@ -837,7 +897,7 @@ class AccountViewModel @Inject constructor(
     private fun refreshSecurityData(allowCurrentAction: Boolean) {
         if (mutableState.value.status != AccountStatus.SIGNED_IN) return
         launchRemoteAction(allowBusy = allowCurrentAction) { generation ->
-            updateRemoteState(generation) { it.copy(busy = true, message = null) }
+            updateRemoteState(generation) { it.copy(busy = true, identitiesLoaded = false, message = null) }
             val identities = repository.identities()
             if (!remoteAccessIsCurrent(generation)) return@launchRemoteAction
             val sessions = repository.sessions()
@@ -847,9 +907,13 @@ class AccountViewModel @Inject constructor(
                 sessions is AuthOutcome.Failure -> sessions
                 else -> null
             }
+            val authenticationInvalid = listOf(identities, sessions).any {
+                it is AuthOutcome.Failure && it.kind == AuthFailureKind.UNAUTHORIZED
+            }
             updateRemoteState(generation) { current ->
                 current.copy(
                     busy = false,
+                    identitiesLoaded = identities is AuthOutcome.Success && !authenticationInvalid,
                     identities = if (identities is AuthOutcome.Success) {
                         identities.value
                     } else {
@@ -859,6 +923,20 @@ class AccountViewModel @Inject constructor(
                         sessions.value
                     } else {
                         current.sessions
+                    },
+                    entryMode = if (authenticationInvalid) {
+                        AccountEntryMode.LOGIN
+                    } else {
+                        current.entryMode
+                    },
+                    registrationStep = when {
+                        authenticationInvalid -> AccountRegistrationStep.PHONE
+                        current.entryMode == AccountEntryMode.REGISTER &&
+                            current.registrationStep == AccountRegistrationStep.WECHAT &&
+                            identities is AuthOutcome.Success &&
+                            identities.value.any { it.type == AuthIdentityType.WECHAT } ->
+                            AccountRegistrationStep.SUCCESS
+                        else -> current.registrationStep
                     },
                     message = firstFailure?.message,
                 )
@@ -1132,8 +1210,11 @@ class AccountViewModel @Inject constructor(
                 busy = false,
                 exportBusy = false,
                 identities = emptyList(),
+                identitiesLoaded = false,
                 sessions = emptyList(),
                 export = null,
+                entryMode = AccountEntryMode.LOGIN,
+                registrationStep = AccountRegistrationStep.PHONE,
                 message = if (currentSession is AuthOutcome.Success && currentSession.value != null) {
                     "本次请求使用的旧登录状态已失效，请刷新后重试"
                 } else {
@@ -1147,6 +1228,7 @@ class AccountViewModel @Inject constructor(
         @Suppress("UNUSED_PARAMETER") session: LocalAuthSession,
         generation: Long,
         message: String = "登录成功",
+        continueRegistration: Boolean = false,
     ) {
         if (!remoteAccessIsCurrent(generation)) return
         cancelExportJob()
@@ -1159,11 +1241,18 @@ class AccountViewModel @Inject constructor(
                 busy = false,
                 challenge = null,
                 identities = emptyList(),
+                identitiesLoaded = false,
                 sessions = emptyList(),
                 export = null,
                 exportBusy = false,
                 includeBehaviorHistory = true,
                 authStep = AccountAuthStep.CHOOSE,
+                entryMode = if (continueRegistration) AccountEntryMode.REGISTER else AccountEntryMode.LOGIN,
+                registrationStep = if (continueRegistration) {
+                    AccountRegistrationStep.WECHAT
+                } else {
+                    AccountRegistrationStep.PHONE
+                },
                 otpInputType = null,
                 otpTargetDraft = "",
                 otpCodeDraft = "",
@@ -1193,7 +1282,21 @@ class AccountViewModel @Inject constructor(
             )
             when (stateOutcome) {
                 is AuthOutcome.Failure -> updateRemoteState(generation) {
-                    it.copy(busy = false, message = stateOutcome.message)
+                    it.copy(
+                        busy = false,
+                        identitiesLoaded = it.identitiesLoaded && stateOutcome.kind != AuthFailureKind.UNAUTHORIZED,
+                        entryMode = if (stateOutcome.kind == AuthFailureKind.UNAUTHORIZED) {
+                            AccountEntryMode.LOGIN
+                        } else {
+                            it.entryMode
+                        },
+                        registrationStep = if (stateOutcome.kind == AuthFailureKind.UNAUTHORIZED) {
+                            AccountRegistrationStep.PHONE
+                        } else {
+                            it.registrationStep
+                        },
+                        message = stateOutcome.message,
+                    )
                 }
                 is AuthOutcome.Success -> {
                     if (!remoteAccessIsCurrent(generation) || !wechatPurposeIsReady(purpose)) return@launchRemoteAction
@@ -1438,6 +1541,11 @@ class AccountViewModel @Inject constructor(
                                         it.copy(
                                             busy = false,
                                             authStep = AccountAuthStep.CHOOSE,
+                                            registrationStep = if (it.entryMode == AccountEntryMode.REGISTER) {
+                                                AccountRegistrationStep.SUCCESS
+                                            } else {
+                                                it.registrationStep
+                                            },
                                             message = "微信身份已安全绑定",
                                         )
                                     }
@@ -1446,7 +1554,21 @@ class AccountViewModel @Inject constructor(
                                     }
                                 }
                                 is AuthOutcome.Failure -> updateRemoteState(generation) {
-                                    it.copy(busy = false, message = outcome.message)
+                                    it.copy(
+                                        busy = false,
+                                        identitiesLoaded = it.identitiesLoaded && outcome.kind != AuthFailureKind.UNAUTHORIZED,
+                                        entryMode = if (outcome.kind == AuthFailureKind.UNAUTHORIZED) {
+                                            AccountEntryMode.LOGIN
+                                        } else {
+                                            it.entryMode
+                                        },
+                                        registrationStep = if (outcome.kind == AuthFailureKind.UNAUTHORIZED) {
+                                            AccountRegistrationStep.PHONE
+                                        } else {
+                                            it.registrationStep
+                                        },
+                                        message = outcome.message,
+                                    )
                                 }
                                 null -> updateRemoteState(generation) {
                                     it.copy(busy = false, message = "微信授权流程已使用，请重新发起")
