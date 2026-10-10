@@ -121,14 +121,14 @@ class MainActivityAmapLiveFixtureTest {
             enterManualLocation(scenario)
             scrollOverviewToTop()
             captureSyntheticScreenshot("home-overview.png")
-            composeRule.onNodeWithContentDescription("设置").performClick()
+            composeRule.homeSettingsAction().performClick()
             awaitSettingsConfiguration(enabled = false)
             scrollOverviewToTop()
             composeRule.onNodeWithText("设置与透明度").assertIsDisplayed()
             captureSyntheticScreenshot("settings-overview.png")
             composeRule.onNodeWithContentDescription("返回").performClick()
             assertHomePreferenceControls(enabled = false)
-            scrollHomeTo(hasClickAction() and hasText("帮我决定"))
+            scrollHomeTo(hasClickAction() and hasText("现在决定"))
                 .assertIsDisplayed()
                 .performClick()
 
@@ -199,6 +199,7 @@ class MainActivityAmapLiveFixtureTest {
         radiusDefaultsEnabled = true
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             enterManualLocation(scenario)
+            composeRule.openHomeConditions()
             scrollHomeTo(hasText("精细匹配") and hasClickAction()).performClick()
             composeRule.onNode(hasText("精细匹配") and hasClickAction()).assertIsSelected()
             radiusOption("750 m").assertIsSelected()
@@ -210,7 +211,8 @@ class MainActivityAmapLiveFixtureTest {
             scrollHomeTo(hasText("工作日午餐") and hasClickAction()).performClick()
             composeRule.onNode(hasText("工作日午餐") and hasClickAction()).assertIsSelected()
             val error = "当前服务最远支持 1250 米，你选择了 1500 米。请调整最远距离后重试。"
-            scrollHomeTo(hasText("帮我决定") and hasClickAction()).performClick()
+            composeRule.closeHomePanel()
+            scrollHomeTo(hasText("现在决定") and hasClickAction()).performClick()
             val submittedRadii = requests.filter { it.path == "/v1/recommendations" }.map {
                 Json.parseToJsonElement(it.body).jsonObject.getValue("radiusMeters").jsonPrimitive.content
             }
@@ -221,12 +223,14 @@ class MainActivityAmapLiveFixtureTest {
             )
             scrollHomeTo(hasText(error)).assertIsDisplayed()
             captureSyntheticScreenshot("single-radius-over-limit.png")
+            composeRule.openHomeConditions()
             scrollHomeTo(hasText("精细匹配") and hasClickAction()).performClick()
             radiusOption("1.5 km").assertIsSelected()
             scrollHomeTo(hasText("将最远距离改为 750 米") and hasClickAction()).performClick()
             radiusOption("750 m").assertIsSelected()
             captureSyntheticScreenshot("single-radius-explicit-correction.png")
-            scrollHomeTo(hasText("帮我决定") and hasClickAction()).performClick()
+            composeRule.closeHomePanel()
+            scrollHomeTo(hasText("现在决定") and hasClickAction()).performClick()
 
             awaitResultsReady(scenario)
             scrollResultsTo(RESTAURANT_NAME)
@@ -248,7 +252,7 @@ class MainActivityAmapLiveFixtureTest {
         preferenceRankingEnabled = true
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             enterManualLocation(scenario)
-            composeRule.onNodeWithContentDescription("设置").performClick()
+            composeRule.homeSettingsAction().performClick()
             awaitText("设置与透明度")
             awaitSettingsConfiguration(enabled = true)
             scrollSettingsTo("推荐偏好")
@@ -336,6 +340,7 @@ class MainActivityAmapLiveFixtureTest {
     }
 
     private fun assertHomePreferenceControls(enabled: Boolean) {
+        composeRule.openHomeConditions()
         scrollHomeTo(hasText("精细匹配") and hasClickAction()).performClick()
         for (title in listOf("人均预算", "一共可用多久", "交通方式")) {
             scrollHomeTo(hasText(title)).assertIsDisplayed()
@@ -355,6 +360,7 @@ class MainActivityAmapLiveFixtureTest {
         val summary = "人均 25元内 · 60 分钟 · 只步行" + if (enabled) " · 平衡选择" else ""
         scrollHomeTo(hasText(summary)).assertIsDisplayed()
         captureSyntheticScreenshot(if (enabled) "licensed-home-summary.png" else "live-home-summary.png")
+        composeRule.closeHomePanel()
     }
 
     private fun scrollSettingsTo(text: String): SemanticsNodeInteraction =
@@ -369,7 +375,7 @@ class MainActivityAmapLiveFixtureTest {
 
     private fun enterManualLocation(scenario: ActivityScenario<MainActivity>) {
         composeRule.waitUntil(UI_TIMEOUT_MS) {
-            hasUiText("同意并继续") || hasUiText("吃什么")
+            hasUiText("同意并继续") || hasUiText("现在决定")
         }
         if (hasUiText("同意并继续")) {
             assertEquals("隐私同意前不得访问配置或地点服务", 0, server.requestCount)
@@ -383,7 +389,7 @@ class MainActivityAmapLiveFixtureTest {
             decisionViewModel = ViewModelProvider(activity)[DecisionViewModel::class.java]
         }
         composeRule.waitUntil(UI_TIMEOUT_MS) {
-            requests.any { it.path == "/v1/config" } && hasUiText("吃什么") &&
+            requests.any { it.path == "/v1/config" } && hasUiText("现在决定") &&
                 decisionViewModel.uiState.value.remoteFeatureConfig is RemoteFeatureConfigState.Ready
         }
         // The configuration notice can cover even the first scrolled location action
@@ -392,7 +398,7 @@ class MainActivityAmapLiveFixtureTest {
         composeRule.waitUntil(UI_TIMEOUT_MS) {
             !hasUiText("已按当前服务建议将最远距离调整为 750 米。")
         }
-        scrollHomeTo(hasText("手动选择") and hasClickAction())
+        composeRule.homeManualLocationAction()
             .assertIsDisplayed()
             .performClick()
         composeRule.onNodeWithText("快捷地点（始终可用）").performScrollTo()
@@ -413,6 +419,7 @@ class MainActivityAmapLiveFixtureTest {
     }
 
     private fun scrollOverviewToTop() {
+        if (hasUiText("现在决定")) return
         composeRule.onNode(
             hasScrollToIndexAction() and !hasAnyAncestor(hasScrollToIndexAction()),
         ).performScrollToIndex(0)

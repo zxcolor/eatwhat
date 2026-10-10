@@ -49,7 +49,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -71,7 +70,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
@@ -83,7 +82,6 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -117,7 +115,6 @@ import com.chishenme.app.location.LocationAccess
 import com.chishenme.app.location.LocationSettingsTarget
 import com.chishenme.app.ui.AppIcons
 import com.chishenme.app.ui.AppSnackbarHost
-import com.chishenme.app.ui.AppTopBar
 import com.chishenme.app.location.LocationUiState
 import com.chishenme.app.location.presentation
 import kotlin.math.roundToInt
@@ -256,127 +253,83 @@ fun HomeScreen(
         }
     }
 
+    var locationPanelOpen by rememberSaveable { mutableStateOf(false) }
+    var conditionsPanelOpen by rememberSaveable { mutableStateOf(false) }
+
     HomeSurfaceTheme {
         val homeColors = currentHomeVisualColors()
-        val compactHeight = LocalConfiguration.current.screenHeightDp < 600
-        val decisionActions: @Composable () -> Unit = {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                (state.formError ?: state.radiusError)?.let { error ->
-                    Surface(
-                        modifier = Modifier.semantics {
-                            liveRegion = LiveRegionMode.Assertive
-                            stateDescription = error
-                        },
-                        color = MaterialTheme.colorScheme.errorContainer,
-                        shape = MaterialTheme.shapes.small,
-                    ) {
-                        Text(
-                            error,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
-                        )
-                    }
-                }
-                if (state.radiusError != null) {
-                    val suggestedRadius = RecommendationRadiusPolicy.automaticRadius(
-                        state.input.mealPeriod,
-                        recommendationDefaults,
-                    )
-                    TextButton(onClick = { viewModel.setRadius(suggestedRadius) }) {
-                        Text("将最远距离改为 $suggestedRadius 米")
-                    }
-                }
-                HomePrimaryAction(
-                    enabled = recommendationEnabled,
-                    onClick = {
-                        if (viewModel.recommend()) onRecommendationStarted()
+        val serviceMessage = remoteServiceStatusMessage(state)
+        val selectionUnavailable = state.input.mealPeriod !in availableMealPeriods.map { it.first }
+        val formNotice: @Composable () -> Unit = {
+            (state.formError ?: state.radiusError)?.let { error ->
+                Surface(
+                    modifier = Modifier.semantics {
+                        liveRegion = LiveRegionMode.Assertive
+                        stateDescription = error
                     },
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    shape = MaterialTheme.shapes.small,
+                ) {
+                    Text(
+                        error,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                    )
+                }
+            }
+            if (state.radiusError != null) {
+                val suggestedRadius = RecommendationRadiusPolicy.automaticRadius(
+                    state.input.mealPeriod,
+                    recommendationDefaults,
                 )
-                Text(
-                    "最多 3 个候选 · 每个选择都有可核对理由",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.Center,
-                )
+                TextButton(onClick = { viewModel.setRadius(suggestedRadius) }) {
+                    Text("将最远距离改为 $suggestedRadius 米")
+                }
             }
         }
-        Scaffold(
-            containerColor = homeColors.page,
-            snackbarHost = { AppSnackbarHost(snackbarHostState) },
-            topBar = {
-                AppTopBar(
-                    title = "吃什么",
-                    subtitle = "附近美食，少一点纠结",
-                    actions = {
-                        Surface(
-                            modifier = Modifier.padding(end = 10.dp).size(48.dp),
-                            color = homeColors.accentSoft,
-                            shape = MaterialTheme.shapes.medium,
-                        ) {
-                            IconButton(onClick = onOpenSettings) {
-                                Icon(
-                                    Icons.Rounded.Settings,
-                                    contentDescription = "设置",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(22.dp),
-                                )
-                            }
-                        }
-                    },
-                )
-            },
-            bottomBar = {
-                if (!compactHeight) Surface(color = homeColors.card, shadowElevation = 5.dp) {
-                    Box(
-                        modifier = Modifier.fillMaxWidth().navigationBarsPadding()
-                            .padding(horizontal = HomeDimens.ScreenHorizontal, vertical = 12.dp),
-                    ) {
-                        decisionActions()
-                    }
-                }
-            },
-        ) { contentPadding ->
-            LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(contentPadding),
-                contentPadding = PaddingValues(
-                    horizontal = HomeDimens.ScreenHorizontal,
-                    vertical = HomeDimens.SectionGap,
+        val locationControls: @Composable () -> Unit = {
+            LocationCard(
+                location = state.input.location,
+                locationState = state.locationState,
+                offerPrecisionUpgrade = shouldOfferPrecisionUpgrade(
+                    coarseGranted = context.hasCoarseLocationPermission(),
+                    fineGranted = context.hasFineLocationPermission(),
                 ),
-                verticalArrangement = Arrangement.spacedBy(HomeDimens.SectionGap),
-            ) {
-                item { HomeHeroCard() }
-            remoteServiceStatusMessage(state)?.let { message ->
-                item {
-                    RemoteServiceStatusCard(
-                        message = message,
-                        onReconnect = onReconnectService,
-                    )
-                }
-            }
-            item {
-                LocationCard(
-                    location = state.input.location,
-                    locationState = state.locationState,
-                    offerPrecisionUpgrade = shouldOfferPrecisionUpgrade(
-                        coarseGranted = context.hasCoarseLocationPermission(),
-                        fineGranted = context.hasFineLocationPermission(),
-                    ),
-                    precisionUpgradeRequiresSettings = precisionUpgradeRequiresSettings,
-                    isPrecisionRequestInFlight =
-                        pendingPermissionRequest == LocationPermissionRequest.PRECISION_UPGRADE,
-                    onLocate = {
-                        if (context.hasCoarseLocationPermission()) {
-                            viewModel.locate()
-                        } else {
-                            pendingPermissionRequest = LocationPermissionRequest.INITIAL_LOCATION
-                            viewModel.onLocationPermissionRequestStarted()
-                            // Android 12+ requires COARSE and FINE to be requested together so
-                            // the user can intentionally choose approximate-only access.
+                precisionUpgradeRequiresSettings = precisionUpgradeRequiresSettings,
+                isPrecisionRequestInFlight =
+                    pendingPermissionRequest == LocationPermissionRequest.PRECISION_UPGRADE,
+                onLocate = {
+                    if (context.hasCoarseLocationPermission()) {
+                        viewModel.locate()
+                    } else {
+                        pendingPermissionRequest = LocationPermissionRequest.INITIAL_LOCATION
+                        viewModel.onLocationPermissionRequestStarted()
+                        // Android 12+ requires COARSE and FINE to be requested together so
+                        // the user can intentionally choose approximate-only access.
+                        locationPermissionLauncher.launch(
+                            arrayOf(
+                                Manifest.permission.ACCESS_COARSE_LOCATION,
+                                Manifest.permission.ACCESS_FINE_LOCATION,
+                            ),
+                        )
+                    }
+                },
+                onImproveAccuracy = {
+                    when {
+                        context.hasFineLocationPermission() -> viewModel.locate()
+                        precisionUpgradeRequiresSettings -> {
+                            context.startActivity(
+                                Intent(
+                                    AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                    "package:${context.packageName}".toUri(),
+                                ),
+                            )
+                        }
+                        context.hasCoarseLocationPermission() -> {
+                            pendingPermissionRequest = LocationPermissionRequest.PRECISION_UPGRADE
+                            // Android 12+ requires both permissions in the same request.
+                            // This request is reachable only from the explicit upgrade button.
                             locationPermissionLauncher.launch(
                                 arrayOf(
                                     Manifest.permission.ACCESS_COARSE_LOCATION,
@@ -384,241 +337,265 @@ fun HomeScreen(
                                 ),
                             )
                         }
-                    },
-                    onImproveAccuracy = {
-                        when {
-                            context.hasFineLocationPermission() -> viewModel.locate()
-                            precisionUpgradeRequiresSettings -> {
-                                context.startActivity(
-                                    Intent(
-                                        AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                        "package:${context.packageName}".toUri(),
-                                    ),
+                        else -> {
+                            pendingPermissionRequest = LocationPermissionRequest.INITIAL_LOCATION
+                            viewModel.onLocationPermissionRequestStarted()
+                            locationPermissionLauncher.launch(
+                                arrayOf(
+                                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                                    Manifest.permission.ACCESS_FINE_LOCATION,
+                                ),
+                            )
+                        }
+                    }
+                },
+                onChoose = {
+                    locationPanelOpen = false
+                    viewModel.openLocationChooser()
+                },
+                onOpenLocationSettings = {
+                    context.startActivity(Intent(AndroidSettings.ACTION_LOCATION_SOURCE_SETTINGS))
+                },
+                onOpenAppSettings = {
+                    context.startActivity(
+                        Intent(
+                            AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            "package:${context.packageName}".toUri(),
+                        ),
+                    )
+                },
+            )
+        }
+        Scaffold(
+            containerColor = homeColors.page,
+            snackbarHost = { AppSnackbarHost(snackbarHostState) },
+        ) { padding ->
+            HomeLanding(
+                modifier = Modifier.padding(padding),
+                meal = state.input.mealPeriod,
+                availableMeals = availableMealPeriods.map { it.first }.toSet(),
+                locationLabel = state.input.location?.label,
+                locationDescription = when {
+                    state.locationState is LocationUiState.Locating -> "正在定位"
+                    state.input.location == null -> "尚未选择地点，点击定位或手动选择"
+                    state.input.location.isDemonstration -> "已选演示地点，仅用于本次会话"
+                    state.input.location.isApproximate -> "已选择大致位置"
+                    else -> "已选择本次出发地点"
+                },
+                conditionsDescription = buildString {
+                    append("预算 ")
+                    append(state.input.budgetMaxYuan?.let { "每人 " + it + " 元以内" } ?: "不限")
+                    append("，可用 " + state.input.availableMinutes + " 分钟，")
+                    append(travelLabel(state.input.travelMode))
+                    append("，最远 " + state.input.radiusMeters + " 米")
+                    if (state.input.excludedCuisines.isNotEmpty()) append("，这次不吃 " + state.input.excludedCuisines.joinToString())
+                },
+                decisionEnabled = recommendationEnabled && !selectionUnavailable,
+                showNotice = serviceMessage != null || state.formError != null || state.radiusError != null || selectionUnavailable,
+                onMeal = viewModel::setMealPeriod,
+                onLocation = { locationPanelOpen = true },
+                onConditions = { conditionsPanelOpen = true },
+                onDecide = {
+                    if (viewModel.recommend()) onRecommendationStarted()
+                    else if (state.input.location == null) locationPanelOpen = true
+                },
+                notice = {
+                    serviceMessage?.let { RemoteServiceStatusCard(it, onReconnectService) }
+                    if (selectionUnavailable) {
+                        Text("当前餐段暂未开放，请选择可用餐段或重新连接服务。", color = MaterialTheme.colorScheme.error)
+                    }
+                    formNotice()
+                },
+            )
+        }
+
+        if (locationPanelOpen && !state.locationChooserOpen) {
+            HomeControlPanel("出发地点", onDismiss = { locationPanelOpen = false }) {
+                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp)) { locationControls() }
+            }
+        }
+        if (conditionsPanelOpen) {
+            HomeControlPanel("调整条件", onDismiss = { conditionsPanelOpen = false }) {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize().testTag("home-conditions-list"),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    item {
+                        OutlinedButton(onClick = { conditionsPanelOpen = false; onOpenSettings() }) {
+                            Icon(Icons.Rounded.Settings, contentDescription = "设置", modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("设置与账号")
+                        }
+                    }
+                    item { formNotice() }
+                    item {
+                        HomeCard {
+                            SectionTitle("怎么决定", "极速模式一键给答案，精细模式可调全部条件")
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                ModeButton(
+                                    modifier = Modifier.weight(1f),
+                                    selected = state.input.decisionMode == DecisionMode.QUICK,
+                                    title = "极速决定",
+                                    subtitle = "少操作",
+                                    onClick = { viewModel.setDecisionMode(DecisionMode.QUICK) },
                                 )
-                            }
-                            context.hasCoarseLocationPermission() -> {
-                                pendingPermissionRequest = LocationPermissionRequest.PRECISION_UPGRADE
-                                // Android 12+ requires both permissions in the same request.
-                                // This request is reachable only from the explicit upgrade button.
-                                locationPermissionLauncher.launch(
-                                    arrayOf(
-                                        Manifest.permission.ACCESS_COARSE_LOCATION,
-                                        Manifest.permission.ACCESS_FINE_LOCATION,
-                                    ),
-                                )
-                            }
-                            else -> {
-                                pendingPermissionRequest = LocationPermissionRequest.INITIAL_LOCATION
-                                viewModel.onLocationPermissionRequestStarted()
-                                locationPermissionLauncher.launch(
-                                    arrayOf(
-                                        Manifest.permission.ACCESS_COARSE_LOCATION,
-                                        Manifest.permission.ACCESS_FINE_LOCATION,
-                                    ),
+                                ModeButton(
+                                    modifier = Modifier.weight(1f),
+                                    selected = state.input.decisionMode == DecisionMode.GUIDED,
+                                    title = "精细匹配",
+                                    subtitle = "更可控",
+                                    onClick = { viewModel.setDecisionMode(DecisionMode.GUIDED) },
                                 )
                             }
                         }
-                    },
-                    onChoose = viewModel::openLocationChooser,
-                    onOpenLocationSettings = {
-                        context.startActivity(Intent(AndroidSettings.ACTION_LOCATION_SOURCE_SETTINGS))
-                    },
-                    onOpenAppSettings = {
-                        context.startActivity(
-                            Intent(
-                                AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                                "package:${context.packageName}".toUri(),
-                            ),
-                        )
-                    },
-                )
-            }
-            item {
-                HomeCard {
-                    SectionTitle("怎么决定", "极速模式一键给答案，精细模式可调全部条件")
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        ModeButton(
-                            modifier = Modifier.weight(1f),
-                            selected = state.input.decisionMode == DecisionMode.QUICK,
-                            title = "极速决定",
-                            subtitle = "少操作",
-                            onClick = { viewModel.setDecisionMode(DecisionMode.QUICK) },
-                        )
-                        ModeButton(
-                            modifier = Modifier.weight(1f),
-                            selected = state.input.decisionMode == DecisionMode.GUIDED,
-                            title = "精细匹配",
-                            subtitle = "更可控",
-                            onClick = { viewModel.setDecisionMode(DecisionMode.GUIDED) },
-                        )
                     }
-                }
-            }
 
-            item {
-                OptionSection(
-                    title = "主动场景",
-                    subtitle = "一键套用常用条件；地点和已选菜系保持不变",
-                    options = DecisionScenario.entries.map { scenario ->
-                        scenario to scenarioLabel(scenario)
-                    },
-                    selected = state.activeScenario,
-                    onSelected = viewModel::applyScenario,
-                )
-            }
-
-            if (availableSpecialtyTargets.isNotEmpty() || state.input.target != RecommendationTarget.MEAL) {
-                item {
-                    OptionSection(
-                        title = "想决定什么",
-                        subtitle = if (state.input.target != RecommendationTarget.MEAL &&
-                            availableSpecialtyTargets.none { it.first == state.input.target }
-                        ) {
-                            "已保留${recommendationTargetLabel(state.input.target)}；当前未开放，可重新连接或选择普通用餐。"
-                        } else "专项入口只在当前数据源明确支持时开放",
-                        options = listOf(RecommendationTarget.MEAL to "普通用餐") +
-                            availableSpecialtyTargets,
-                        selected = state.input.target,
-                        onSelected = viewModel::setRecommendationTarget,
-                    )
-                }
-            }
-
-            item {
-                OptionSection(
-                    title = "这一顿",
-                    subtitle = when (state.input.mealPeriod) {
-                        MealPeriod.BREAKFAST -> if (
-                            specialtyCapabilities?.breakfastProfileEnabled == true
-                        ) "已启用早餐专项查询" else "已保留早餐；当前未开放，请选择可用餐段或重新连接。"
-                        MealPeriod.LUNCH -> null
-                        MealPeriod.DINNER -> if (
-                            specialtyCapabilities?.dinnerProfileEnabled == true
-                        ) "已启用晚餐专项查询" else "已保留晚餐；当前未开放，请选择可用餐段或重新连接。"
-                    },
-                    options = availableMealPeriods,
-                    selected = state.input.mealPeriod,
-                    onSelected = viewModel::setMealPeriod,
-                )
-            }
-
-            if (specialtyCapabilities?.userReportedWeatherEnabled == true ||
-                state.input.weatherContext.preference != null
-            ) {
-                item {
-                    OptionSection(
-                        title = "手动体感（可选）",
-                        subtitle = if (specialtyCapabilities?.userReportedWeatherEnabled != true) {
-                            "已保留“${weatherPreferenceLabel(state.input.weatherContext.preference)}”；当前未开放，可重新连接或选择不使用。"
-                        } else "只用你本次主动选择的体感；不读取天气、温度或后台位置",
-                        options = weatherPreferenceOptions(specialtyCapabilities),
-                        selected = state.input.weatherContext.preference,
-                        onSelected = viewModel::setUserReportedWeather,
-                    )
-                }
-            }
-
-            if (state.input.decisionMode == DecisionMode.QUICK) {
-                item {
-                    QuickDecisionSummary(
-                        budgetMaxYuan = state.input.budgetMaxYuan,
-                        availableMinutes = state.input.availableMinutes,
-                        travelMode = state.input.travelMode,
-                        explorationMode = state.input.explorationMode,
-                        showExplorationPreference = softPreferencesEnabled,
-                    )
-                }
-            } else {
-                item {
-                    OptionSection(
-                        title = "人均预算",
-                        options = listOf<Pair<Int?, String>>(
-                            15 to "15 元内",
-                            25 to "25 元内",
-                            40 to "40 元内",
-                            null to "不限",
-                        ),
-                        selected = state.input.budgetMaxYuan,
-                        onSelected = viewModel::setBudget,
-                    )
-                }
-                item {
-                    OptionSection(
-                        title = "一共可用多久",
-                        options = listOf(30, 45, 60, 90).map { it to "$it 分钟" },
-                        selected = state.input.availableMinutes,
-                        onSelected = viewModel::setAvailableMinutes,
-                    )
-                }
-                item {
-                    OptionSection(
-                        title = "交通方式",
-                        options = listOf(
-                            TravelMode.WALK to "步行",
-                            TravelMode.BIKE to "骑行",
-                            TravelMode.TRANSIT to "公交/地铁",
-                        ),
-                        selected = state.input.travelMode,
-                        onSelected = viewModel::setTravelMode,
-                    )
-                }
-                if (softPreferencesEnabled) {
                     item {
                         OptionSection(
-                            title = "探索偏好",
-                            options = listOf(
-                                ExplorationMode.SAFE to "稳妥吃",
-                                ExplorationMode.BALANCED to "平衡",
-                                ExplorationMode.ADVENTUROUS to "换个口味",
-                            ),
-                            selected = state.input.explorationMode,
-                            onSelected = viewModel::setExplorationMode,
-                        )
-                    }
-                }
-                item {
-                    OptionSection(
-                        title = "最远距离",
-                        subtitle = recommendationDefaults?.let {
-                            "当前服务最远支持 ${it.maximumRadiusMeters} 米；保留你主动选择的距离。"
-                        },
-                        options = (
-                            listOf(1_000, 1_500, 3_000, 5_000).filter { it <= maximumRadius } +
-                                listOfNotNull(
-                                    recommendationDefaults?.defaultRadiusMeters,
-                                    recommendationDefaults?.maximumRadiusMeters,
-                                ) + state.input.radiusMeters
-                            ).distinct().sorted().map { radius ->
-                                radius to when {
-                                    radius < 1_000 -> "$radius m"
-                                    radius % 1_000 == 0 -> "${radius / 1_000} km"
-                                    else -> "${radius / 1_000.0} km"
-                                }
+                            title = "主动场景",
+                            subtitle = "一键套用常用条件；地点和已选菜系保持不变",
+                            options = DecisionScenario.entries.map { scenario ->
+                                scenario to scenarioLabel(scenario)
                             },
-                        selected = state.input.radiusMeters,
-                        onSelected = viewModel::setRadius,
-                    )
-                }
-                if (softPreferencesEnabled) {
-                    item {
-                        CuisineSection(
-                            title = "更想吃",
-                            selected = state.input.preferredCuisines,
-                            onToggle = { viewModel.toggleCuisine(it, preferred = true) },
+                            selected = state.activeScenario,
+                            onSelected = viewModel::applyScenario,
                         )
                     }
+
+                    if (availableSpecialtyTargets.isNotEmpty() || state.input.target != RecommendationTarget.MEAL) {
+                        item {
+                            OptionSection(
+                                title = "想决定什么",
+                                subtitle = if (state.input.target != RecommendationTarget.MEAL &&
+                                    availableSpecialtyTargets.none { it.first == state.input.target }
+                                ) {
+                                    "已保留${recommendationTargetLabel(state.input.target)}；当前未开放，可重新连接或选择普通用餐。"
+                                } else "专项入口只在当前数据源明确支持时开放",
+                                options = listOf(RecommendationTarget.MEAL to "普通用餐") +
+                                    availableSpecialtyTargets,
+                                selected = state.input.target,
+                                onSelected = viewModel::setRecommendationTarget,
+                            )
+                        }
+                    }
+
+                    if (specialtyCapabilities?.userReportedWeatherEnabled == true ||
+                        state.input.weatherContext.preference != null
+                    ) {
+                        item {
+                            OptionSection(
+                                title = "手动体感（可选）",
+                                subtitle = if (specialtyCapabilities?.userReportedWeatherEnabled != true) {
+                                    "已保留“${weatherPreferenceLabel(state.input.weatherContext.preference)}”；当前未开放，可重新连接或选择不使用。"
+                                } else "只用你本次主动选择的体感；不读取天气、温度或后台位置",
+                                options = weatherPreferenceOptions(specialtyCapabilities),
+                                selected = state.input.weatherContext.preference,
+                                onSelected = viewModel::setUserReportedWeather,
+                            )
+                        }
+                    }
+
+                    if (state.input.decisionMode == DecisionMode.QUICK) {
+                        item {
+                            QuickDecisionSummary(
+                                budgetMaxYuan = state.input.budgetMaxYuan,
+                                availableMinutes = state.input.availableMinutes,
+                                travelMode = state.input.travelMode,
+                                explorationMode = state.input.explorationMode,
+                                showExplorationPreference = softPreferencesEnabled,
+                            )
+                        }
+                    } else {
+                        item {
+                            OptionSection(
+                                title = "人均预算",
+                                options = listOf<Pair<Int?, String>>(
+                                    15 to "15 元内",
+                                    25 to "25 元内",
+                                    40 to "40 元内",
+                                    null to "不限",
+                                ),
+                                selected = state.input.budgetMaxYuan,
+                                onSelected = viewModel::setBudget,
+                            )
+                        }
+                        item {
+                            OptionSection(
+                                title = "一共可用多久",
+                                options = listOf(30, 45, 60, 90).map { it to "$it 分钟" },
+                                selected = state.input.availableMinutes,
+                                onSelected = viewModel::setAvailableMinutes,
+                            )
+                        }
+                        item {
+                            OptionSection(
+                                title = "交通方式",
+                                options = listOf(
+                                    TravelMode.WALK to "步行",
+                                    TravelMode.BIKE to "骑行",
+                                    TravelMode.TRANSIT to "公交/地铁",
+                                ),
+                                selected = state.input.travelMode,
+                                onSelected = viewModel::setTravelMode,
+                            )
+                        }
+                        if (softPreferencesEnabled) {
+                            item {
+                                OptionSection(
+                                    title = "探索偏好",
+                                    options = listOf(
+                                        ExplorationMode.SAFE to "稳妥吃",
+                                        ExplorationMode.BALANCED to "平衡",
+                                        ExplorationMode.ADVENTUROUS to "换个口味",
+                                    ),
+                                    selected = state.input.explorationMode,
+                                    onSelected = viewModel::setExplorationMode,
+                                )
+                            }
+                        }
+                        item {
+                            OptionSection(
+                                title = "最远距离",
+                                subtitle = recommendationDefaults?.let {
+                                    "当前服务最远支持 ${it.maximumRadiusMeters} 米；保留你主动选择的距离。"
+                                },
+                                options = (
+                                    listOf(1_000, 1_500, 3_000, 5_000).filter { it <= maximumRadius } +
+                                        listOfNotNull(
+                                            recommendationDefaults?.defaultRadiusMeters,
+                                            recommendationDefaults?.maximumRadiusMeters,
+                                        ) + state.input.radiusMeters
+                                    ).distinct().sorted().map { radius ->
+                                        radius to when {
+                                            radius < 1_000 -> "$radius m"
+                                            radius % 1_000 == 0 -> "${radius / 1_000} km"
+                                            else -> "${radius / 1_000.0} km"
+                                        }
+                                    },
+                                selected = state.input.radiusMeters,
+                                onSelected = viewModel::setRadius,
+                            )
+                        }
+                        if (softPreferencesEnabled) {
+                            item {
+                                CuisineSection(
+                                    title = "更想吃",
+                                    selected = state.input.preferredCuisines,
+                                    onToggle = { viewModel.toggleCuisine(it, preferred = true) },
+                                )
+                            }
+                        }
+                        item {
+                            CuisineSection(
+                                title = "这次不吃",
+                                selected = state.input.excludedCuisines,
+                                onToggle = { viewModel.toggleCuisine(it, preferred = false) },
+                            )
+                        }
+                    }
+
                 }
-                item {
-                    CuisineSection(
-                        title = "这次不吃",
-                        selected = state.input.excludedCuisines,
-                        onToggle = { viewModel.toggleCuisine(it, preferred = false) },
-                    )
-                }
-            }
-            if (compactHeight) {
-                item { HomeCard { decisionActions() } }
-            }
             }
         }
 
@@ -639,6 +616,23 @@ fun HomeScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HomeControlPanel(title: String, onDismiss: () -> Unit, content: @Composable () -> Unit) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = currentHomeVisualColors().page,
+    ) {
+        Column(Modifier.fillMaxWidth().fillMaxHeight(.90f).navigationBarsPadding()) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(title, Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                TextButton(onClick = onDismiss) { Text("完成") }
+            }
+            Box(Modifier.weight(1f)) { content() }
+        }
+    }
+}
 
 internal fun remoteServiceStatusMessage(state: DecisionUiState): String? =
     when (val remote = state.remoteFeatureConfig) {

@@ -1,0 +1,26 @@
+.page { min-height: 100vh; padding: 0 0 calc(44rpx + env(safe-area-inset-bottom)); background: var(--bg); color: var(--text); }
+.cover { width: 100%; height: 430rpx; background: var(--surface-soft); }
+.hero { padding: 38rpx 36rpx 28rpx; display: flex; flex-direction: column; gap: 12rpx; }
+.title { font-size: 52rpx; font-weight: 800; line-height: 1.15; }
+.address, .timing, .meta, .source, .share-closed { color: var(--muted); font-size: 25rpx; line-height: 1.5; }
+.facts { display: flex; flex-wrap: wrap; gap: 12rpx 22rpx; color: var(--primary); font-size: 25rpx; }
+.card { margin: 18rpx 32rpx; padding: 30rpx; border-radius: 26rpx; background: var(--surface);  }
+.section-title { display: block; margin-bottom: 14rpx; font-size: 31rpx; font-weight: 750; }
+.reason, .warning, .meta, .source { display: block; margin-top: 8rpx; }
+.reason { color: var(--primary); font-size: 26rpx; }
+.tags { display: flex; flex-wrap: wrap; gap: 10rpx; margin-top: 20rpx; }
+.tag { padding: 6rpx 14rpx; border-radius: 999rpx; background: var(--bg); color: var(--primary); font-size: 24rpx; }
+.warning-card { background: var(--bg); }
+.warning { color: var(--warning); font-size: 24rpx; }
+.messages { margin: 18rpx 32rpx; padding: 22rpx; display: flex; flex-direction: column; gap: 8rpx; border-radius: 18rpx; background: var(--surface-soft); color: var(--warning); font-size: 24rpx; }
+.actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12rpx; margin: 26rpx 32rpx 12rpx; }
+.actions button { margin: 0; padding: 22rpx 8rpx; border-radius: 18rpx; background: var(--primary); color: var(--on-primary); font-size: 24rpx; }
+.actions button[disabled] { background: var(--surface-soft); color: var(--muted); }
+.share-closed { display: block; text-align: center; }
+.expired { min-height: 70vh; padding: 60rpx 34rpx; display: flex; flex-direction: column; justify-content: center; gap: 28rpx; text-align: center; color: var(--muted); }
+.persistence-note, .persistence-message { display: block; color: var(--muted); font-size: 24rpx; line-height: 1.55; }
+.save-actions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12rpx; margin-top: 20rpx; }
+.save-actions button { margin: 0; background: var(--surface-soft); color: var(--primary); border-radius: 17rpx; font-size: 24rpx; }
+.feedback-chips { display: flex; flex-wrap: wrap; gap: 10rpx; margin-top: 22rpx; }
+.feedback-chips button { width: auto; min-height: 88rpx; margin: 0; padding: 20rpx 18rpx; background: var(--bg); color: var(--text); border-radius: 20rpx; font-size: 24rpx; }
+.persistence-message { margin-top: 18rpx; color: var(--primary); }

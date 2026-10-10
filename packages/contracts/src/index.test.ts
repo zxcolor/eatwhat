@@ -14,6 +14,7 @@ import {
 	AdminPromptSettingsValueSchema,
 	AdminRecommendationRulesValueSchema,
 	AuthCapabilitiesSchema,
+	AuthDeviceContextSchema,
 	AuthTokenResponseSchema,
 	BindIdentityRequestSchema,
 	CONTRACT_VERSION_HEADER,
@@ -30,6 +31,7 @@ import {
 	ListFavoritesQuerySchema,
 	ListPrivateFeedbackQuerySchema,
 	ListRecommendationHistoryQuerySchema,
+	ListSessionsQuerySchema,
 	LocationSearchRequestSchema,
 	LocationSearchResponseSchema,
 	LoginRequestSchema,
@@ -49,6 +51,7 @@ import {
 	RecommendationResultSchema,
 	RecommendationTargetSchema,
 	ServiceCapabilitiesSchema,
+	SessionsResponseSchema,
 	SpecialtyCapabilitiesSchema,
 	SupportFeedbackCategorySchema,
 	SupportFeedbackRequestSchema,
@@ -57,6 +60,16 @@ import {
 	WeatherApplicationSchema,
 	WeatherContextRequestSchema,
 } from "./index.js";
+
+describe("Session platform capability negotiation", () => {
+	it("preserves legacy empty query and accepts only explicit ALL", () => {
+		expect(ListSessionsQuerySchema.parse({})).toEqual({});
+		expect(ListSessionsQuerySchema.parse({ includePlatforms: "ALL" })).toEqual({ includePlatforms: "ALL" });
+		for (const value of [{ includePlatforms: "all" }, { includePlatforms: ["ALL"] }, { platform: "MINIPROGRAM" }, { includePlatforms: "MINIPROGRAM" }]) {
+			expect(ListSessionsQuerySchema.safeParse(value).success).toBe(false);
+		}
+	});
+});
 
 describe("Individual dining product boundary", () => {
 	const request = {
@@ -1298,6 +1311,64 @@ describe("Account contracts", () => {
 				provider: "WECHAT",
 				purpose: "REGISTER",
 				installationId,
+			}).success,
+		).toBe(false);
+	});
+
+	it("accepts both client platforms for PHONE and EMAIL while rejecting unknown platforms", () => {
+		for (const platform of ["ANDROID", "MINIPROGRAM", "IOS", "WEB", "", null]) {
+			const allowed = platform === "ANDROID" || platform === "MINIPROGRAM";
+			const clientDevice = { ...device, platform };
+			expect(AuthDeviceContextSchema.safeParse(clientDevice).success).toBe(
+				allowed,
+			);
+			for (const method of ["PHONE", "EMAIL"]) {
+				expect(
+					LoginRequestSchema.safeParse({
+						method,
+						challengeId,
+						otpCode: "123456",
+						...(method === "PHONE" ? { phoneNumber: "+8613800138000" } : {}),
+						device: clientDevice,
+					}).success,
+				).toBe(allowed);
+			}
+		}
+	});
+
+	it("does not send mini-program credentials through native WECHAT or QQ exchanges", () => {
+		for (const method of ["WECHAT", "QQ"]) {
+			expect(
+				LoginRequestSchema.safeParse({
+					method,
+					oauthState: state,
+					authorizationCode: "TemporaryAuthorization123456",
+					device: { ...device, platform: "MINIPROGRAM" },
+				}).success,
+			).toBe(false);
+		}
+	});
+
+	it("returns sessions from both clients and rejects unsupported session platforms", () => {
+		const summary = {
+			sessionId: challengeId,
+			deviceLabel: "测试客户端",
+			current: false,
+			createdAt: "2026-08-21T04:00:00.000Z",
+			lastActiveAt: "2026-08-21T04:00:00.000Z",
+			expiresAt: "2026-09-01T04:00:00.000Z",
+		};
+		expect(
+			SessionsResponseSchema.safeParse({
+				items: ["ANDROID", "MINIPROGRAM"].map((platform) => ({
+					...summary,
+					platform,
+				})),
+			}).success,
+		).toBe(true);
+		expect(
+			SessionsResponseSchema.safeParse({
+				items: [{ ...summary, platform: "IOS" }],
 			}).success,
 		).toBe(false);
 	});

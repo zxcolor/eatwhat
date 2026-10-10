@@ -12,6 +12,7 @@ import androidx.compose.ui.test.isDisplayed
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -80,14 +81,14 @@ class MainActivityDecisionFlowTest {
                 .performClick()
 
             composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
-                hasText("手动选择")
+                hasText("现在决定")
             }
             scenario.onActivity { activity ->
                 decisionViewModel = ViewModelProvider(activity)[DecisionViewModel::class.java]
             }
-            composeRule.onNodeWithText("吃什么").assertIsDisplayed()
-            composeRule.onNodeWithText("附近美食，少一点纠结").assertIsDisplayed()
-            composeRule.onNodeWithText("手动选择")
+            composeRule.onNodeWithText("现在决定").assertIsDisplayed()
+            composeRule.onNodeWithText("附近美食，少一点纠结").assertDoesNotExist()
+            composeRule.homeManualLocationAction()
                 .performScrollTo()
                 .assertIsDisplayed()
                 .performClick()
@@ -101,11 +102,13 @@ class MainActivityDecisionFlowTest {
                 .performClick()
 
             composeRule.onNodeWithText(MANUAL_LOCATION).assertIsDisplayed()
+            composeRule.openHomeConditions()
             scrollListTo("当前极速条件")
             composeRule.onNodeWithText("当前极速条件")
                 .performScrollTo()
                 .assertIsDisplayed()
-            composeRule.onNodeWithText("帮我决定")
+            composeRule.closeHomePanel()
+            composeRule.onNodeWithText("现在决定")
                 .assertIsDisplayed()
                 .performClick()
 
@@ -269,9 +272,9 @@ class MainActivityDecisionFlowTest {
                 .performClick()
 
             composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
-                hasText("手动选择")
+                hasText("现在决定")
             }
-            composeRule.onNodeWithContentDescription("设置")
+            composeRule.homeSettingsAction()
                 .assertIsDisplayed()
                 .performClick()
 
@@ -327,14 +330,14 @@ class MainActivityDecisionFlowTest {
                 .performClick()
 
             composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
-                hasText("手动选择")
+                hasText("现在决定")
             }
             assertFalse("正常首页不应显示直接餐厅搜索卡片", hasText("已经知道想吃什么？"))
             assertFalse(
                 "正常首页不应显示直接餐厅搜索入口",
                 hasText("搜索附近餐厅 / 菜系 / 食物"),
             )
-            composeRule.onNodeWithText("手动选择")
+            composeRule.homeManualLocationAction()
                 .performScrollTo()
                 .assertIsDisplayed()
                 .performClick()
@@ -396,13 +399,18 @@ class MainActivityDecisionFlowTest {
             composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
                 hasText(DEMO_SEARCH_PLACE)
             }
-            scrollListTo(DEMO_SEARCH_PLACE)
-            composeRule.onNodeWithText(DEMO_SEARCH_PLACE).performScrollTo().assertIsDisplayed()
-            scrollListTo("演示位置只在本次会话使用，不会写入历史。")
+            composeRule.onNodeWithText(DEMO_SEARCH_PLACE).assertIsDisplayed()
+            composeRule.onNodeWithTag("home-location").performClick()
+            composeRule.onNode(
+                androidx.compose.ui.test.hasText(DEMO_SEARCH_PLACE) and hasAnyAncestor(
+                    androidx.compose.ui.test.SemanticsMatcher.keyIsDefined(SemanticsActions.ScrollBy),
+                ),
+            ).performScrollTo().assertIsDisplayed()
             composeRule.onNodeWithText("演示位置只在本次会话使用，不会写入历史。")
                 .performScrollTo()
                 .assertIsDisplayed()
-            composeRule.onNodeWithText("帮我决定")
+            composeRule.closeHomePanel()
+            composeRule.onNodeWithText("现在决定")
                 .assertIsDisplayed()
             assertFalse("选择地点后也不应显示直接餐厅搜索卡片", hasText("已经知道想吃什么？"))
             assertFalse(

@@ -1,0 +1,8 @@
+<view class="page {{themeClass}}">
+  <text class="title">当前版本暂不兼容</text>
+  <text class="body">服务要求至少使用 {{minimumVersion}}。为避免旧客户端错误处理账号、位置或餐厅数据，远程功能已安全关闭。</text>
+  <text wx:if="{{message}}" class="hint">{{message}}</text>
+  <button loading="{{checking}}" disabled="{{checking}}" bindtap="onRetry">重新检查</button>
+  <button class="local-action" bindtap="onLocalLogout">退出本机登录</button>
+  <button class="local-action" bindtap="onWithdrawPrivacy">撤回隐私同意</button>
+</view>

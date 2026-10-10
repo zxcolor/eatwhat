@@ -1,0 +1,11 @@
+{
+	"name": "@chi-shen-me/miniprogram",
+	"version": "0.1.0",
+	"private": true,
+	"type": "commonjs",
+	"scripts": {
+		"build": "tsc -p tsconfig.json --noEmit && node scripts/build.mjs && node scripts/check-package.mjs",
+		"typecheck": "tsc -p tsconfig.json --noEmit",
+		"test": "vitest run"
+	}
+}

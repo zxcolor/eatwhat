@@ -1162,13 +1162,16 @@
 				"operationId": "listSessions",
 				"tags": ["Identity and sessions"],
 				"summary": "读取登录设备列表",
+				"description": "缺省仅返回 ANDROID 会话，兼容旧版客户端。显式 includePlatforms=ALL 才返回同账号 ANDROID 与 MINIPROGRAM 会话。",
 				"security": [{ "BearerAuth": [] }],
 				"parameters": [
+					{ "name": "includePlatforms", "in": "query", "required": false, "schema": { "type": "string", "enum": ["ALL"] } },
 					{ "$ref": "#/components/parameters/RequestCorrelationId" },
 					{ "$ref": "#/components/parameters/ClientContractVersion" }
 				],
 				"responses": {
 					"200": { "$ref": "#/components/responses/Sessions" },
+					"400": { "$ref": "#/components/responses/AuthBadRequest" },
 					"401": { "$ref": "#/components/responses/AuthUnauthorized" },
 					"403": { "$ref": "#/components/responses/AuthForbidden" },
 					"429": { "$ref": "#/components/responses/RateLimited" },
@@ -3686,6 +3689,26 @@
 						"x-sensitive": "device-installation-id"
 					},
 					"label": { "type": "string", "minLength": 1, "maxLength": 80 },
+					"platform": { "type": "string", "enum": ["ANDROID", "MINIPROGRAM"] },
+					"appVersion": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 32,
+						"pattern": "^\\d+(?:\\.\\d+){0,3}(?:[-+][A-Za-z0-9.-]+)?$"
+					}
+				},
+				"required": ["installationId", "label", "platform", "appVersion"],
+				"additionalProperties": false
+			},
+			"AndroidAuthDeviceContext": {
+				"type": "object",
+				"properties": {
+					"installationId": {
+						"$ref": "#/components/schemas/ContractUuid",
+						"writeOnly": true,
+						"x-sensitive": "device-installation-id"
+					},
+					"label": { "type": "string", "minLength": 1, "maxLength": 80 },
 					"platform": { "type": "string", "const": "ANDROID" },
 					"appVersion": {
 						"type": "string",
@@ -3920,7 +3943,9 @@
 								"$ref": "#/components/schemas/ThirdPartyAuthorizationCode"
 							},
 							"method": { "type": "string", "const": "WECHAT" },
-							"device": { "$ref": "#/components/schemas/AuthDeviceContext" }
+							"device": {
+								"$ref": "#/components/schemas/AndroidAuthDeviceContext"
+							}
 						},
 						"required": ["oauthState", "authorizationCode", "method", "device"],
 						"additionalProperties": false
@@ -3938,7 +3963,9 @@
 								"$ref": "#/components/schemas/ThirdPartyAuthorizationCode"
 							},
 							"method": { "type": "string", "const": "QQ" },
-							"device": { "$ref": "#/components/schemas/AuthDeviceContext" }
+							"device": {
+								"$ref": "#/components/schemas/AndroidAuthDeviceContext"
+							}
 						},
 						"required": ["oauthState", "authorizationCode", "method", "device"],
 						"additionalProperties": false
@@ -4192,7 +4219,7 @@
 				"properties": {
 					"sessionId": { "$ref": "#/components/schemas/ContractUuid" },
 					"deviceLabel": { "type": "string", "minLength": 1, "maxLength": 80 },
-					"platform": { "type": "string", "const": "ANDROID" },
+					"platform": { "type": "string", "enum": ["ANDROID", "MINIPROGRAM"] },
 					"current": { "type": "boolean" },
 					"createdAt": { "$ref": "#/components/schemas/UtcDateTime" },
 					"lastActiveAt": { "$ref": "#/components/schemas/UtcDateTime" },

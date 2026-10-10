@@ -2,10 +2,11 @@
 
 > 产品范围（2026-09-12）：只服务一个人的用餐决策，永久取消多人用餐。历史群组方案与验收记录仅作追溯，不属于当前或未来待实施功能。
 
-面向全国用户的附近美食决策产品。当前仓库包含 Android 原生客户端、NestJS API、Next.js 运营后台和共享接口契约。
+面向全国用户的附近美食决策产品。当前仓库包含 Android 原生客户端、微信小程序、NestJS API、Next.js 运营后台和共享接口契约。
 
 ## 当前可运行范围
 
+- 微信小程序已有 10 条原生页面路由，按照当前 Android 的单人推荐、隐私和手机号主账号流程实现；`pnpm --filter @chi-shen-me/miniprogram build` 生成可导入工程。当前只完成本地代码与自动化验证，真实 AppID、微信开发者工具和真机验收仍待完成，详见[导入说明](./apps/miniprogram/README.md)。
 - 本地开发默认使用虚构演示餐厅和确定性意图引擎，不调用或缓存任何第三方 POI 数据；生产环境从代码层禁止演示餐厅。
 - Android 已支持内置快捷地点和全国地点关键词手动选址；关键词经自有 `POST /v1/location-search` JSON body 提交，最多返回 5 个显式标记 `LIVE/DEMO` 的通用地点结果，快捷地点在拒绝定位、无网或上游不可用时仍可回退。
 - Android 1.0 聚焦“帮用户做决定”：保留自动定位和手动选址作为推荐起点，不展示、不注册路由，也不调用直接餐厅关键词搜索。服务端 `/v1/place-search`、OpenAPI 与 provider 继续作为独立 API 能力保留，不据此在 Android 1.0 恢复搜索入口。
@@ -74,6 +75,8 @@ API 运行进程；管理员、迁移、维护、导出 worker 和其他父终�
 
 ## 项目文档
 
+- [微信小程序导入与开发说明](./apps/miniprogram/README.md)
+- [微信小程序本次验证报告](./docs/MINIPROGRAM_VERIFICATION_20260917.md)
 - [Android 1.0：ECS 最小云端部署计划](./docs/ECS_MINIMAL_DEPLOYMENT_PLAN.md)
 - [ECS 运维、备份、恢复与回滚手册](./docs/ECS_OPERATIONS_RUNBOOK.md)
 - [Android 1.0 外部平台与密钥配置手册](./docs/EXTERNAL_CREDENTIALS_SETUP.md)

@@ -49,6 +49,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -74,6 +75,8 @@ import com.chishenme.app.data.remote.AuthSessionSummary
 import com.chishenme.app.data.remote.OtpPurpose
 import com.chishenme.app.feature.config.RemoteFeatureConfigState
 import com.chishenme.app.feature.config.configOrNull
+import com.chishenme.app.feature.consent.ConsentDocument
+import com.chishenme.app.feature.consent.DocumentDialog
 import com.chishenme.app.ui.AppBadge
 import com.chishenme.app.ui.AppCard
 import com.chishenme.app.ui.AppDimens
@@ -90,6 +93,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -102,6 +106,8 @@ fun AccountScreen(
     val capabilities = remoteFeatureConfig.configOrNull?.authCapabilities
     val lifecycleOwner = LocalLifecycleOwner.current
     val snackbar = remember { SnackbarHostState() }
+    val noticeScope = rememberCoroutineScope()
+    var showPrivacy by remember { mutableStateOf(false) }
     val accountListState = rememberLazyListState()
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -160,6 +166,67 @@ fun AccountScreen(
         }
     }
 
+    val authLandingVisible = state.status == AccountStatus.GUEST && capabilities?.accountsEnabled == true ||
+        state.status == AccountStatus.SIGNED_IN && state.entryMode == AccountEntryMode.REGISTER
+    if (authLandingVisible) {
+        AccountAuthLanding(
+            state = state,
+            capabilities = capabilities,
+            qqHostAvailable = hostActivity != null,
+            snackbar = snackbar,
+            actions = AuthLandingActions(
+                onBack = {
+                    if (state.entryMode == AccountEntryMode.REGISTER && state.status == AccountStatus.GUEST && !state.busy) {
+                        viewModel.showLogin()
+                    } else {
+                        viewModel.finishRegistration()
+                        onBack()
+                    }
+                },
+                onPrivacy = { showPrivacy = true },
+                onRequestCode = { type, target ->
+                    viewModel.requestCode(
+                        type,
+                        if (type == AuthIdentityType.PHONE) OtpPurpose.REGISTER else OtpPurpose.LOGIN,
+                        target,
+                    )
+                },
+                onSubmit = viewModel::submitLoginCode,
+                onResend = viewModel::resendCode,
+                onResetChallenge = viewModel::clearChallenge,
+                onSelectType = { type ->
+                    viewModel.clearChallenge()
+                    viewModel.selectOtpInputType(type)
+                },
+                onTargetChange = viewModel::updateOtpTargetDraft,
+                onOtpChange = viewModel::updateOtpCodeDraft,
+                onLogin = viewModel::showLogin,
+                onRegister = viewModel::showRegistration,
+                onWechatLogin = {
+                    viewModel.clearChallenge()
+                    viewModel.startWechatLogin()
+                },
+                onQqLogin = {
+                    viewModel.clearChallenge()
+                    hostActivity?.let(viewModel::startQqLogin)
+                },
+                onWechatBind = viewModel::startWechatBind,
+                onRefreshIdentities = viewModel::refreshSecurityData,
+                onFinish = {
+                    viewModel.finishRegistration()
+                    onBack()
+                },
+                onNotice = { message -> noticeScope.launch { snackbar.showSnackbar(message) } },
+            ),
+        )
+        if (showPrivacy) {
+            AuthSurfaceTheme {
+                DocumentDialog(ConsentDocument.PRIVACY) { showPrivacy = false }
+            }
+        }
+        return
+    }
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
@@ -203,56 +270,6 @@ fun AccountScreen(
                 }
                 state.status == AccountStatus.CHECKING -> item {
                     AccountSessionCheckingCard()
-                }
-                state.status == AccountStatus.GUEST -> {
-                    val guestCapabilities = requireNotNull(capabilities)
-                    val loginChallenge = state.challenge?.takeIf {
-                        it.purpose == OtpPurpose.LOGIN || it.purpose == OtpPurpose.REGISTER
-                    }
-                    item { GuestNoticeCard() }
-                    if (state.busy) {
-                        item { AccountBusyBanner(state) }
-                    }
-                    item {
-                        OtpLoginCard(
-                            state = state,
-                            capabilities = guestCapabilities,
-                            onRequestCode = { type, target ->
-                                viewModel.requestCode(
-                                    type,
-                                    if (type == AuthIdentityType.PHONE) {
-                                        OtpPurpose.REGISTER
-                                    } else {
-                                        OtpPurpose.LOGIN
-                                    },
-                                    target,
-                                )
-                            },
-                            onSubmit = viewModel::submitLoginCode,
-                            onResend = viewModel::resendCode,
-                            onReset = viewModel::clearChallenge,
-                            onSelectType = viewModel::selectOtpInputType,
-                            onTargetChange = viewModel::updateOtpTargetDraft,
-                            onOtpChange = viewModel::updateOtpCodeDraft,
-                        )
-                    }
-                    item {
-                        if (loginChallenge == null) {
-                            OtherLoginMethodsCard(
-                                wechatServerEnabled = guestCapabilities.wechatEnabled,
-                                wechatClientConfigured = state.wechatClientConfigured,
-                                qqServerEnabled = guestCapabilities.qqEnabled,
-                                qqClientConfigured = state.qqClientConfigured,
-                                qqHostAvailable = hostActivity != null,
-                                busy = state.busy,
-                                onWechatLogin = viewModel::startWechatLogin,
-                                onQqLogin = { hostActivity?.let(viewModel::startQqLogin) },
-                            )
-                        } else {
-                            OtpChallengePrivacyCard()
-                        }
-                    }
-                    item { GuestProtectionCard() }
                 }
                 else -> {
                     val activeCapabilities = capabilities?.takeIf { it.accountsEnabled }
@@ -529,272 +546,6 @@ private fun AccountBusyBanner(state: AccountUiState) {
     )
 }
 
-@Composable
-private fun GuestNoticeCard() {
-    AppCard(contentPadding = PaddingValues(14.dp)) {
-        Text(
-            text = "访客模式",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
-            fontWeight = FontWeight.SemiBold,
-        )
-        AppSectionHeader(
-            title = "不登录也能决定吃什么",
-            subtitle = "登录只用于跨设备同步、身份绑定和账号数据权利；不会改变自然推荐排序。",
-        )
-    }
-}
-
-@Composable
-private fun OtpChallengePrivacyCard() {
-    AppCard {
-        AppSectionHeader(
-            title = "本次验证只处理验证码",
-            subtitle = "完成当前步骤后才会重新显示其他登录方式。",
-            trailing = { AppBadge(text = "步骤 2 / 2", tone = AppTone.INFO) },
-        )
-        AppStatusBanner(
-            title = "原始手机号或邮箱不会写入页面状态",
-            body = "页面只展示服务端返回的脱敏目标，验证码不会保存到磁盘。",
-            tone = AppTone.SUCCESS,
-            icon = Icons.Rounded.Lock,
-        )
-    }
-}
-
-@Composable
-private fun GuestProtectionCard() {
-    AppCard(contentPadding = PaddingValues(14.dp)) {
-        AppSectionHeader(
-            title = "账号安全边界",
-            subtitle = "每一种登录方式都遵守同一套身份规则。",
-            trailing = { AppBadge(text = "手机号主身份", tone = AppTone.ACCENT) },
-        )
-        SecurityPromiseRow("手机号是唯一可创建账号的方式")
-        SecurityPromiseRow("邮箱、微信和 QQ 只能登录已绑定身份")
-        SecurityPromiseRow("不会静默创建、合并或转移账号")
-    }
-}
-
-@Composable
-private fun SecurityPromiseRow(text: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        AppIconTile(Icons.Rounded.Check, tone = AppTone.SUCCESS, size = 28.dp)
-        Text(
-            text,
-            modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Medium,
-        )
-    }
-}
-
-@Composable
-private fun OtpLoginCard(
-    state: AccountUiState,
-    capabilities: AuthCapabilities,
-    onRequestCode: (AuthIdentityType, String) -> Unit,
-    onSubmit: (String) -> Unit,
-    onResend: () -> Unit,
-    onReset: () -> Unit,
-    onSelectType: (AuthIdentityType) -> Unit,
-    onTargetChange: (AuthIdentityType, String) -> Unit,
-    onOtpChange: (String) -> Unit,
-) {
-    val allowed = buildList {
-        if (capabilities.phoneEnabled && capabilities.registrationEnabled) {
-            add(AuthIdentityType.PHONE)
-        }
-        if (capabilities.emailEnabled) add(AuthIdentityType.EMAIL)
-    }
-    val type = state.otpInputType?.takeIf { it in allowed }
-        ?: allowed.firstOrNull()
-        ?: AuthIdentityType.PHONE
-    val target = state.otpTargetDraft.takeIf { state.otpInputType == type }.orEmpty()
-    val otp = state.otpCodeDraft
-    val challenge = state.challenge?.takeIf {
-        (it.type == AuthIdentityType.PHONE && it.purpose == OtpPurpose.REGISTER) ||
-            (it.type == AuthIdentityType.EMAIL && it.purpose == OtpPurpose.LOGIN)
-    }
-    val targetIsValid = when (type) {
-        AuthIdentityType.PHONE -> target.matches(LOCAL_MAINLAND_PHONE_INPUT) ||
-            target.matches(INTERNATIONAL_MAINLAND_PHONE_INPUT)
-        AuthIdentityType.EMAIL -> target.matches(ACCOUNT_EMAIL_INPUT)
-        else -> false
-    }
-    val targetHasError = target.isNotBlank() && !targetIsValid
-
-    AppCard(contentPadding = PaddingValues(14.dp)) {
-        AppSectionHeader(
-            title = "手机号 / 邮箱验证码",
-            subtitle = if (challenge == null) {
-                "选择登录身份并验证；新手机号可在验证后创建账号。"
-            } else {
-                "验证码已发送，只差最后一步。"
-            },
-            trailing = {
-                AppBadge(
-                    text = if (challenge == null) "步骤 1 / 2" else "步骤 2 / 2",
-                    tone = if (challenge == null) AppTone.ACCENT else AppTone.SUCCESS,
-                )
-            },
-        )
-        if (allowed.size > 1 && challenge == null) {
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                allowed.forEach { option ->
-                    FilterChip(
-                        selected = type == option,
-                        onClick = { onSelectType(option) },
-                        enabled = !state.busy,
-                        leadingIcon = if (type == option) {
-                            {
-                                Icon(
-                                    Icons.Rounded.Check,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            }
-                        } else {
-                            null
-                        },
-                        label = { Text(option.displayName()) },
-                    )
-                }
-            }
-        }
-        if (allowed.isEmpty()) {
-            AppStatusBanner(
-                title = "验证码渠道不可用",
-                body = "当前没有可用的验证码登录渠道。",
-                tone = AppTone.WARNING,
-                icon = Icons.Rounded.Info,
-            )
-        } else if (challenge == null) {
-            OutlinedTextField(
-                value = target,
-                onValueChange = { onTargetChange(type, it) },
-                label = { Text(if (type == AuthIdentityType.PHONE) "手机号" else "邮箱") },
-                supportingText = {
-                    Text(
-                        when {
-                            targetHasError && type == AuthIdentityType.PHONE ->
-                                "请输入 11 位大陆手机号，或使用 +86 格式"
-                            targetHasError -> "请输入完整有效的邮箱地址"
-                            type == AuthIdentityType.PHONE ->
-                                "已注册手机号直接登录；新手机号验证后自动创建账号"
-                            else -> "邮箱只能登录已绑定账号"
-                        },
-                    )
-                },
-                isError = targetHasError,
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = if (type == AuthIdentityType.PHONE) KeyboardType.Phone else KeyboardType.Email,
-                ),
-                singleLine = true,
-                enabled = !state.busy,
-                modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.medium,
-            )
-            AppPrimaryButton(
-                text = "发送验证码",
-                onClick = { onRequestCode(type, target) },
-                enabled = targetIsValid && !state.busy,
-                icon = Icons.Rounded.Lock,
-            )
-        } else {
-            AppStatusBanner(
-                title = "验证码已发送至 ${challenge.maskedTarget}",
-                body = "请在有效期内完成验证。",
-                tone = AppTone.SUCCESS,
-                icon = Icons.Rounded.Lock,
-            )
-            OtpChallengeTiming(
-                state = state,
-                challenge = challenge,
-                onResend = onResend,
-                onResetForNewTarget = onReset,
-            )
-            OutlinedTextField(
-                value = otp,
-                onValueChange = onOtpChange,
-                label = { Text("6 位验证码") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                singleLine = true,
-                enabled = !state.busy,
-                modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.medium,
-            )
-            AppPrimaryButton(
-                text = if (challenge.type == AuthIdentityType.PHONE) {
-                    "验证并登录 / 创建账号"
-                } else {
-                    "安全登录"
-                },
-                onClick = { onSubmit(otp) },
-                enabled = otp.length == 6 && !state.busy,
-                icon = Icons.Rounded.Lock,
-            )
-            TextButton(
-                onClick = onReset,
-                enabled = !state.busy,
-                modifier = Modifier.align(Alignment.End),
-            ) { Text("更换账号") }
-        }
-    }
-}
-
-@Composable
-private fun OtherLoginMethodsCard(
-    wechatServerEnabled: Boolean,
-    wechatClientConfigured: Boolean,
-    qqServerEnabled: Boolean,
-    qqClientConfigured: Boolean,
-    qqHostAvailable: Boolean,
-    busy: Boolean,
-    onWechatLogin: () -> Unit,
-    onQqLogin: () -> Unit,
-) {
-    AppCard {
-        AppSectionHeader(
-            title = "其他安全登录方式",
-            subtitle = "只有已提前绑定的身份才能登录，不会创建新账号。",
-            trailing = { AppIconTile(Icons.Rounded.Lock, tone = AppTone.INFO) },
-        )
-        ExternalAuthMethodHeader(
-            title = "微信登录",
-            description = "仅能登录已经绑定微信的账号；不会自动创建或静默合并账号。",
-            available = wechatServerEnabled && wechatClientConfigured,
-        )
-        WechatAvailabilityContent(
-            serverEnabled = wechatServerEnabled,
-            clientConfigured = wechatClientConfigured,
-            actionLabel = "使用微信安全登录",
-            busy = busy,
-            onAction = onWechatLogin,
-        )
-        HorizontalDivider()
-        ExternalAuthMethodHeader(
-            title = "QQ 登录",
-            description = "仅能登录已经绑定 QQ 的账号；QQ 不能创建新账号，也不会触发静默合并。",
-            available = qqServerEnabled && qqClientConfigured && qqHostAvailable,
-        )
-        QqAvailabilityContent(
-            serverEnabled = qqServerEnabled,
-            clientConfigured = qqClientConfigured,
-            hostAvailable = qqHostAvailable,
-            actionLabel = "使用 QQ 安全登录",
-            busy = busy,
-            onAction = onQqLogin,
-        )
-    }
-}
 
 @Composable
 private fun ExternalAuthMethodHeader(
@@ -1400,7 +1151,7 @@ private fun SessionsCard(
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Text(session.deviceLabel, fontWeight = FontWeight.SemiBold)
                         Text(
-                            "${session.platform} · 最近 ${formatInstant(session.lastActiveAt)}",
+                            "${sessionPlatformLabel(session.platform)} · 最近 ${formatInstant(session.lastActiveAt)}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

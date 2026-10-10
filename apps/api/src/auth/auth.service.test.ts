@@ -336,49 +336,55 @@ describe("AuthService PHONE_ONLY workflows", () => {
 		}
 	});
 
-	it("claims a durable lease before one PNVS verification and consumes PASS", async () => {
-		const completeOtpLogin = vi.fn(async (completion) => ({
-			kind: "SUCCESS" as const,
-			userId,
-			sessionId: completion.session?.sessionId ?? challengeId,
-		}));
-		let proof: OtpProof;
-		const repository = fakeRepository({
-			findOtpProof: async () => proof,
-			claimPhoneOtpVerification: vi.fn(async () => true),
-			releasePhoneOtpVerification: vi.fn(async () => true),
-			completeOtpLogin,
-		});
-		const app = service(repository);
-		proof = phoneProof(app.config);
-		await expect(
-			app.service.login(
-				{
-					method: "PHONE",
-					challengeId,
-					otpCode: "001204",
-					phoneNumber,
-					device,
-				},
-				"203.0.113.7",
-			),
-		).resolves.toMatchObject({ userId, tokenType: "Bearer" });
-		expect(repository.claimPhoneOtpVerification).toHaveBeenCalledOnce();
-		expect(app.phone.verify).toHaveBeenCalledOnce();
-		expect(completeOtpLogin).toHaveBeenCalledWith(
-			expect.objectContaining({
-				proof,
-				verificationSucceeded: true,
-				verificationClaimHash: expect.stringMatching(/^[0-9a-f]{64}$/u),
-			}),
-		);
-		expect(
-			vi.mocked(repository.claimPhoneOtpVerification).mock
-				.invocationCallOrder[0],
-		).toBeLessThan(
-			vi.mocked(app.phone.verify).mock.invocationCallOrder[0] ?? 0,
-		);
-	});
+	it.each(["ANDROID", "MINIPROGRAM"] as const)(
+		"claims a durable PNVS verification lease for %s and preserves the account",
+		async (platform) => {
+			const completeOtpLogin = vi.fn(async (completion) => ({
+				kind: "SUCCESS" as const,
+				userId,
+				sessionId: completion.session?.sessionId ?? challengeId,
+			}));
+			let proof: OtpProof;
+			const repository = fakeRepository({
+				findOtpProof: async () => proof,
+				claimPhoneOtpVerification: vi.fn(async () => true),
+				releasePhoneOtpVerification: vi.fn(async () => true),
+				completeOtpLogin,
+			});
+			const app = service(repository);
+			proof = phoneProof(app.config);
+			await expect(
+				app.service.login(
+					{
+						method: "PHONE",
+						challengeId,
+						otpCode: "001204",
+						phoneNumber,
+						device: { ...device, platform },
+					},
+					"203.0.113.7",
+				),
+			).resolves.toMatchObject({ userId, tokenType: "Bearer" });
+			expect(repository.claimPhoneOtpVerification).toHaveBeenCalledOnce();
+			expect(app.phone.verify).toHaveBeenCalledOnce();
+			expect(completeOtpLogin).toHaveBeenCalledWith(
+				expect.objectContaining({
+					proof,
+					verificationSucceeded: true,
+					verificationClaimHash: expect.stringMatching(/^[0-9a-f]{64}$/u),
+					session: expect.objectContaining({
+						device: expect.objectContaining({ platform }),
+					}),
+				}),
+			);
+			expect(
+				vi.mocked(repository.claimPhoneOtpVerification).mock
+					.invocationCallOrder[0],
+			).toBeLessThan(
+				vi.mocked(app.phone.verify).mock.invocationCallOrder[0] ?? 0,
+			);
+		},
+	);
 
 	it("does not call PNVS when another request owns the challenge lease", async () => {
 		let proof: OtpProof;
@@ -542,34 +548,41 @@ describe("AuthService PHONE_ONLY workflows", () => {
 		expect(completeOtpLogin).toHaveBeenCalledOnce();
 	});
 
-	it("keeps EMAIL verification on the local peppered hash path", async () => {
-		const appConfig = config();
-		const proof = await emailProof(appConfig);
-		const completeOtpLogin = vi.fn(async (completion) => ({
-			kind: "SUCCESS" as const,
-			userId,
-			sessionId: completion.session?.sessionId ?? challengeId,
-		}));
-		const repository = fakeRepository({
-			findOtpProof: async () => proof,
-			completeOtpLogin,
-		});
-		await service(repository).service.login(
-			{
-				method: "EMAIL",
-				challengeId,
-				otpCode: "001204",
-				device,
-			},
-			"203.0.113.7",
-		);
-		expect(completeOtpLogin).toHaveBeenCalledWith(
-			expect.objectContaining({
-				verificationSucceeded: true,
-				verificationClaimHash: null,
-			}),
-		);
-	});
+	it.each(["ANDROID", "MINIPROGRAM"] as const)(
+		"keeps %s EMAIL verification on the bound-account hash path",
+		async (platform) => {
+			const appConfig = config();
+			const proof = await emailProof(appConfig);
+			const completeOtpLogin = vi.fn(async (completion) => ({
+				kind: "SUCCESS" as const,
+				userId,
+				sessionId: completion.session?.sessionId ?? challengeId,
+			}));
+			const repository = fakeRepository({
+				findOtpProof: async () => proof,
+				completeOtpLogin,
+			});
+			await service(repository).service.login(
+				{
+					method: "EMAIL",
+					challengeId,
+					otpCode: "001204",
+					device: { ...device, platform },
+				},
+				"203.0.113.7",
+			);
+			expect(completeOtpLogin).toHaveBeenCalledWith(
+				expect.objectContaining({
+					verificationSucceeded: true,
+					verificationClaimHash: null,
+					newUserId: null,
+					session: expect.objectContaining({
+						device: expect.objectContaining({ platform }),
+					}),
+				}),
+			);
+		},
+	);
 
 	it("charges a wrong EMAIL code as a generic invalid credential without issuing a session", async () => {
 		const appConfig = config();

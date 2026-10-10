@@ -2,21 +2,31 @@ package com.chishenme.app
 
 import android.graphics.Rect
 import android.os.Build
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ComposeTimeoutException
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -139,9 +149,7 @@ class MainActivityAuthLocalFixtureTest {
                 scenario = scenario,
                 inputLabel = "手机号",
                 target = PHONE_NUMBER,
-                sendAction = "发送验证码",
                 maskedTarget = PHONE_MASK,
-                submitAction = "验证并登录 / 创建账号",
                 keyboardScreenshot = "account-phone-keyboard.png",
             )
             awaitText("已安全登录")
@@ -161,11 +169,9 @@ class MainActivityAuthLocalFixtureTest {
             selectEmailLogin()
             requestOtpAndSubmit(
                 scenario = scenario,
-                inputLabel = "邮箱",
+                inputLabel = "邮箱地址",
                 target = EMAIL,
-                sendAction = "发送验证码",
                 maskedTarget = EMAIL_MASK,
-                submitAction = "安全登录",
                 keyboardScreenshot = "account-email-keyboard.png",
             )
             awaitText("已安全登录")
@@ -190,9 +196,9 @@ class MainActivityAuthLocalFixtureTest {
             .performScrollTo()
             .assertIsDisplayed()
             .performClick()
-        awaitText("吃什么")
+        awaitText("现在决定")
         awaitRequestCount(1)
-        composeRule.onNodeWithContentDescription("设置").assertIsDisplayed().performClick()
+        composeRule.homeSettingsAction().assertIsDisplayed().performClick()
         awaitText("设置与透明度")
         composeRule.onNodeWithText("账号与安全")
             .performScrollTo()
@@ -203,32 +209,67 @@ class MainActivityAuthLocalFixtureTest {
             .performScrollTo()
             .assertIsDisplayed()
             .performClick()
-        awaitText("不登录也能决定吃什么")
+        awaitLoginLanding()
     }
 
     private fun assertGuestChannelPresentation() {
-        scrollAccountTo("手机号 / 邮箱验证码")
-        composeRule.onNodeWithText("手机号 / 邮箱验证码").assertIsDisplayed()
+        composeRule.onNodeWithTag("auth-title").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("auth-consent").performScrollTo().assertIsOff().performClick().assertIsOn()
+        listOf(
+            "微信登录" to "当前安装包暂不支持微信登录",
+            "QQ 登录" to "当前安装包暂不支持 QQ 登录",
+        ).forEach { (description, notice) ->
+            composeRule.onNodeWithContentDescription(description)
+                .performScrollTo()
+                .assertIsDisplayed()
+                .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "暂不可用"))
+                .assertIsEnabled()
+            assertUnavailableProviderNotice(description, notice)
+            assertEquals("未配置 AppID 时点击图标不得发送任何 OAuth 请求", 1, server.requestCount)
+        }
+        listOf("微信", "QQ", "邮箱", "暂不登录", "不登录也能决定吃什么")
+            .forEach { composeRule.onNodeWithText(it).assertDoesNotExist() }
+    }
 
-        scrollAccountTo("此安装包未配置微信开放平台 AppID，微信能力已安全关闭。")
-        composeRule.onNodeWithText("此安装包未配置微信开放平台 AppID，微信能力已安全关闭。")
-            .assertIsDisplayed()
-
-        scrollAccountTo("此安装包未配置腾讯 QQ 互联 AppID，QQ 能力已安全关闭。")
-        composeRule.onNodeWithText("此安装包未配置腾讯 QQ 互联 AppID，QQ 能力已安全关闭。")
-            .assertIsDisplayed()
-        assertTextsAbsentAcrossAccountItems(
-            itemCount = GUEST_ACCOUNT_ITEM_COUNT,
-            forbiddenTexts = listOf(
-                "使用微信安全登录",
-                "发送注册验证码",
-                "微信授权并创建账号",
-                "使用 QQ 安全登录",
-            ),
-            failureMessage = { text, index ->
-                "未配置 AppID 时不得出现 OAuth 动作：$text（账号列表索引 $index）"
-            },
-        )
+    private fun assertUnavailableProviderNotice(description: String, expectedNotice: String) {
+        val previousAutoAdvance = composeRule.mainClock.autoAdvance
+        val startedAt = composeRule.mainClock.currentTime
+        try {
+            // A Snackbar is transient. Drive only its entrance frames while checking the text,
+            // rather than allowing an idle synchronization to run past its visible lifetime.
+            composeRule.mainClock.autoAdvance = false
+            composeRule.onNodeWithContentDescription(description).performClick()
+            composeRule.mainClock.advanceTimeBy(300)
+            composeRule.waitUntil(timeoutMillis = UI_TIMEOUT_MS) {
+                composeRule.mainClock.advanceTimeByFrame()
+                hasUiText(expectedNotice)
+            }
+            composeRule.mainClock.advanceTimeBy(300)
+            composeRule.onNodeWithText(expectedNotice).assertIsDisplayed()
+            // Explicitly dismiss the verified message so the next provider is not queued behind it.
+            composeRule.onNode(SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss))
+                .performSemanticsAction(SemanticsActions.Dismiss) { dismiss ->
+                    assertTrue("已验证的账号提示应支持关闭", dismiss())
+                }
+            composeRule.mainClock.advanceTimeBy(300)
+        } catch (error: Throwable) {
+            val knownNotices = listOf(
+                "请先阅读并同意隐私政策",
+                "微信登录暂未开放",
+                "QQ 登录暂未开放",
+                "当前安装包暂不支持微信登录",
+                "当前安装包暂不支持 QQ 登录",
+            ).joinToString { notice -> "$notice=${hasUiText(notice)}" }
+            throw AssertionError(
+                "Provider notice failure: provider=$description; expected=$expectedNotice; " +
+                    "knownNotices=[$knownNotices]; " +
+                    "virtualElapsedMs=${composeRule.mainClock.currentTime - startedAt}; " +
+                    authFailureDiagnostics(),
+                error,
+            )
+        } finally {
+            composeRule.mainClock.autoAdvance = previousAutoAdvance
+        }
     }
 
     private fun assertCredentialsNotExposedAcrossSignedInAccount(itemCount: Int) {
@@ -263,29 +304,29 @@ class MainActivityAuthLocalFixtureTest {
         scenario: ActivityScenario<MainActivity>,
         inputLabel: String,
         target: String,
-        sendAction: String,
         maskedTarget: String,
-        submitAction: String,
         keyboardScreenshot: String,
     ) {
-        scrollAccountTo(sendAction)
+        val consent = composeRule.onNodeWithTag("auth-consent")
+        if (runCatching { consent.assertIsOff() }.isSuccess) consent.performScrollTo().performClick()
+        consent.assertIsOn()
         captureEmptyInputWithKeyboard(scenario, inputLabel, keyboardScreenshot)
-        composeRule.onNode(hasSetTextAction() and hasText(inputLabel))
+        composeRule.onNodeWithTag("auth-target")
             .performScrollTo()
             .assertIsDisplayed()
             .performTextInput(target)
         awaitInputKeyboardIdle(scenario)
-        composeRule.onNode(hasClickAction() and hasText(sendAction))
+        composeRule.onNodeWithTag("auth-send-code")
             .performScrollTo()
             .assertIsDisplayed()
             .performClick()
         awaitText("验证码已发送至 $maskedTarget")
-        composeRule.onNode(hasSetTextAction() and hasText("6 位验证码"))
+        composeRule.onNodeWithTag("auth-code")
             .performScrollTo()
             .assertIsDisplayed()
             .performTextInput(OTP)
         awaitInputKeyboardIdle(scenario)
-        composeRule.onNode(hasClickAction() and hasText(submitAction))
+        composeRule.onNodeWithTag("auth-primary")
             .performScrollTo()
             .assertIsDisplayed()
             .performClick()
@@ -328,32 +369,63 @@ class MainActivityAuthLocalFixtureTest {
             .assertIsDisplayed()
             .assertIsEnabled()
             .performClick()
-        awaitText("不登录也能决定吃什么")
-        scrollAccountTo("手机号 / 邮箱验证码")
-        composeRule.onNodeWithText("手机号 / 邮箱验证码").assertIsDisplayed()
+        awaitLoginLanding()
+        // Logout immediately publishes GUEST with busy=true, then finishes storage/network
+        // cleanup asynchronously. A visible title alone does not make guest actions usable.
+        composeRule.waitUntil(timeoutMillis = UI_TIMEOUT_MS) {
+            runCatching {
+                composeRule.onNodeWithTag("auth-switch-channel").assertIsEnabled()
+                composeRule.onNodeWithTag("auth-target").assertIsEnabled()
+            }.isSuccess
+        }
+        composeRule.onNodeWithTag("auth-title").performScrollTo().assertIsDisplayed()
     }
 
     private fun selectEmailLogin() {
-        scrollAccountTo("手机号 / 邮箱验证码")
-        composeRule.onNode(hasClickAction() and hasText("邮箱"))
+        composeRule.waitUntil(timeoutMillis = UI_TIMEOUT_MS) {
+            runCatching {
+                composeRule.onNodeWithContentDescription("邮箱登录").assertIsEnabled()
+            }.isSuccess
+        }
+        composeRule.onNodeWithContentDescription("邮箱登录")
             .performScrollTo()
             .assertIsDisplayed()
+            .assertIsEnabled()
             .performClick()
+        composeRule.waitUntil(timeoutMillis = UI_TIMEOUT_MS) {
+            runCatching {
+                composeRule.onNodeWithTag("auth-target")
+                    .assert(hasContentDescription("邮箱地址") and hasSetTextAction())
+                    .assertIsEnabled()
+            }.isSuccess
+        }
     }
 
     private fun scrollAccountTo(text: String) {
         val node = composeRule.onNode(hasText(text))
         if (runCatching { node.assertIsDisplayed() }.isSuccess) return
-        composeRule.onNode(hasScrollToIndexAction())
-            .performScrollToNode(hasText(text))
+        if (composeRule.onAllNodes(hasScrollToIndexAction()).fetchSemanticsNodes().isNotEmpty()) {
+            composeRule.onNode(hasScrollToIndexAction()).performScrollToNode(hasText(text))
+        }
         // A tall account card can be composed while its requested child remains
         // below the viewport. Bring that exact child into view after composing it.
         composeRule.onNode(hasText(text)).performScrollTo()
     }
 
     private fun captureAccountOverview(fileName: String) {
-        composeRule.onNode(hasScrollToIndexAction()).performScrollToIndex(0)
+        if (composeRule.onAllNodesWithTag("auth-title").fetchSemanticsNodes().isNotEmpty()) {
+            composeRule.onNodeWithTag("auth-title").performScrollTo()
+        } else {
+            composeRule.onNode(hasScrollToIndexAction()).performScrollToIndex(0)
+        }
         composeRule.captureUiRefinementScreenshot(fileName)
+    }
+
+    private fun awaitLoginLanding() {
+        composeRule.waitUntil(timeoutMillis = UI_TIMEOUT_MS) {
+            composeRule.onAllNodesWithTag("auth-title").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("auth-title").assert(hasText("登录"))
     }
 
     private fun awaitSecurityDataReady() {
@@ -372,7 +444,9 @@ class MainActivityAuthLocalFixtureTest {
         inputLabel: String,
         fileName: String,
     ) {
-        val input = composeRule.onNode(hasSetTextAction() and hasText(inputLabel))
+        val input = composeRule.onNode(
+            hasSetTextAction() and (hasText(inputLabel) or hasContentDescription(inputLabel)),
+        )
         input.performScrollTo().assertIsDisplayed().performClick()
         scenario.onActivity { activity ->
             WindowCompat.getInsetsController(activity.window, activity.window.decorView)
@@ -794,7 +868,6 @@ class MainActivityAuthLocalFixtureTest {
         const val DEVICE_API_PORT = 3001
         const val PREFERENCES_FILE = "app_preferences.preferences_pb"
         const val UI_TIMEOUT_MS = 20_000L
-        const val GUEST_ACCOUNT_ITEM_COUNT = 4
         const val SIGNED_IN_WITH_EMAIL_BIND_ITEM_COUNT = 7
         const val SIGNED_IN_EMAIL_BOUND_ITEM_COUNT = 7
         const val PHONE_NUMBER = "+8613800138000"

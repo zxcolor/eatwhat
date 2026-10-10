@@ -1,3 +1,4 @@
+import type { AuthDeviceContext } from "@chi-shen-me/contracts";
 import { Injectable } from "@nestjs/common";
 import type { QueryResultRow } from "pg";
 import {
@@ -93,7 +94,7 @@ interface IdentityBindingRow extends QueryResultRow {
 interface SessionRow extends QueryResultRow {
 	readonly id: string;
 	readonly device_label: string;
-	readonly platform: "ANDROID";
+	readonly platform: AuthDeviceContext["platform"];
 	readonly created_at: Date | string;
 	readonly last_seen_at: Date | string;
 	readonly refresh_expires_at: Date | string;
@@ -205,7 +206,7 @@ export type UnbindIdentityResult =
 export interface SessionRecord {
 	readonly sessionId: string;
 	readonly deviceLabel: string;
-	readonly platform: "ANDROID";
+	readonly platform: AuthDeviceContext["platform"];
 	readonly current: boolean;
 	readonly createdAt: Date;
 	readonly lastActiveAt: Date;
@@ -373,6 +374,7 @@ export abstract class AuthRepository {
 	): Promise<UnbindIdentityResult>;
 	abstract listSessions(
 		session: AuthenticatedUserContext,
+		includeAllPlatforms?: boolean,
 	): Promise<readonly SessionRecord[] | null>;
 	abstract revokeSession(
 		session: AuthenticatedUserContext,
@@ -1230,6 +1232,7 @@ export class PostgresAuthRepository extends AuthRepository {
 
 	async listSessions(
 		session: AuthenticatedUserContext,
+		includeAllPlatforms = false,
 	): Promise<readonly SessionRecord[] | null> {
 		return this.database.withTransaction(async (transaction) => {
 			if (!(await hasActiveSession(transaction, session))) return null;
@@ -1237,11 +1240,12 @@ export class PostgresAuthRepository extends AuthRepository {
 				`SELECT id, device_label, platform, created_at, last_seen_at,
 				   refresh_expires_at, status, revoked_at
 				 FROM public.auth_session_families
-				 WHERE user_id = $1 AND platform = 'ANDROID' AND status = 'ACTIVE'
+				 WHERE user_id = $1 AND platform IN ('ANDROID', 'MINIPROGRAM') AND status = 'ACTIVE'
+				   AND ($3::boolean OR platform = 'ANDROID')
 				   AND refresh_expires_at > clock_timestamp()
 				 ORDER BY (id = $2) DESC, last_seen_at DESC, id ASC
 				 LIMIT 50`,
-				[session.userId, session.sessionId],
+				[session.userId, session.sessionId, includeAllPlatforms],
 			);
 			return Object.freeze(
 				result.rows.map((row) =>
@@ -1271,7 +1275,7 @@ export class PostgresAuthRepository extends AuthRepository {
 				`SELECT id, device_label, platform, created_at, last_seen_at,
 				   refresh_expires_at, status, revoked_at
 				 FROM public.auth_session_families
-				 WHERE id = $1 AND user_id = $2 AND platform = 'ANDROID'
+				 WHERE id = $1 AND user_id = $2 AND platform IN ('ANDROID', 'MINIPROGRAM')
 				 FOR UPDATE`,
 				[sessionId, session.userId],
 			);

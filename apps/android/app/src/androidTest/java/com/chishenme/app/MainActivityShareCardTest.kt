@@ -142,7 +142,7 @@ class MainActivityShareCardTest {
 
     private fun openPrimaryDemoRestaurant(scenario: ActivityScenario<MainActivity>) {
         composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
-            hasText("同意并继续") || hasText("手动选择")
+            hasText("同意并继续") || hasText("现在决定")
         }
         if (hasText("同意并继续")) {
             composeRule.onNodeWithText("同意并继续")
@@ -151,12 +151,12 @@ class MainActivityShareCardTest {
                 .performClick()
         }
 
-        composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) { hasText("手动选择") }
+        composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) { hasText("现在决定") }
         lateinit var decisionViewModel: DecisionViewModel
         scenario.onActivity { activity ->
             decisionViewModel = ViewModelProvider(activity)[DecisionViewModel::class.java]
         }
-        composeRule.onNodeWithText("手动选择")
+        composeRule.homeManualLocationAction()
             .performScrollTo()
             .assertIsDisplayed()
             .performClick()
@@ -164,7 +164,7 @@ class MainActivityShareCardTest {
             .performScrollTo()
             .assertIsDisplayed()
             .performClick()
-        composeRule.onNodeWithText("帮我决定")
+        composeRule.onNodeWithText("现在决定")
             .assertIsDisplayed()
             .performClick()
 

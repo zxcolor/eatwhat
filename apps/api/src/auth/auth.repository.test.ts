@@ -830,6 +830,63 @@ describe("PostgresAuthRepository transaction workflows", () => {
 		expect(register).toBeLessThan(session);
 	});
 
+	it.each([
+		["ANDROID", otpProof],
+		["MINIPROGRAM", otpProof],
+		["ANDROID", emailLoginOtpProof],
+		["MINIPROGRAM", emailLoginOtpProof],
+		["MINIPROGRAM", registrationOtpProof],
+	] as const)(
+		"reuses the existing account for %s OTP login",
+		async (platform, proof) => {
+			let insertedSession: readonly unknown[] = [];
+			const database = new ScriptedDatabase((text, values) => {
+				if (
+					text.includes("complete_otp_verification_lease") ||
+					text.includes("record_otp_verification_attempt")
+				) {
+					return result({ changed: true });
+				}
+				if (text.includes("SELECT binding.user_id")) {
+					expect(values).toEqual([proof.channel, proof.destinationDedupHash]);
+					expect(text).not.toContain("platform");
+					return result({ user_id: authenticatedContext.userId });
+				}
+				if (text.includes("INSERT INTO public.auth_session_families")) {
+					insertedSession = values;
+					return empty(1);
+				}
+				if (text.includes("INSERT INTO public.auth_")) return empty(1);
+				throw new Error(
+					"existing account login must not register another user",
+				);
+			});
+			const outcome = await new PostgresAuthRepository(
+				database as unknown as DatabasePool,
+			).completeOtpLogin({
+				proof,
+				verificationSucceeded: true,
+				session: {
+					...sessionDraft,
+					device: { ...sessionDraft.device, platform },
+				},
+				newUserId:
+					proof.purpose === "REGISTER"
+						? "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+						: null,
+				verificationClaimHash:
+					proof.channel === "PHONE" ? "c".repeat(64) : null,
+			});
+			expect(outcome).toEqual({
+				kind: "SUCCESS",
+				userId: authenticatedContext.userId,
+				sessionId: sessionDraft.sessionId,
+			});
+			expect(insertedSession[1]).toBe(authenticatedContext.userId);
+			expect(insertedSession[3]).toBe(platform);
+		},
+	);
+
 	it("logs into the account that wins a concurrent REGISTER phone binding race", async () => {
 		const newUserId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 		let identityLookupCount = 0;
@@ -1693,46 +1750,88 @@ describe("PostgresAuthRepository transaction workflows", () => {
 		).toBe(false);
 	});
 
-	it("revokes a same-account session and all of its access tokens in one transaction", async () => {
-		const revokedAt = new Date("2026-08-21T05:40:00.000Z");
-		const targetId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
-		const database = new ScriptedDatabase((text) => {
-			if (text.includes("SELECT family.id")) {
+	it.each([false, true])("lists owner sessions with explicit all-platform opt-in %s", async (includeAllPlatforms) => {
+		const otherId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+		const database = new ScriptedDatabase((text, values) => {
+			if (text.includes("SELECT family.id"))
 				return result({ id: authenticatedContext.sessionId });
-			}
-			if (
-				text.includes("FROM public.auth_session_families") &&
-				text.includes("FOR UPDATE")
-			) {
-				return result({
-					id: targetId,
-					device_label: "Other device",
-					platform: "ANDROID",
-					created_at: new Date("2026-08-20T05:40:00.000Z"),
-					last_seen_at: new Date("2026-08-21T05:30:00.000Z"),
-					refresh_expires_at: new Date("2026-09-01T05:40:00.000Z"),
-					status: "ACTIVE",
-					revoked_at: null,
-				});
-			}
-			if (text.includes("UPDATE public.auth_session_families")) {
-				return result({ occurred_at: revokedAt });
-			}
-			if (text.includes("UPDATE public.auth_access_tokens")) return empty(2);
-			throw new Error("unexpected session revocation SQL");
+			expect(text).toContain("WHERE user_id = $1");
+			expect(text).toContain("platform IN ('ANDROID', 'MINIPROGRAM')");
+			expect(text.indexOf("($3::boolean OR platform = 'ANDROID')")).toBeLessThan(text.indexOf("LIMIT 50"));
+			expect(text).toContain("status = 'ACTIVE'");
+			expect(text).toContain("refresh_expires_at > clock_timestamp()");
+			expect(values).toEqual([
+				authenticatedContext.userId,
+				authenticatedContext.sessionId,
+				includeAllPlatforms,
+			]);
+			const rows = (includeAllPlatforms ? ["ANDROID", "MINIPROGRAM"] : ["ANDROID"]).map((platform, index) => ({
+				id: index === 0 ? authenticatedContext.sessionId : otherId,
+				device_label: platform,
+				platform,
+				created_at: new Date("2026-08-20T05:40:00.000Z"),
+				last_seen_at: new Date("2026-08-21T05:30:00.000Z"),
+				refresh_expires_at: new Date("2026-09-01T05:40:00.000Z"),
+				status: "ACTIVE",
+				revoked_at: null,
+			}));
+			return { rows, rowCount: rows.length };
 		});
-		const outcome = await new PostgresAuthRepository(
+		const sessions = await new PostgresAuthRepository(
 			database as unknown as DatabasePool,
-		).revokeSession(authenticatedContext, targetId);
-		expect(outcome).toEqual({ kind: "SUCCESS", revokedAt });
-		const family = database.calls.findIndex((sql) =>
-			sql.includes("UPDATE public.auth_session_families"),
-		);
-		const access = database.calls.findIndex((sql) =>
-			sql.includes("UPDATE public.auth_access_tokens"),
-		);
-		expect(family).toBeLessThan(access);
+		).listSessions(authenticatedContext, includeAllPlatforms);
+		expect(sessions).toMatchObject(includeAllPlatforms ? [
+			{ platform: "ANDROID", current: true },
+			{ platform: "MINIPROGRAM", current: false },
+		] : [{ platform: "ANDROID", current: true }]);
 	});
+
+	it.each(["ANDROID", "MINIPROGRAM"])(
+		"revokes a same-account %s session and all its access tokens",
+		async (platform) => {
+			const revokedAt = new Date("2026-08-21T05:40:00.000Z");
+			const targetId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+			const database = new ScriptedDatabase((text, values) => {
+				if (text.includes("SELECT family.id")) {
+					return result({ id: authenticatedContext.sessionId });
+				}
+				if (
+					text.includes("FROM public.auth_session_families") &&
+					text.includes("FOR UPDATE")
+				) {
+					expect(text).toContain("WHERE id = $1 AND user_id = $2");
+					expect(text).toContain("platform IN ('ANDROID', 'MINIPROGRAM')");
+					expect(values).toEqual([targetId, authenticatedContext.userId]);
+					return result({
+						id: targetId,
+						device_label: "Other device",
+						platform,
+						created_at: new Date("2026-08-20T05:40:00.000Z"),
+						last_seen_at: new Date("2026-08-21T05:30:00.000Z"),
+						refresh_expires_at: new Date("2026-09-01T05:40:00.000Z"),
+						status: "ACTIVE",
+						revoked_at: null,
+					});
+				}
+				if (text.includes("UPDATE public.auth_session_families")) {
+					return result({ occurred_at: revokedAt });
+				}
+				if (text.includes("UPDATE public.auth_access_tokens")) return empty(2);
+				throw new Error("unexpected session revocation SQL");
+			});
+			const outcome = await new PostgresAuthRepository(
+				database as unknown as DatabasePool,
+			).revokeSession(authenticatedContext, targetId);
+			expect(outcome).toEqual({ kind: "SUCCESS", revokedAt });
+			const family = database.calls.findIndex((sql) =>
+				sql.includes("UPDATE public.auth_session_families"),
+			);
+			const access = database.calls.findIndex((sql) =>
+				sql.includes("UPDATE public.auth_access_tokens"),
+			);
+			expect(family).toBeLessThan(access);
+		},
+	);
 
 	it("serializes concurrent export retries to one durable job", async () => {
 		const database = new ExportQueueDatabase();

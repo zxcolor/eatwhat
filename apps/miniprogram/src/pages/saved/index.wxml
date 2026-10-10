@@ -1,0 +1,29 @@
+<view class="page {{themeClass}}">
+  <view wx:if="{{sections.length}}" class="tabs">
+    <button wx:for="{{sections}}" wx:key="value" class="{{selected === item.value ? 'active' : ''}}" data-value="{{item.value}}" bindtap="onSection">{{item.label}}</button>
+  </view>
+  <text wx:if="{{message}}" class="message">{{message}}</text>
+  <button wx:if="{{loginRequired}}" class="login" bindtap="onLogin">去登录</button>
+
+  <view wx:if="{{selected === 'FAVORITES'}}" class="list">
+    <view wx:for="{{favorites}}" wx:key="index" class="card">
+      <view class="badge">{{item.group}}</view><text class="title">{{item.name}}</text><text class="detail">{{item.detail}}</text><text class="time">收藏于 {{item.createdAt}}</text>
+      <view class="actions"><button data-index="{{index}}" bindtap="onToggleGroup">{{item.nextGroup}}</button><button class="danger" data-index="{{index}}" bindtap="onDeleteFavorite">删除</button></view>
+    </view>
+    <text wx:if="{{!busy && !favorites.length && sections.length}}" class="empty">暂无收藏</text>
+  </view>
+
+  <view wx:if="{{selected === 'HISTORY'}}" class="list">
+    <view wx:for="{{history}}" wx:key="id" class="card"><text class="badge">{{item.action}} · {{item.meal}}</text><text class="title">{{item.name}}</text><text class="detail">{{item.detail}}</text><text class="time">{{item.occurredAt}}</text></view>
+    <text wx:if="{{!busy && !history.length && sections.length}}" class="empty">暂无账号历史</text>
+  </view>
+
+  <view wx:if="{{selected === 'PRIVATE_FEEDBACK'}}" class="list">
+    <view wx:for="{{feedback}}" wx:key="index" class="card"><text class="badge">仅自己可见 · {{item.type}}</text><text class="title">{{item.name}}</text><text class="detail">{{item.detail}}</text><text class="time">{{item.createdAt}}</text><view class="actions"><button class="danger" data-index="{{index}}" bindtap="onDeleteFeedback">删除</button></view></view>
+    <text wx:if="{{!busy && !feedback.length && sections.length}}" class="empty">暂无私有反馈</text>
+  </view>
+
+  <button wx:if="{{hasMore}}" class="more" loading="{{busy}}" bindtap="onLoadMore">加载更多</button>
+  <button wx:if="{{sections.length && selected !== 'FAVORITES'}}" class="clear" disabled="{{busy}}" bindtap="onClearCurrent">清空当前类别</button>
+  <button wx:if="{{sections.length}}" class="refresh" loading="{{busy}}" bindtap="onRefresh">刷新</button>
+</view>

@@ -1,0 +1,31 @@
+{
+	"pages": [
+		"pages/consent/index",
+		"pages/home/index",
+		"pages/results/index",
+		"pages/detail/index",
+		"pages/login/index",
+		"pages/account/index",
+		"pages/saved/index",
+		"pages/feedback/index",
+		"pages/settings/index",
+		"pages/update/index"
+	],
+	"window": {
+		"navigationBarTitleText": "吃什么",
+		"navigationBarBackgroundColor": "#f4f6fb",
+		"navigationBarTextStyle": "black",
+		"backgroundColor": "#f4f6fb",
+		"backgroundTextStyle": "light"
+	},
+	"permission": {
+		"scope.userLocation": {
+			"desc": "仅在你点击使用本次定位时获取当前位置，用于附近餐厅推荐；也可始终手动选址"
+		}
+	},
+	"requiredPrivateInfos": ["getLocation"],
+	"style": "v2",
+	"lazyCodeLoading": "requiredComponents",
+	"sitemapLocation": "sitemap.json",
+	"darkmode": true
+}

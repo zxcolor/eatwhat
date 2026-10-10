@@ -728,7 +728,7 @@ describe("OpenAPI v1", () => {
 			{
 				path: "/v1/auth/sessions",
 				method: "get",
-				statuses: ["200", "401", "403", "429", "500", "503"],
+				statuses: ["200", "400", "401", "403", "429", "500", "503"],
 			},
 			{
 				path: "/v1/auth/sessions/{sessionId}",
