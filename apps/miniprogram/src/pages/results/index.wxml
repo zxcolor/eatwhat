@@ -1,0 +1,51 @@
+<view class="page {{themeClass}}">
+  <view class="header">
+    <text class="title">这顿的选择</text>
+    <text class="summary">{{countSummary}}</text>
+  </view>
+
+  <view wx:if="{{rulesOnly}}" class="notice warning">服务暂时无法确认。当前结果仅供查看，可返回调整条件后重试。</view>
+  <view wx:if="{{notice}}" class="notice">{{notice}}</view>
+
+  <text wx:if="{{liveDisplayOnly}}" class="display-note">按来源顺序展示，不计算自有匹配分。价格、营业状态以商户为准。</text>
+  <view class="filters">
+    <checkbox-group bindchange="onOpenFilter"><label><checkbox value="OPEN" checked="{{openNowOnly}}" />只看明确营业中</label></checkbox-group>
+    <checkbox-group bindchange="onPriceFilter"><label><checkbox value="PRICE" checked="{{knownPriceOnly}}" />只看已知价格且不超预算</label></checkbox-group>
+    <input class="filter-input" value="{{cuisineTagQuery}}" maxlength="40" placeholder="按已返回菜系标签本地筛选" bindinput="onCuisineInput" />
+  </view>
+
+  <view wx:if="{{loading}}" class="state">正在根据本次条件筛选附近选择…</view>
+  <view wx:if="{{error}}" class="state error">{{error}}</view>
+  <view wx:if="{{noRecommendations}}" class="state">当前条件下没有合规候选，请返回调整条件。</view>
+  <view wx:if="{{emptyByFilter}}" class="state">本地筛选后暂无结果；未知价格或营业状态不会被当作负面事实，关闭筛选即可查看。</view>
+
+  <view class="cards">
+    <button
+      wx:for="{{cards}}"
+      wx:key="resultIndex"
+      class="result-card"
+      disabled="{{rulesOnly}}"
+      data-index="{{item.resultIndex}}"
+      bindtap="onOpenDetail"
+    >
+      <view class="rank">{{item.rank}}</view>
+      <view class="content">
+        <view class="name-row"><text class="name">{{item.name}}</text><text class="open">{{item.openText}}</text></view>
+        <text class="address">{{item.address}}</text>
+        <text class="facts">{{item.distanceText}} · {{item.travelText}} · {{item.costText}}</text>
+        <text class="facts">{{item.ratingText}} · {{item.confidenceText}}{{item.aiAssisted ? ' · AI 辅助' : ''}}</text>
+        <view class="tags"><text wx:for="{{item.tags}}" wx:key="*this" class="tag">{{item}}</text></view>
+        <view class="reasons"><text wx:for="{{item.reasons}}" wx:key="*this">• {{item}}</text></view>
+        <view wx:if="{{item.warnings.length}}" class="warnings"><text wx:for="{{item.warnings}}" wx:key="*this">{{item}}</text></view>
+        <view class="evidence"><text wx:for="{{item.evidence}}" wx:key="*this">{{item}}</text></view>
+        <text class="source">{{item.dataModeLabel}} · {{item.sourceAttribution}}</text>
+      </view>
+    </button>
+  </view>
+
+  <view class="actions">
+    <button class="secondary" bindtap="onBack">调整条件</button>
+    <button class="primary" loading="{{rerolling}}" disabled="{{rerolling || loading}}" bindtap="onReroll">重新推荐</button>
+  </view>
+  <text class="retry-note">按相同条件重新请求，结果可能相同。</text>
+</view>

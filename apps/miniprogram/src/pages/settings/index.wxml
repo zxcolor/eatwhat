@@ -1,0 +1,46 @@
+<view class="page {{themeClass}}">
+  <text class="group-title">隐私控制</text>
+  <view class="card row"><view><text class="title">账号与安全</text><text class="description">管理手机号、邮箱、登录设备、数据导出和账号注销。</text></view><button bindtap="onAccount">管理</button></view>
+  <view class="card row"><view><text class="title">收藏、账号历史与私有反馈</text><text class="description">登录后管理跨端记录；与本机最近决策分开，不会静默上传。</text></view><button bindtap="onSaved">{{savedResourcesEnabled ? '管理' : '查看状态'}}</button></view>
+  <view class="card row"><view><text class="title">问题反馈与餐厅纠错</text><text class="description">{{supportFeedbackEnabled ? '正文只在当前页面编辑，不保存到本机历史。' : '反馈服务尚未完成就绪确认。'}}</text></view><button disabled="{{!supportFeedbackEnabled}}" bindtap="onFeedback">{{supportFeedbackEnabled ? '提交' : '未开放'}}</button></view>
+  <view class="card"><text class="title">定位能力</text><text class="description">只有点击“自动定位”才申请权限；手动选址始终可用，坐标不会保存到本机历史。</text></view>
+  <view class="card row"><view><text class="title">AI 辅助偏好</text><text class="description">只保存在本机；服务未开放时强制关闭并使用规则引擎。</text></view><switch checked="{{aiEnabled}}" disabled="{{!aiServiceAvailable}}" bindchange="onAiChange" color="#315bd5" /></view>
+  <view class="card row"><view><text class="title">隐私说明</text><text class="description">查看位置、账号、事件与保留边界。</text></view><button data-document="PRIVACY" bindtap="onDocument">查看</button></view>
+
+  <text class="group-title">本机数据</text>
+  <view class="card">
+    <view class="row"><view><text class="title">最近决策</text><text class="description">最多 30 条、90 天；不保存位置或餐厅信息。</text></view><button wx:if="{{history.length}}" bindtap="onClearHistory">清空</button></view>
+    <text wx:if="{{!history.length}}" class="empty">暂无最近决策</text>
+    <view wx:for="{{history}}" wx:key="time" class="history-item"><view><text class="history-title">{{item.time}} · {{item.meal}}</text><text class="description">{{item.summary}}</text></view><text class="count">{{item.resultCount}} 个结果</text></view>
+  </view>
+
+  <text class="group-title">推荐透明度</text>
+  <view wx:if="{{preferenceEditable}}" class="card">
+    <text class="title">本机推荐偏好</text><text class="description">保存在本机，只影响授权模式的软评分，不放宽排除条件。撤回隐私同意会清除。</text>
+    <view wx:for="{{weights}}" wx:key="key" class="weight-row"><view class="row"><text>{{item.label}}</text><text>{{item.value}}%</text></view><slider min="0" max="100" step="10" value="{{item.value}}" data-key="{{item.key}}" activeColor="#315bd5" bindchange="onWeight" /></view>
+    <button bindtap="onResetWeights">恢复默认权重</button>
+  </view>
+  <view wx:if="{{preferenceStored}}" class="card row"><view><text class="title">存在本机偏好设置</text><text class="description">{{preferenceEditable ? '可随时清除已保存的偏好。' : '当前实时展示不使用这些设置调整顺序。'}}</text></view><button bindtap="onClearWeights">清除</button></view>
+  <view class="card row"><view><text class="title">数据来源</text><text class="description">实时与演示数据分开标识，不合并伪装评分。</text></view><button data-document="SOURCES" bindtap="onDocument">查看</button></view>
+  <view class="card row"><view><text class="title">推荐规则摘要</text><text class="description">营业、距离、预算与排除项先于可解释排序。</text></view><button data-document="ALGORITHM" bindtap="onDocument">查看</button></view>
+  <view class="card row"><view><text class="title">第三方服务清单</text><text class="description">同意前不调用地点、验证码或供应商登录能力。</text></view><button data-document="SERVICES" bindtap="onDocument">查看</button></view>
+
+  <text class="group-title">显示与关于</text>
+  <view class="card row"><view><text class="title">外观模式</text><text class="description">外观偏好保留在本机。</text></view><picker range="{{themeOptions}}" range-key="label" value="{{themeIndex}}" bindchange="onTheme"><view class="picker">{{themeOptions[themeIndex].label}} 〉</view></picker></view>
+  <view class="card row"><view><text class="title">使用帮助</text><text class="description">定位、无结果、弱网和账号问题。</text></view><button data-document="HELP" bindtap="onDocument">查看</button></view>
+  <view class="card row"><view><text class="title">版本兼容性</text><text class="description">{{versionMessage}}</text></view><button data-document="VERSION" bindtap="onDocument">检查</button></view>
+  <view class="about"><text>吃什么 · 微信小程序开发版 0.1.0</text><text>内部体验版，实际可用功能以页面状态为准。</text></view>
+  <button class="withdraw" bindtap="onWithdrawPrivacy">撤回隐私同意</button>
+
+  <view wx:if="{{document}}" class="overlay" bindtap="onCloseDocument">
+    <view class="sheet" catchtap="noop">
+      <text wx:if="{{document === 'PRIVACY'}}">精确坐标只用于本次推荐 POST 请求，不进入行为事件、错误日志或本机最近决策。账号数据由登录用户主动管理，令牌不展示、不记录。</text>
+      <text wx:if="{{document === 'SOURCES'}}">餐厅结果逐条显示来源与 LIVE/DEMO 模式。未经正式 API 或书面授权，不抓取、复制或缓存第三方平台内容。</text>
+      <text wx:if="{{document === 'ALGORITHM'}}">系统按已知营业状态、距离、预算与排除项筛选，最多返回三个结果。未知信息会提示确认；用时是估计。实时展示遵循来源顺序，AI 不改写价格或营业等事实。</text>
+      <text wx:if="{{document === 'SERVICES'}}">高德只在服务端授权与配置同时满足时调用；短信/邮件仅在主动登录或绑定时调用；小程序微信登录暂未开放；QQ 不在本端使用。</text>
+      <text wx:if="{{document === 'HELP'}}">定位失败时使用地点关键词或内置地点；弱网时重试远程配置；账号状态失效时重新登录。不要把验证码、令牌或精确位置粘贴到反馈中。</text>
+      <text wx:if="{{document === 'VERSION'}}">{{versionMessage}}。远程配置不可用或版本过低时，账号与数据网络操作保持关闭。</text>
+      <button bindtap="onCloseDocument">关闭</button>
+    </view>
+  </view>
+</view>

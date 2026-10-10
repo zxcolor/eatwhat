@@ -776,7 +776,7 @@ export const AuthDeviceContextSchema = z
 	.object({
 		installationId: z.uuid(),
 		label: z.string().trim().min(1).max(80),
-		platform: z.literal("ANDROID"),
+		platform: z.enum(["ANDROID", "MINIPROGRAM"]),
 		appVersion: z
 			.string()
 			.trim()
@@ -786,6 +786,12 @@ export const AuthDeviceContextSchema = z
 	})
 	.strict();
 export type AuthDeviceContext = z.infer<typeof AuthDeviceContextSchema>;
+
+// The existing OAuth exchange belongs to native Android providers. A mini-program
+// wx.login code needs a separate code2Session integration before it can be used.
+const AndroidAuthDeviceContextSchema = AuthDeviceContextSchema.extend({
+	platform: z.literal("ANDROID"),
+});
 
 export const PhoneRequestCodeSchema = z
 	.object({
@@ -901,11 +907,11 @@ export const LoginRequestSchema = z.discriminatedUnion("method", [
 	OtpLoginBaseSchema.extend({ method: z.literal("EMAIL") }).strict(),
 	ThirdPartyAuthorizationCredentialSchema.extend({
 		method: z.literal("WECHAT"),
-		device: AuthDeviceContextSchema,
+		device: AndroidAuthDeviceContextSchema,
 	}).strict(),
 	ThirdPartyAuthorizationCredentialSchema.extend({
 		method: z.literal("QQ"),
-		device: AuthDeviceContextSchema,
+		device: AndroidAuthDeviceContextSchema,
 	}).strict(),
 ]);
 export type LoginRequest = z.infer<typeof LoginRequestSchema>;
@@ -1048,7 +1054,7 @@ export const SessionSummarySchema = z
 	.object({
 		sessionId: z.uuid(),
 		deviceLabel: z.string().trim().min(1).max(80),
-		platform: z.literal("ANDROID"),
+		platform: z.enum(["ANDROID", "MINIPROGRAM"]),
 		current: z.boolean(),
 		createdAt: z.iso.datetime(),
 		lastActiveAt: z.iso.datetime(),
@@ -1056,6 +1062,10 @@ export const SessionSummarySchema = z
 	})
 	.strict();
 export type SessionSummary = z.infer<typeof SessionSummarySchema>;
+
+/** New clients opt in; absent preserves Android-only v1 clients. */
+export const ListSessionsQuerySchema = z.object({ includePlatforms: z.literal("ALL").optional() }).strict();
+export type ListSessionsQuery = z.infer<typeof ListSessionsQuerySchema>;
 
 export const SessionsResponseSchema = z
 	.object({ items: z.array(SessionSummarySchema).max(50) })

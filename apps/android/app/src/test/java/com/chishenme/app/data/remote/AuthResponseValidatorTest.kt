@@ -129,7 +129,7 @@ class AuthResponseValidatorTest {
     }
 
     @Test
-    fun `session list requires exactly one current Android session`() {
+    fun `session list accepts mixed supported platforms and requires exactly one current session`() {
         val session = AuthSessionSummary(
             sessionId = "11111111-1111-4111-8111-111111111111",
             deviceLabel = "Android 设备",
@@ -140,6 +140,28 @@ class AuthResponseValidatorTest {
             expiresAt = now.plusSeconds(3600).toString(),
         )
         assertTrue(AuthResponseValidator.validSessions(AuthSessionsResponse(listOf(session))))
+        val miniprogram = session.copy(
+            sessionId = "22222222-2222-4222-8222-222222222222",
+            platform = "MINIPROGRAM",
+            deviceLabel = "微信小程序",
+            current = false,
+        )
+        assertTrue(AuthResponseValidator.validSessions(AuthSessionsResponse(listOf(session, miniprogram))))
+        assertFalse(
+            AuthResponseValidator.validSessions(
+                AuthSessionsResponse(listOf(session, miniprogram.copy(current = true))),
+            ),
+        )
+        assertFalse(
+            AuthResponseValidator.validSessions(
+                AuthSessionsResponse(listOf(session, miniprogram.copy(platform = "IOS"))),
+            ),
+        )
+        assertFalse(
+            AuthResponseValidator.validSessions(
+                AuthSessionsResponse(listOf(session, miniprogram.copy(sessionId = session.sessionId))),
+            ),
+        )
         assertFalse(
             AuthResponseValidator.validSessions(
                 AuthSessionsResponse(listOf(session.copy(current = false))),

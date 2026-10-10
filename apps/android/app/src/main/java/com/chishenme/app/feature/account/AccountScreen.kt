@@ -1151,7 +1151,7 @@ private fun SessionsCard(
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Text(session.deviceLabel, fontWeight = FontWeight.SemiBold)
                         Text(
-                            "${session.platform} · 最近 ${formatInstant(session.lastActiveAt)}",
+                            "${sessionPlatformLabel(session.platform)} · 最近 ${formatInstant(session.lastActiveAt)}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

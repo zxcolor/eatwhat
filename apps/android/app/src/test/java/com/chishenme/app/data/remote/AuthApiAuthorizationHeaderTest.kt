@@ -53,7 +53,24 @@ class AuthApiAuthorizationHeaderTest {
         }
     }
 
-    private fun api(onRequest: (Request) -> Unit): AuthApi {
+    @Test
+    fun `new client explicitly opts into cross platform sessions without leaking bearer into URL`() = runTest {
+        val captured = mutableListOf<Request>()
+        val privateBearer = "Bearer ${"t".repeat(43)}"
+        val api = api(responseBody = """{"items":[]}""") { request -> captured += request }
+
+        api.sessions(privateBearer)
+
+        val request = captured.single()
+        assertEquals("GET", request.method)
+        assertEquals("/v1/auth/sessions", request.url.encodedPath)
+        assertEquals(setOf("includePlatforms"), request.url.queryParameterNames)
+        assertEquals("ALL", request.url.queryParameter("includePlatforms"))
+        assertEquals(privateBearer, request.header("Authorization"))
+        assertFalse(request.url.toString().contains(privateBearer))
+    }
+
+    private fun api(responseBody: String? = null, onRequest: (Request) -> Unit): AuthApi {
         val client = OkHttpClient.Builder()
             .addInterceptor(
                 Interceptor { chain ->
@@ -65,13 +82,13 @@ class AuthApiAuthorizationHeaderTest {
                         .code(200)
                         .message("OK")
                         .body(
-                            """{
+                            (responseBody ?: """{
                                 "challengeId":"22222222-2222-4222-8222-222222222222",
                                 "targetType":"${if (emailTarget) "EMAIL" else "PHONE"}",
                                 "maskedTarget":"${if (emailTarget) "u****r@example.com" else "+86138****8000"}",
                                 "expiresAt":"2026-08-21T04:05:00Z",
                                 "resendAvailableAt":"2026-08-21T04:01:00Z"
-                            }""".trimIndent().toResponseBody("application/json".toMediaType()),
+                            }""").trimIndent().toResponseBody("application/json".toMediaType()),
                         )
                         .build()
                 },

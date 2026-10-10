@@ -1,0 +1,37 @@
+<view class="page {{themeClass}}">
+  <view class="hero">
+    <text class="title">先由你决定，再帮你决定</text>
+    <text class="subtitle">了解我们如何使用位置与账号信息，再开始本次用餐决策。</text>
+  </view>
+
+  <view class="card">
+    <view class="feature"><view><text class="feature-title">位置按需使用</text><text class="feature-body">只有你点击“自动定位”时才申请位置；也可手动选址。位置仅用于本次附近推荐，不会保存到本机历史。</text></view></view>
+    <view class="feature"><view><text class="feature-title">账号不是推荐前提</text><text class="feature-body">未登录也可使用推荐。手机号注册或登录已有账号；邮箱仅登录已绑定的账号。</text></view></view>
+    <view class="feature"><view><text class="feature-title">来源与 AI 可辨认</text><text class="feature-body">演示数据与经授权实时数据分开标识；AI 只处理主动选择的决策偏好，不接收手机号、设备标识或精确坐标。</text></view></view>
+  </view>
+
+  <view class="links">
+    <button data-document="PRIVACY" bindtap="onDocument">隐私说明</button>
+    <button data-document="TERMS" bindtap="onDocument">用户协议</button>
+    <button data-document="SERVICES" bindtap="onDocument">第三方清单</button>
+    <button data-document="AI" bindtap="onDocument">AI 说明</button>
+  </view>
+  <text class="version">内部开发版隐私摘要；正式隐私政策与平台审核完成前，不面向公众开放。</text>
+  <text wx:if="{{errorMessage}}" class="error">{{errorMessage}}</text>
+  <button class="primary" bindtap="onAccept">同意并继续</button>
+  <button class="secondary" bindtap="onDecline">暂不同意</button>
+
+  <view wx:if="{{document}}" class="overlay" bindtap="onCloseDocument">
+    <view class="sheet" catchtap="noop">
+      <text wx:if="{{document === 'PRIVACY'}}" class="sheet-title">隐私说明摘要</text>
+      <text wx:if="{{document === 'PRIVACY'}}" class="sheet-body">精确坐标或你主动选择的固定地点仅随 HTTPS 推荐请求提交给自有后端。坐标不进入推荐事件、错误日志或本机最近决策。账号身份、会话和导出按自有账号契约处理，不向页面暴露 OpenID、UnionID、令牌或验证码。</text>
+      <text wx:if="{{document === 'TERMS'}}" class="sheet-title">用户协议摘要</text>
+      <text wx:if="{{document === 'TERMS'}}" class="sheet-body">本产品提供附近餐饮决策辅助。营业、价格和餐饮信息可能变化，请以商户现场为准；过敏、清真、素食等信息不构成绝对保证。</text>
+      <text wx:if="{{document === 'SERVICES'}}" class="sheet-title">第三方服务清单</text>
+      <text wx:if="{{document === 'SERVICES'}}" class="sheet-body">高德 Web Service 仅在服务端授权与配置同时满足时用于地点和餐厅实时查询。短信、邮件验证码仅在你主动发起登录或绑定时调用。小程序微信登录暂未开放；本端不提供 QQ 授权或登录，但账号页可以展示已有 QQ 绑定摘要。</text>
+      <text wx:if="{{document === 'AI'}}" class="sheet-title">AI 使用说明</text>
+      <text wx:if="{{document === 'AI'}}" class="sheet-body">AI 仅在服务端能力开放且你明确勾选后辅助理解餐段、预算、时间和偏好。失败时回退确定性规则；不会生成或改写营业时间、价格、距离等事实。</text>
+      <button class="close" bindtap="onCloseDocument">关闭</button>
+    </view>
+  </view>
+</view>

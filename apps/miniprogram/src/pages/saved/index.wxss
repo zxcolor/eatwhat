@@ -1,0 +1,19 @@
+.page { min-height: 100vh; box-sizing: border-box; padding: 30rpx 32rpx 56rpx; background: var(--bg); color: var(--text); }
+.tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10rpx; }
+.tabs button { margin: 0; background: var(--surface-soft); color: var(--primary); font-size: 24rpx; border-radius: 17rpx; }
+.tabs button.active { background: var(--primary); color: var(--on-primary); }
+.message, .empty { display: block; margin: 24rpx 8rpx; color: var(--muted); font-size: 25rpx; line-height: 1.5; text-align: center; }
+.login { width: 260rpx; background: var(--primary); color: var(--on-primary); border-radius: 18rpx; }
+.list { margin-top: 24rpx; }
+.card { position: relative; margin-bottom: 18rpx; padding: 28rpx; background: var(--surface); border-radius: 24rpx; }
+.badge, .title, .detail, .time { display: block; }
+.badge { color: var(--primary); font-size: 24rpx; font-weight: 700; }
+.title { margin-top: 10rpx; font-size: 31rpx; font-weight: 800; }
+.detail { margin-top: 8rpx; color: var(--muted); font-size: 24rpx; line-height: 1.5; }
+.time { margin-top: 12rpx; color: var(--muted); font-size: 24rpx; }
+.actions { display: flex; justify-content: flex-end; gap: 12rpx; margin-top: 22rpx; }
+.actions button { width: auto; margin: 0; padding: 0 18rpx; background: var(--bg); color: var(--primary); font-size: 24rpx; border-radius: 15rpx; }
+.actions .danger { background: var(--bg); color: var(--danger); }
+.more, .refresh, .clear { margin-top: 16rpx; border-radius: 18rpx; }
+.more, .refresh { background: var(--surface-soft); color: var(--primary); }
+.clear { background: transparent; color: var(--danger); border: 2rpx solid var(--border); }

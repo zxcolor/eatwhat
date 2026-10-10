@@ -1,0 +1,12 @@
+{
+	"description": "吃什么微信小程序本地开发模板",
+	"compileType": "miniprogram",
+	"miniprogramRoot": "dist/",
+	"projectname": "chi-shen-me-miniprogram",
+	"appid": "wx_REPLACE_WITH_LOCAL_APP_ID",
+	"setting": {
+		"es6": true,
+		"minified": true,
+		"urlCheck": true
+	}
+}

@@ -1,0 +1,62 @@
+<view wx:if="{{pageActive}}" class="page-shell {{themeClass}}">
+  <view class="header-row">
+    <view>
+      <text class="headline">账号与数据</text>
+    </view>
+    <button class="small-button" loading="{{busy}}" disabled="{{busy || !remoteReady}}" bindtap="loadAccount">刷新</button>
+  </view>
+
+  <view class="status-card status-card--{{statusTone}}"><text>{{statusMessage}}</text></view>
+
+  <view wx:if="{{remoteReady}}" class="section-card">
+    <text class="section-title">身份绑定</text>
+    <view wx:for="{{bindings}}" wx:key="type" class="row">
+      <view><text class="row-title">{{item.label}}</text><text wx:if="{{item.primary}}" class="badge">主身份</text></view>
+      <text class="success-text">已绑定</text>
+    </view>
+    <view wx:if="{{!hasEmailBinding && emailEnabled}}" class="bind-form">
+      <text class="field-label">绑定邮箱</text>
+      <input disabled="{{busy}}" class="field-input" maxlength="254" placeholder="邮箱地址" bindinput="onEmailInput" />
+      <button class="secondary-button" disabled="{{busy || !remoteReady}}" bindtap="onRequestEmailBindCode">获取邮箱验证码</button>
+      <view wx:if="{{emailChallengeSent}}">
+        <input disabled="{{busy}}" class="field-input" type="number" maxlength="6" placeholder="6 位验证码" bindinput="onEmailOtpInput" />
+        <text class="hint">已发送至 {{emailMaskedTarget}}</text>
+        <button class="primary-button" loading="{{busy}}" disabled="{{busy || !remoteReady}}" bindtap="onBindEmail">确认绑定</button>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{remoteReady}}" class="section-card">
+    <text class="section-title">登录设备</text>
+    <view wx:for="{{sessions}}" wx:key="sessionId" class="session-row">
+      <view class="session-copy">
+        <text class="row-title">{{item.label}}</text>
+        <text class="hint">{{item.platformLabel}} · 最近活跃 {{item.lastActiveAt}}</text>
+      </view>
+      <text wx:if="{{item.current}}" class="badge">当前</text>
+      <button wx:else class="danger-link" data-session-id="{{item.sessionId}}" disabled="{{busy}}" bindtap="onRevokeSession">撤销</button>
+    </view>
+  </view>
+
+  <view wx:if="{{dataExportEnabled}}" class="section-card">
+    <text class="section-title">账号数据导出</text>
+    <view class="switch-row"><text>包含行为历史</text><switch checked="{{includeBehaviorHistory}}" color="#315bd5" bindchange="onIncludeHistoryChange" /></view>
+    <text class="hint">{{exportStatusLabel}}</text>
+    <view class="button-row">
+      <button class="secondary-button compact" disabled="{{busy}}" bindtap="onRequestExport">申请导出</button>
+      <button class="secondary-button compact" disabled="{{busy}}" bindtap="onRefreshExport">刷新状态</button>
+    </view>
+    <button wx:if="{{exportReady}}" class="primary-button" loading="{{busy}}" disabled="{{busy}}" bindtap="onDownloadExport">下载并校验 JSON</button>
+    <button wx:if="{{exportFileReady}}" class="primary-button" disabled="{{busy}}" bindtap="onTakeExport">取出导出文件</button>
+  </view>
+
+  <view wx:if="{{remoteReady}}" class="section-card danger-card">
+    <text class="section-title danger-text">注销账号</text>
+    <text class="hint">请输入“注销账号”后再确认。账号会立即停用，所有会话失效。</text>
+    <input disabled="{{busy}}" class="field-input" placeholder="注销账号" bindinput="onDeleteConfirmationInput" />
+    <button class="delete-button" disabled="{{busy || !remoteReady || !deleteConfirmationReady}}" bindtap="onDeleteAccount">永久注销账号</button>
+  </view>
+
+  <button class="logout-button" disabled="{{busy}}" bindtap="onLogout">退出当前账号</button>
+  <text class="privacy-note">账号与 Android 端共用。退出当前账号不会清除其他设备的会话。</text>
+</view>

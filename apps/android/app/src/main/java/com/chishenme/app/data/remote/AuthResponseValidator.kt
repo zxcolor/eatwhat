@@ -106,7 +106,7 @@ internal object AuthResponseValidator {
                 session.sessionId.isCanonicalUuid() &&
                     session.deviceLabel.isNotBlank() &&
                     session.deviceLabel.length <= 80 &&
-                    session.platform == "ANDROID" &&
+                    session.platform in setOf("ANDROID", "MINIPROGRAM") &&
                     created != null && active != null && expires != null &&
                     !active.isBefore(created) && expires.isAfter(created)
             }

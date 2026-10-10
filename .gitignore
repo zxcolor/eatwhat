@@ -31,3 +31,5 @@ apps/android/.kotlin/
 *.der
 secrets.properties
 alpha-signing.properties
+apps/miniprogram/project.config.json
+apps/miniprogram/project.private.config.json

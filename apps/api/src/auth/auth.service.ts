@@ -14,6 +14,7 @@ import type {
 	IdentityBinding,
 	IdentityBindingsResponse,
 	LatestAccountExportResponse,
+	ListSessionsQuery,
 	LoginRequest,
 	LogoutResponse,
 	OAuthStateRequest,
@@ -451,11 +452,11 @@ export class AuthService {
 			unboundAt: result.unboundAt.toISOString(),
 		});
 	}
-	async listSessions(bearer: string): Promise<SessionsResponse> {
+	async listSessions(bearer: string, query: ListSessionsQuery = {}): Promise<SessionsResponse> {
 		const session =
 			await this.authenticatedUserResolver.resolveAccessToken(bearer);
 		const sessions = await this.repositoryCall(() =>
-			this.repository.listSessions(session),
+			this.repository.listSessions(session, query.includePlatforms === "ALL"),
 		);
 		if (sessions === null) {
 			throw new AuthUnauthorizedException("SESSION_EXPIRED");

@@ -1,0 +1,52 @@
+<view class="page {{themeClass}}">
+  <view wx:if="{{!available}}" class="expired">
+    <text>{{expiredMessage}}</text>
+    <button bindtap="onBack">返回推荐</button>
+  </view>
+
+  <block wx:else>
+    <image wx:if="{{imageUrl}}" class="cover" mode="aspectFill" src="{{imageUrl}}" />
+    <view class="hero">
+      <text class="title">{{name}}</text>
+      <text class="address">{{address}}</text>
+      <view class="facts"><text>{{openText}}</text><text>{{distanceText}}</text><text>{{costText}}</text><text>{{ratingText}}</text></view>
+      <text class="timing">{{timingText}}</text>
+    </view>
+
+    <view class="card">
+      <text class="section-title">为什么推荐</text>
+      <text wx:for="{{reasons}}" wx:key="*this" class="reason">• {{item}}</text>
+      <view class="tags"><text wx:for="{{tags}}" wx:key="*this" class="tag">{{item}}</text></view>
+      <text class="meta">{{confidenceText}} · {{aiText}}</text>
+      <text class="source">{{dataModeLabel}} · {{sourceAttribution}}</text>
+    </view>
+
+    <view wx:if="{{warnings.length}}" class="card warning-card">
+      <text class="section-title">到店前请确认</text>
+      <text wx:for="{{warnings}}" wx:key="*this" class="warning">{{item}}</text>
+    </view>
+
+    <view wx:if="{{actionMessages.length}}" class="messages">
+      <text wx:for="{{actionMessages}}" wx:key="*this">{{item}}</text>
+    </view>
+
+    <view class="actions">
+      <button disabled="{{!navigateEnabled}}" bindtap="onNavigate">地图导航</button>
+      <button disabled="{{!callEnabled}}" bindtap="onCall">联系商户</button>
+      <button disabled="{{!copyEnabled}}" bindtap="onCopyAddress">复制地址</button>
+    </view>
+
+    <view wx:if="{{favoriteEnabled || privateFeedbackEnabled}}" class="card persistence-card">
+      <text class="section-title">只保存到你的账号</text>
+      <text class="persistence-note">收藏与反馈只在你主动操作后保存；反馈仅自己可见。</text>
+      <view wx:if="{{favoriteEnabled}}" class="save-actions">
+        <button loading="{{persistenceBusy}}" disabled="{{persistenceBusy}}" data-group="WANT_TO_GO" bindtap="onFavorite">收藏到想去</button>
+        <button loading="{{persistenceBusy}}" disabled="{{persistenceBusy}}" data-group="REGULAR" bindtap="onFavorite">收藏到常吃</button>
+      </view>
+      <view wx:if="{{privateFeedbackEnabled}}" class="feedback-chips">
+        <button wx:for="{{feedbackOptions}}" wx:key="value" disabled="{{persistenceBusy}}" data-type="{{item.value}}" bindtap="onPrivateFeedback">{{item.label}}</button>
+      </view>
+      <text wx:if="{{persistenceMessage}}" class="persistence-message">{{persistenceMessage}}</text>
+    </view>
+  </block>
+</view>

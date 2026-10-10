@@ -1,0 +1,14 @@
+<view class="page {{themeClass}}">
+  <view class="hero"><text class="title">告诉我们哪里需要改进</text><text class="subtitle">正文只保留在当前页面内存中，不写入本机反馈历史。</text></view>
+  <view class="card">
+    <text class="label">反馈类型</text>
+    <picker range="{{categories}}" range-key="label" value="{{categoryIndex}}" bindchange="onCategory">
+      <view class="picker">{{categories[categoryIndex].label}} 〉</view>
+    </picker>
+    <text class="label top">具体说明</text>
+    <textarea value="{{message}}" maxlength="2000" placeholder="请至少输入 10 个字符；请勿填写验证码、令牌或不必要的个人信息" bindinput="onMessage" />
+    <text class="count">{{messageLength}} / 2000</text>
+    <text wx:if="{{statusMessage}}" class="status">{{statusMessage}}</text>
+    <button loading="{{busy}}" disabled="{{busy || !enabled}}" bindtap="onSubmit">提交反馈</button>
+  </view>
+</view>

@@ -1,0 +1,72 @@
+.page-shell {
+  box-sizing: border-box;
+  min-height: 100vh;
+  padding: 72rpx 40rpx calc(44rpx + env(safe-area-inset-bottom));
+}
+
+.brand-mark {
+  width: 88rpx;
+  height: 88rpx;
+  border-radius: 28rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: 44rpx;
+  font-weight: 700;
+
+}
+
+.eyebrow,
+.headline,
+.description,
+.field-label,
+.masked-target,
+.status-message,
+.privacy-note {
+  display: block;
+}
+
+.headline { margin-top: 14rpx; font-size: 48rpx; line-height: 1.2; font-weight: 750; }
+.description { margin-top: 18rpx; color: var(--muted); font-size: 27rpx; line-height: 1.65; }
+
+.method-tabs,
+.purpose-tabs {
+  display: flex;
+  gap: 12rpx;
+  margin-top: 34rpx;
+  padding: 8rpx;
+  border-radius: 22rpx;
+  background: var(--surface-soft);
+}
+
+.purpose-tabs { margin-top: 16rpx; background: transparent; padding: 0; }
+.tab,
+.purpose { flex: 1; margin: 0; border-radius: 18rpx; background: transparent; color: var(--muted); font-size: 28rpx; }
+.tab--active { background: var(--primary-soft); color: var(--primary); }
+.purpose { border: 1rpx solid var(--border); }
+.purpose--active { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }
+
+.form-card,
+.status-card {
+  margin-top: 24rpx;
+  padding: 30rpx;
+  border-radius: 26rpx;
+  background: var(--surface);
+  border: 1rpx solid var(--border);
+}
+
+.field-label { color: var(--muted); font-size: 24rpx; }
+.field-input { box-sizing: border-box; height: 88rpx; margin-top: 12rpx; padding: 0 22rpx; border-radius: 18rpx; background: var(--surface); border: 1rpx solid var(--border); font-size: 29rpx; }
+.code-button { margin-top: 18rpx; border-radius: 20rpx; background: var(--primary); color: var(--on-primary); font-size: 28rpx; }
+.otp-area { margin-top: 28rpx; padding-top: 26rpx; border-top: 1rpx solid var(--border); }
+.masked-target { margin-top: 10rpx; color: var(--muted); font-size: 24rpx; }
+.primary-button { margin-top: 22rpx; border-radius: 20rpx; background: var(--primary); color: var(--on-primary); font-size: 30rpx; font-weight: 650; }
+
+.status-card { padding: 24rpx 28rpx; }
+.status-card--success { border-color: var(--border); background: var(--bg); }
+.status-card--warning { border-color: var(--border); background: var(--surface-soft); }
+.status-card--error { border-color: var(--border); background: var(--bg); }
+.status-message { color: var(--muted); font-size: 25rpx; line-height: 1.55; }
+.privacy-note { margin-top: 22rpx; color: var(--muted); text-align: center; font-size: 24rpx; line-height: 1.5; }

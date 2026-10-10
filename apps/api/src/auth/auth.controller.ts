@@ -6,6 +6,8 @@ import {
 	type EmailRequestCode,
 	EmailRequestCodeSchema,
 	type LoginRequest,
+	type ListSessionsQuery,
+	ListSessionsQuerySchema,
 	LoginRequestSchema,
 	type LogoutRequest,
 	LogoutRequestSchema,
@@ -29,6 +31,7 @@ import {
 	Ip,
 	Param,
 	Post,
+	Query,
 	UseGuards,
 	UseInterceptors,
 } from "@nestjs/common";
@@ -169,8 +172,11 @@ export class AuthController {
 	@Get("sessions")
 	@HttpCode(HttpStatus.OK)
 	@RateLimit(30, 60_000)
-	listSessions(@Headers("authorization") authorization: string | undefined) {
-		return this.service.listSessions(requireBearerAccessToken(authorization));
+	listSessions(
+		@Headers("authorization") authorization: string | undefined,
+		@Query(new ZodBodyPipe(ListSessionsQuerySchema)) query: ListSessionsQuery,
+	) {
+		return this.service.listSessions(requireBearerAccessToken(authorization), query);
 	}
 
 	@Delete("sessions/:sessionId")

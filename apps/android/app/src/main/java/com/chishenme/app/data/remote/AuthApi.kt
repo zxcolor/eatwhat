@@ -56,7 +56,7 @@ interface AuthApi {
         @Path("bindingId") bindingId: String,
     ): UnbindIdentityResponse
 
-    @GET("v1/auth/sessions")
+    @GET("v1/auth/sessions?includePlatforms=ALL")
     suspend fun sessions(
         @Header("Authorization") authorization: String,
     ): AuthSessionsResponse
