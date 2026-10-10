@@ -199,8 +199,9 @@ jobs:
         run: |
           set -euo pipefail
           repository_root="$PWD"
-          completion_marker="$(mktemp)"
-          trap 'rm -f -- "$completion_marker"' EXIT
+          completion_directory="$(mktemp -d)"
+          completion_marker="$completion_directory/completed"
+          trap 'rm -f -- "$completion_marker"; rmdir -- "$completion_directory"' EXIT
           sudo env REPOSITORY_ROOT="$repository_root" \
             AUTH_CONTINUITY_COMPLETION_MARKER="$completion_marker" bash -c '
             set -euo pipefail
@@ -616,11 +617,11 @@ jobs:
             ! grep -Eq "^QQ_UNION_ID_NAMESPACE_INITIALIZED=" "$candidate/deployment.env"
             grep -Fq "release must preserve the shared QQ Open Platform realm" \
               "$REPOSITORY_ROOT/infra/ecs/scripts/preflight-deployment.sh"
-            printf "Authentication continuity assertions completed\n" >"$AUTH_CONTINUITY_COMPLETION_MARKER"
+            touch "$AUTH_CONTINUITY_COMPLETION_MARKER"
           '
           # A swallowed heredoc can exit zero without reaching any assertion.
-          grep -Fxq "Authentication continuity assertions completed" "$completion_marker"
-          cat "$completion_marker"
+          test -f "$completion_marker"
+          printf "Authentication continuity assertions completed\n"
       - uses: pnpm/action-setup@v4
         with:
           version: 11.17.0
