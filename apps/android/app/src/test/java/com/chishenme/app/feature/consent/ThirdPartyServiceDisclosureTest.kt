@@ -51,6 +51,12 @@ class ThirdPartyServiceDisclosureTest {
         assertTrue(disclosure.contains("GCJ-02"))
         assertTrue(disclosure.contains("固定地点也可能作为查询中心"))
         assertTrue(disclosure.contains("不跨请求缓存或持久化高德 POI"))
+        assertTrue(disclosure.contains("已获授权的启动收集"))
+        assertTrue(disclosure.contains("3.5 km 内最多两页餐厅"))
+        assertTrue(disclosure.contains("本机私有目录按启动时间戳独立保存 90 天"))
+        assertTrue(disclosure.contains("撤回隐私同意后删除"))
+        assertTrue(disclosure.contains("本次用户位置、坐标系和定位精度（米）也保存到同一文件"))
+        assertTrue(disclosure.contains("系统未提供有效精度时保存为空"))
         assertTrue(disclosure.contains("不把高德 POI 内容发送给模型"))
         assertTrue(disclosure.contains("AMAP 关闭时不会向高德传输"))
     }

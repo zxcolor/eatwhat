@@ -1,4 +1,4 @@
-import type { RecommendationContext } from "@chi-shen-me/contracts";
+import { type RecommendationContext, RecommendationContextSchema } from "@chi-shen-me/contracts";
 import { Inject, Injectable } from "@nestjs/common";
 import { APP_CONFIG, type AppConfig } from "../../config/app-config.js";
 import { applyAmapWebServiceSignature } from "../../providers/amap-request-signature.js";
@@ -273,6 +273,26 @@ export class AmapPlaceProvider implements PlaceProvider {
 		if (!this.supportsQueryPlan(plan)) {
 			throw new PlaceProviderUnavailableError("UNSUPPORTED_QUERY_PLAN");
 		}
+		return (await this.searchPage(context, 1, safeMealKeywords(plan.queryTerms))).candidates;
+	}
+
+	/** Type-only pagination for the separately authorized local collection path. */
+	async searchNearbyPage(location: RecommendationContext["location"], page: number): Promise<{
+		candidates: readonly PlaceCandidate[];
+		hasMore: boolean;
+	}> {
+		return this.searchPage(RecommendationContextSchema.parse({
+			location, radiusMeters: 3500, mealPeriod: "LUNCH", decisionMode: "QUICK",
+			travelMode: "WALK", explorationMode: "BALANCED", partySize: 1,
+			availableMinutes: 60, aiAssistanceEnabled: false,
+			excludedCuisines: [], preferredCuisines: [],
+		}), page, null);
+	}
+
+	private async searchPage(context: RecommendationContext, page: number, keywords: string | null): Promise<{
+		candidates: readonly PlaceCandidate[];
+		hasMore: boolean;
+	}> {
 		if (!this.config.amap.enabled || this.config.amap.apiKey === null) {
 			throw new PlaceProviderUnavailableError("DISABLED");
 		}
@@ -292,13 +312,12 @@ export class AmapPlaceProvider implements PlaceProvider {
 		endpoint.searchParams.set("types", "050000");
 		endpoint.searchParams.set("sortrule", "distance");
 		endpoint.searchParams.set("page_size", "25");
-		endpoint.searchParams.set("page_num", "1");
+		endpoint.searchParams.set("page_num", String(page));
 		// The official response contract documents a photo URL but no stable owned
 		// hostname allowlist. Do not request or surface photos until that boundary
 		// is confirmed in writing.
 		endpoint.searchParams.set("show_fields", "business");
 		endpoint.searchParams.set("output", "json");
-		const keywords = safeMealKeywords(plan.queryTerms);
 		if (keywords !== null) endpoint.searchParams.set("keywords", keywords);
 		applyAmapWebServiceSignature(endpoint, this.config.amap.signingPrivateKey);
 
@@ -346,7 +365,7 @@ export class AmapPlaceProvider implements PlaceProvider {
 			if (!Array.isArray(body.pois)) {
 				throw new PlaceProviderUnavailableError("INVALID_RESPONSE");
 			}
-			return body.pois
+			const candidates = body.pois
 				.slice(0, 25)
 				.map((poi, index) => {
 					const poiObject = objectValue(poi);
@@ -360,6 +379,7 @@ export class AmapPlaceProvider implements PlaceProvider {
 							);
 				})
 				.filter((candidate): candidate is PlaceCandidate => candidate !== null);
+			return { candidates, hasMore: body.pois.length >= 25 };
 		} catch (error) {
 			if (error instanceof PlaceProviderUnavailableError) throw error;
 			if (error instanceof BoundedJsonResponseError)

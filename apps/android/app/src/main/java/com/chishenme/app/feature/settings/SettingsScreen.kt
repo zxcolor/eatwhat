@@ -91,6 +91,8 @@ fun SettingsScreen(
     onOpenSupportFeedback: () -> Unit,
     supportFeedbackEnabled: Boolean,
     minimumSupportedVersion: String?,
+    onClearNearbyRestaurants: () -> Unit = {},
+    nearbyCacheMessage: String? = null,
 ) {
     var document by remember { mutableStateOf<SettingsDocument?>(null) }
     var confirmWithdraw by remember { mutableStateOf(false) }
@@ -163,7 +165,7 @@ fun SettingsScreen(
                 SettingsCard(
                     icon = { Icon(Icons.Rounded.LocationOn, null) },
                     title = "定位能力",
-                    description = "使用 Android 系统原生前台定位。只有你点击“自动定位”时才申请位置权限；大致位置和手动选址都可完成推荐，坐标不会保存。",
+                    description = "使用 Android 系统原生前台定位。同意隐私后，启动收集会请求位置权限；大致位置和手动选址都可完成推荐。餐厅资料、本次用户位置和定位精度按启动时间独立保存到本机，保留 90 天。",
                     action = { Text("按需启用", color = MaterialTheme.colorScheme.onSurfaceVariant) },
                 )
             }
@@ -198,6 +200,14 @@ fun SettingsScreen(
             }
 
             item { SettingsHeader("本机数据") }
+            item {
+                SettingsCard(
+                    icon = { Icon(Icons.Rounded.LocationOn, null) },
+                    title = "附近餐厅缓存",
+                    description = nearbyCacheMessage ?: "每次启动单独保存餐厅、本次用户位置与精度，最多两页、3.5 km 范围，90 天到期一并清理。",
+                    action = { TextButton(onClick = onClearNearbyRestaurants) { Text("清除餐厅缓存") } },
+                )
+            }
             item {
                 DecisionHistoryCard(
                     entries = decisionHistory,
@@ -687,9 +697,9 @@ private fun SettingsDocumentDialog(
 ) {
     val (title, body) = when (document) {
         SettingsDocument.PRIVACY -> "隐私政策摘要" to
-            "精确坐标或主动选择的固定地点只存在于当次 HTTPS 地点搜索/推荐请求；AMAP 完成授权门禁并启用时，自有后端才把单次查询中心转换为 GCJ-02 后提交高德，不跨请求持久化高德 POI，坐标不写入埋点。推荐事件只发送请求 ID、有效期最多两小时且仅限原推荐请求使用的结果令牌、事件类型和时间。正式发布版本会列明运营主体、联系方式、完整保留期限和数据权利入口。"
+            "同意隐私并允许定位后，每次打开应用查询当前位置附近 3.5 km 内最多两页餐厅。门店数据已获存储授权，与本次用户经纬度、坐标系及定位精度（米）一起，在本机同一私有目录中用启动时间戳命名独立 JSON 文件，保留 90 天；系统未提供有效精度时记录为空。后台定期及启动/读取时一并清理，到期数据不再读取。用户查询中心不进入埋点或日志，服务端不保存位置记录。清除餐厅缓存或撤回隐私同意会删除本机餐厅与定位记录；撤回同意也会停止收集。后台任务只清理到期文件，不收集位置或餐厅。正式发布版本会列明运营主体、联系方式和数据权利入口。"
         SettingsDocument.DATA_SOURCES -> "数据来源" to
-            "当前默认使用虚构的演示餐厅（DEMO）。配置并取得高德书面授权后，才可启用 AMAP 实时数据；实时展示模式不缓存外部 POI、不展示自有适合度，也不把 POI 内容发送给模型。"
+            "推荐数据来源由服务端配置决定。推荐路径的实时展示模式不缓存外部 POI、不展示自有适合度，也不把 POI 内容发送给模型。启动附近餐厅收集已获得本机保存授权，将高德门店、本次用户位置和定位精度单独保留 90 天；推荐排序、收藏及模型处理仍遵守各自的数据权限。"
         SettingsDocument.ALGORITHM -> "推荐规则摘要" to
             "系统先排除明确停业、超出最大范围、明确超预算、用户排除菜系和重复门店。授权允许后，才根据合法质量信号、往返时间、预算、餐段意图、多样性和有审计记录的运营精选计算适合度。来源评分与适合度始终分开。"
         SettingsDocument.SDK -> "第三方服务清单" to

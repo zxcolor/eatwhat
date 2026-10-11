@@ -18,6 +18,7 @@ import com.chishenme.app.data.remote.AccountExportContentApi
 import com.chishenme.app.data.remote.AuthApi
 import com.chishenme.app.data.remote.LocationSearchApi
 import com.chishenme.app.data.remote.RecommendationApi
+import com.chishenme.app.data.remote.NearbyRestaurantsApi
 import com.chishenme.app.data.remote.RuntimeAppVersionInterceptor
 import com.chishenme.app.data.remote.SavedResourcesApi
 import com.chishenme.app.data.remote.SupportFeedbackApi
@@ -83,6 +84,11 @@ object AppModule {
     @Singleton
     fun provideRecommendationApi(retrofit: Retrofit): RecommendationApi =
         retrofit.create(RecommendationApi::class.java)
+
+    @Provides
+    @Singleton
+    fun provideNearbyRestaurantsApi(retrofit: Retrofit): NearbyRestaurantsApi =
+        retrofit.create(NearbyRestaurantsApi::class.java)
 
     @Provides
     @Singleton

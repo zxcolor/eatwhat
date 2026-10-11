@@ -56,7 +56,7 @@ sealed interface LocationUiState {
 }
 
 interface ForegroundLocationClient {
-    /** Called only after an in-context user action and runtime permission handling. */
+    /** Called only in foreground, after privacy consent and runtime permission handling. */
     suspend fun currentLocation(): ForegroundLocationResult
 }
 

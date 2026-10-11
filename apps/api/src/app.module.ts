@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { NearbyRestaurantsModule } from "./nearby-restaurants/nearby-restaurants.module.js";
 import { APP_GUARD } from "@nestjs/core";
 import { AuthModule } from "./auth/auth.module.js";
 import { CommonSecurityModule } from "./common/common-security.module.js";
@@ -18,6 +19,7 @@ import { SupportFeedbackModule } from "./support-feedback/support-feedback.modul
 
 @Module({
 	imports: [
+		NearbyRestaurantsModule,
 		CommonSecurityModule,
 		AppConfigModule,
 		DatabaseModule,

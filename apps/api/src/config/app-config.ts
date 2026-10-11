@@ -30,6 +30,7 @@ export const APP_CONFIG = Symbol("APP_CONFIG");
 export const EXECUTABLE_RECOMMENDATION_RULE_VERSION = "recommendation-rules-v3";
 
 export interface AppConfig {
+	readonly nearbyRestaurantCollectionEnabled?: boolean;
 	readonly nodeEnv: "development" | "test" | "production";
 	readonly port: number;
 	readonly trustedProxyCidrs: readonly string[];
@@ -406,6 +407,10 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 
 	return Object.freeze({
 		nodeEnv,
+		nearbyRestaurantCollectionEnabled: readBoolean(
+			env.NEARBY_RESTAURANT_COLLECTION_ENABLED ?? "true",
+			"NEARBY_RESTAURANT_COLLECTION_ENABLED",
+		),
 		port: readInteger(env.PORT, 3_001, "PORT", 1, 65_535),
 		trustedProxyCidrs,
 		database,

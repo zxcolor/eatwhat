@@ -34,6 +34,9 @@ import com.chishenme.app.feature.account.PersonalScreen
 import com.chishenme.app.feature.detail.DetailSessionExpiredScreen
 import com.chishenme.app.feature.detail.RestaurantDetailScreen
 import com.chishenme.app.feature.home.HomeScreen
+import com.chishenme.app.feature.nearby.NearbyCollectionViewModel
+import com.chishenme.app.feature.nearby.StartupNearbyCollection
+import com.chishenme.app.feature.nearby.NearbyPhase
 import com.chishenme.app.feature.results.ResultsScreen
 import com.chishenme.app.feature.config.RemoteFeatureConfigState
 import com.chishenme.app.feature.config.RuntimeAppVersionGate
@@ -65,9 +68,12 @@ private object Routes {
 @Composable
 fun AppNavigation(
     onWithdrawPrivacy: () -> Unit,
+    launchTimestampMillis: Long = System.currentTimeMillis(),
     decisionViewModel: DecisionViewModel = hiltViewModel(),
+    nearbyViewModel: NearbyCollectionViewModel = hiltViewModel(),
 ) {
     val decisionState by decisionViewModel.uiState.collectAsStateWithLifecycle()
+    val nearbyState by nearbyViewModel.state.collectAsStateWithLifecycle()
     val runtimeVersionGateState by
         decisionViewModel.runtimeAppVersionGate.state.collectAsStateWithLifecycle()
     val effectiveFeatureConfig = effectiveRuntimeFeatureConfig(
@@ -116,12 +122,14 @@ fun AppNavigation(
     }
 
     val withdrawPrivacy: () -> Unit = {
+        nearbyViewModel.stop()
         decisionViewModel.clearSelectedResult()
         decisionViewModel.clearForPrivacyWithdrawal()
         onWithdrawPrivacy()
     }
 
     if (runtimeVersionGateState.status == RuntimeAppVersionGate.Status.UPDATE_REQUIRED) {
+        LaunchedEffect(nearbyViewModel) { nearbyViewModel.configure(false, false) }
         val dataRightsViewModel: AccountViewModel = hiltViewModel()
         val dataRightsState by dataRightsViewModel.state.collectAsStateWithLifecycle()
         LaunchedEffect(dataRightsViewModel, runtimeVersionGateState.status) {
@@ -142,6 +150,16 @@ fun AppNavigation(
         )
         return
     }
+
+    StartupNearbyCollection(
+        viewModel = nearbyViewModel,
+        enabled = effectiveFeatureConfig?.nearbyRestaurantCollectionEnabled == true,
+        launchTimestamp = launchTimestampMillis,
+        onLocationFound = { location ->
+            if (decisionViewModel.uiState.value.input.location == null &&
+                !decisionViewModel.uiState.value.locationChooserOpen) decisionViewModel.setLocation(location)
+        },
+    )
 
     // This call site leaves composition while UPDATE_REQUIRED is shown. A later
     // compatible recheck therefore creates a fresh controller at Home instead
@@ -192,6 +210,12 @@ fun AppNavigation(
                 onRecommendationStarted = { navController.navigate(Routes.Results) },
                 conditionsRequested = conditionsRequested,
                 onConditionsRequestConsumed = { conditionsRequested = false },
+                nearbyStatus = when (nearbyState.phase) {
+                    NearbyPhase.LOCATING -> if (nearbyState.attempt <= 1) "正在获取当前位置…" else "正在重试定位（${nearbyState.attempt - 1}/5）…"
+                    NearbyPhase.COLLECTING -> "正在保存附近餐厅，已保存 ${nearbyState.count} 家…"
+                    NearbyPhase.DONE -> if (nearbyState.location != null) "本次已保存 ${nearbyState.count} 家附近餐厅，保留 90 天" else null
+                    else -> null
+                },
             )
         }
         composable(Routes.Personal) {
@@ -320,6 +344,7 @@ fun AppNavigation(
             val aiEnabled by settingsViewModel.aiEnabled.collectAsStateWithLifecycle()
             val theme by settingsViewModel.theme.collectAsStateWithLifecycle()
             val decisionHistory by settingsViewModel.decisionHistory.collectAsStateWithLifecycle()
+            val nearbyCacheMessage by settingsViewModel.nearbyCacheMessage.collectAsStateWithLifecycle()
             val preferenceVector by
                 settingsViewModel.recommendationPreferenceVector.collectAsStateWithLifecycle()
             val preferenceVectorStored by
@@ -341,6 +366,11 @@ fun AppNavigation(
                 onBack = { navController.popBackStack() },
                 decisionHistory = decisionHistory,
                 onClearDecisionHistory = settingsViewModel::clearDecisionHistory,
+                onClearNearbyRestaurants = {
+                    nearbyViewModel.clearStatus()
+                    settingsViewModel.clearNearbyRestaurants()
+                },
+                nearbyCacheMessage = nearbyCacheMessage,
                 onOpenAccount = { navController.navigate(Routes.Account) },
                 onOpenSavedResources = { navController.navigate(Routes.SavedResources) },
                 onOpenSupportFeedback = {
