@@ -81,12 +81,12 @@ class MainActivityDecisionFlowTest {
                 .performClick()
 
             composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
-                hasText("现在决定")
+                hasText("帮我选")
             }
             scenario.onActivity { activity ->
                 decisionViewModel = ViewModelProvider(activity)[DecisionViewModel::class.java]
             }
-            composeRule.onNodeWithText("现在决定").assertIsDisplayed()
+            composeRule.onNodeWithText("帮我选").assertIsDisplayed()
             composeRule.onNodeWithText("附近美食，少一点纠结").assertDoesNotExist()
             composeRule.homeManualLocationAction()
                 .performScrollTo()
@@ -108,7 +108,7 @@ class MainActivityDecisionFlowTest {
                 .performScrollTo()
                 .assertIsDisplayed()
             composeRule.closeHomePanel()
-            composeRule.onNodeWithText("现在决定")
+            composeRule.onNodeWithText("帮我选")
                 .assertIsDisplayed()
                 .performClick()
 
@@ -272,7 +272,7 @@ class MainActivityDecisionFlowTest {
                 .performClick()
 
             composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
-                hasText("现在决定")
+                hasText("帮我选")
             }
             composeRule.homeSettingsAction()
                 .assertIsDisplayed()
@@ -330,7 +330,7 @@ class MainActivityDecisionFlowTest {
                 .performClick()
 
             composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
-                hasText("现在决定")
+                hasText("帮我选")
             }
             assertFalse("正常首页不应显示直接餐厅搜索卡片", hasText("已经知道想吃什么？"))
             assertFalse(
@@ -410,7 +410,7 @@ class MainActivityDecisionFlowTest {
                 .performScrollTo()
                 .assertIsDisplayed()
             composeRule.closeHomePanel()
-            composeRule.onNodeWithText("现在决定")
+            composeRule.onNodeWithText("帮我选")
                 .assertIsDisplayed()
             assertFalse("选择地点后也不应显示直接餐厅搜索卡片", hasText("已经知道想吃什么？"))
             assertFalse(

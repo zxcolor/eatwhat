@@ -238,8 +238,8 @@ android {
         applicationId = "com.chishenme.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.1.4-alpha"
+        versionCode = 8
+        versionName = "0.1.7-alpha"
 
         // WeChat AppID is a public application identifier, not a provider
         // secret. An empty value is intentional: every variant then fails

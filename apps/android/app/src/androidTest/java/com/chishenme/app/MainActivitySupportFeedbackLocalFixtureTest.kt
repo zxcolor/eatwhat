@@ -114,7 +114,7 @@ class MainActivitySupportFeedbackLocalFixtureTest {
             composeRule.onNodeWithText(PRIVACY_ACCEPT_ACTION).performClick()
 
             composeRule.waitUntil(UI_TIMEOUT_MS) {
-                configCallCount.get() >= 1 && hasUiText("现在决定")
+                configCallCount.get() >= 1 && hasUiText("帮我选")
             }
             composeRule.homeSettingsAction().assertIsDisplayed().performClick()
             awaitText("设置与透明度")

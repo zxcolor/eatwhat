@@ -13,6 +13,9 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
@@ -27,6 +30,7 @@ import com.chishenme.app.feature.decision.RecommendationLoadState
 import com.chishenme.app.feature.account.AccountScreen
 import com.chishenme.app.feature.account.AccountStatus
 import com.chishenme.app.feature.account.AccountViewModel
+import com.chishenme.app.feature.account.PersonalScreen
 import com.chishenme.app.feature.detail.DetailSessionExpiredScreen
 import com.chishenme.app.feature.detail.RestaurantDetailScreen
 import com.chishenme.app.feature.home.HomeScreen
@@ -40,6 +44,7 @@ import com.chishenme.app.feature.support.SupportFeedbackScreen
 import com.chishenme.app.feature.support.SupportFeedbackViewModel
 import com.chishenme.app.feature.saved.SavedResourcesScreen
 import com.chishenme.app.feature.saved.SavedResourcesViewModel
+import com.chishenme.app.feature.saved.SavedResourcesSection
 import com.chishenme.app.feature.update.UpdateRequiredScreen
 import com.chishenme.app.data.remote.FeatureConfig
 import com.chishenme.app.data.remote.DataRightsMode
@@ -47,6 +52,8 @@ import com.chishenme.app.data.remote.RecommendationEventType
 
 private object Routes {
     const val Home = "home"
+    const val Personal = "personal"
+    const val History = "history"
     const val Results = "results"
     const val Detail = "restaurant-detail"
     const val Settings = "settings"
@@ -142,6 +149,19 @@ fun AppNavigation(
     // Old saved back stacks may name the retired group destination. Give this
     // graph its own saved-state scope while keeping same-version rotation intact.
     val navController = key("individual-navigation-v1") { rememberNavController() }
+    var conditionsRequested by rememberSaveable { mutableStateOf(false) }
+    val selectTab: (AppTab) -> Unit = { tab ->
+        val route = when (tab) {
+            AppTab.HOME -> Routes.Home
+            AppTab.HISTORY -> Routes.History
+            AppTab.PERSONAL -> Routes.Personal
+        }
+        navController.navigate(route) {
+            popUpTo(Routes.Home) { saveState = true }
+            launchSingleTop = true
+            restoreState = true
+        }
+    }
 
     NavHost(
         navController = navController,
@@ -167,9 +187,42 @@ fun AppNavigation(
             HomeScreen(
                 state = decisionState,
                 viewModel = decisionViewModel,
-                onOpenSettings = { navController.navigate(Routes.Settings) },
+                onSelectTab = selectTab,
                 onReconnectService = refreshConfigAndInvalidateResultSessions,
                 onRecommendationStarted = { navController.navigate(Routes.Results) },
+                conditionsRequested = conditionsRequested,
+                onConditionsRequestConsumed = { conditionsRequested = false },
+            )
+        }
+        composable(Routes.Personal) {
+            PersonalScreen(
+                onSelectTab = selectTab,
+                onOpenAccount = { navController.navigate(Routes.Account) },
+                onOpenSettings = { navController.navigate(Routes.Settings) },
+                onOpenConditions = {
+                    conditionsRequested = true
+                    selectTab(AppTab.HOME)
+                },
+            )
+        }
+        composable(Routes.History) {
+            val savedViewModel: SavedResourcesViewModel = hiltViewModel()
+            val savedState by savedViewModel.state.collectAsStateWithLifecycle()
+            LaunchedEffect(decisionState.remoteFeatureConfig, runtimeVersionGateState) {
+                savedViewModel.start(
+                    effectiveFeatureConfig,
+                    runtimeVersionGateState.trustedConfigurationGeneration,
+                    initialSection = SavedResourcesSection.HISTORY,
+                )
+            }
+            SavedResourcesScreen(
+                state = savedState,
+                viewModel = savedViewModel,
+                onBack = { selectTab(AppTab.HOME) },
+                onOpenAccount = { navController.navigate(Routes.Account) },
+                title = "历史",
+                navigationContentDescription = "返回首页",
+                bottomBar = { AppDock(AppTab.HISTORY, selectTab) },
             )
         }
         composable(Routes.Results) {

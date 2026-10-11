@@ -98,8 +98,15 @@ class SavedResourcesViewModel @Inject constructor(
         }
     }
 
-    fun start(config: FeatureConfig?, configurationGeneration: Long? = null) {
-        applyCapabilitiesInternal(config, configurationGeneration)?.let(::checkSession)
+    fun start(
+        config: FeatureConfig?,
+        configurationGeneration: Long? = null,
+        initialSection: SavedResourcesSection? = null,
+    ) {
+        val defaultSection = applyCapabilitiesInternal(config, configurationGeneration) ?: return
+        val section = initialSection?.takeIf { it in mutableState.value.enabledSections } ?: defaultSection
+        mutableState.update { it.copy(selectedSection = section) }
+        checkSession(section)
     }
 
     /**
