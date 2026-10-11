@@ -79,4 +79,16 @@ describe("authorized nearby collection HTTP flow", () => {
 			expect(JSON.stringify(logger.mock.calls)).not.toMatch(/synthetic-nearby-key|restapi.amap|location=/);
 		} finally { fail = false; logger.mockRestore(); }
 	});
+	it("rejects missing or non-JSON content types before calling AMap", async () => {
+		calls.length = 0;
+		for (const contentType of [undefined, "text/plain", "application/x-www-form-urlencoded"]) {
+			const headers = contentType === undefined ? {} : { "content-type": contentType };
+			const response = await fetch(`${await app.getUrl()}/v1/restaurants/nearby`, {
+				method: "POST", headers,
+				...(contentType === undefined ? {} : { body: JSON.stringify({ location: origin, page: 1 }) }),
+			});
+			expect(response.status).toBe(415);
+		}
+		expect(calls).toHaveLength(0);
+	});
 });

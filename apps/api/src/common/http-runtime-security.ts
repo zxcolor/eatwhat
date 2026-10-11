@@ -68,6 +68,7 @@ const JSON_POST_PATHS = new Set([
 	"/v1/private-feedback",
 	"/v1/recommendations",
 	"/v1/recommendation-events",
+	"/v1/restaurants/nearby",
 	"/v1/support-feedback",
 	"/admin/v1/auth/login/options",
 	"/admin/v1/auth/login/verify",
