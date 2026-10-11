@@ -60,7 +60,7 @@ files/nearby_restaurants/
 
 全量 `./scripts/verify.ps1 -AlphaApiBaseUrl 'https://api.unfinished-era.com/'` 未运行：当前进程没有受控公开 `CHISHENME_ALPHA_WECHAT_APP_ID` 和 `CHISHENME_ALPHA_QQ_APP_ID`，不能用 Secret 或虚构值替代。真实手机定位、真实高德取数、长期关机后的物理清理、生产发布及 GitHub CI 均未执行，不能用本地合成验证替代这些结果。
 
-本次按此前用户的本地开发约定保留在 `codex/nearby-restaurant-cache`，不上传 GitHub、创建 PR、合并 main 或部署服务器。新服务端代码尚未由本任务上线；连接缺少新能力字段的旧服务时，Debug 会保持启动收集关闭。其他工作树原有改动保持不变，本地 main 与 origin/main 引用仍一致。
+上述记录截至本地开发阶段，当时按此前约定没有部署服务器。随后用户于 2026-10-11 明确授权本次接口上线，已完成 schema12 兼容发布及普通公网 APK 两次真实取数/文件保存验证，见 [生产上线记录](NEARBY_COLLECTION_PRODUCTION_DEPLOYMENT_20261011.md)。没有上传 GitHub、创建 PR 或合并 main；其他工作树原有改动保持不变，本地 main 与 origin/main 引用仍一致。缺少新能力字段的旧服务仍会使 Debug 保持启动收集关闭。
 
 普通公网 Debug 交付文件：`artifacts/nearby-cache/app-nearby-0.1.8-alpha-debug.apk`，versionCode 9，versionName `0.1.8-alpha-debug`。DEX 检查包含 `https://api.unfinished-era.com/`，不包含 Fixture 的 `http://127.0.0.1:3001/` 或 `http://localhost:3001/`。SHA-256：`E81688E93D66A7D5B6E45BB79087D90E6F863E889A47C7F738312914CA376940`。
 
