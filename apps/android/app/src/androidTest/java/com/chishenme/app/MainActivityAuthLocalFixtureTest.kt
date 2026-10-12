@@ -196,7 +196,7 @@ class MainActivityAuthLocalFixtureTest {
             .performScrollTo()
             .assertIsDisplayed()
             .performClick()
-        awaitText("现在决定")
+        awaitText("帮我选")
         awaitRequestCount(1)
         composeRule.homeSettingsAction().assertIsDisplayed().performClick()
         awaitText("设置与透明度")

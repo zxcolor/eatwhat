@@ -81,12 +81,12 @@ class MainActivityDecisionFlowTest {
                 .performClick()
 
             composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
-                hasText("现在决定")
+                hasText("帮我选")
             }
             scenario.onActivity { activity ->
                 decisionViewModel = ViewModelProvider(activity)[DecisionViewModel::class.java]
             }
-            composeRule.onNodeWithText("现在决定").assertIsDisplayed()
+            composeRule.onNodeWithText("帮我选").assertIsDisplayed()
             composeRule.onNodeWithText("附近美食，少一点纠结").assertDoesNotExist()
             composeRule.homeManualLocationAction()
                 .performScrollTo()
@@ -108,7 +108,7 @@ class MainActivityDecisionFlowTest {
                 .performScrollTo()
                 .assertIsDisplayed()
             composeRule.closeHomePanel()
-            composeRule.onNodeWithText("现在决定")
+            composeRule.onNodeWithText("帮我选")
                 .assertIsDisplayed()
                 .performClick()
 
@@ -148,12 +148,7 @@ class MainActivityDecisionFlowTest {
                 .assertIsDisplayed()
                 .performClick()
                 .assertIsSelected()
-            scrollListTo("附近方位图")
-            composeRule.onNodeWithText("附近方位图")
-                .performScrollTo()
-                .assertIsDisplayed()
-                .performClick()
-                .assertIsSelected()
+            assertListOnlyPresentation()
 
             recreateActivity(scenario)
             composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
@@ -167,12 +162,7 @@ class MainActivityDecisionFlowTest {
             composeRule.onNodeWithText(RESULTS_HEADING).assertIsDisplayed()
             scrollListTo("仅营业中")
             composeRule.onNodeWithText("仅营业中").assertIsSelected()
-            scrollListTo("附近方位图")
-            composeRule.onNodeWithText("附近方位图").assertIsSelected()
-            scrollListTo("附近方位图（非道路导航图）")
-            composeRule.onNodeWithText("附近方位图（非道路导航图）")
-                .performScrollTo()
-                .assertIsDisplayed()
+            assertListOnlyPresentation()
 
             scrollListTo(PRIMARY_DEMO_RESTAURANT, substring = true)
             composeRule.onNode(
@@ -248,16 +238,20 @@ class MainActivityDecisionFlowTest {
                 .performScrollTo()
                 .assertIsDisplayed()
                 .assertIsSelected()
-            scrollListTo("附近方位图")
-            composeRule.onNodeWithText("附近方位图")
-                .performScrollTo()
-                .assertIsDisplayed()
-                .assertIsSelected()
-            scrollListTo("附近方位图（非道路导航图）")
-            composeRule.onNodeWithText("附近方位图（非道路导航图）")
-                .performScrollTo()
-                .assertIsDisplayed()
+            assertListOnlyPresentation()
+            scrollListTo("本次结果筛选")
+            composeRule.captureUiRefinementScreenshot("results-list-only.png")
         }
+    }
+
+    private fun assertListOnlyPresentation() {
+        composeRule.onNodeWithText("列表").assertDoesNotExist()
+        composeRule.onNodeWithText("附近方位图").assertDoesNotExist()
+        scrollListTo("首个候选")
+        composeRule.onNodeWithText("首个候选")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithText("附近方位图（非道路导航图）").assertDoesNotExist()
     }
 
     @Test
@@ -272,7 +266,7 @@ class MainActivityDecisionFlowTest {
                 .performClick()
 
             composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
-                hasText("现在决定")
+                hasText("帮我选")
             }
             composeRule.homeSettingsAction()
                 .assertIsDisplayed()
@@ -330,7 +324,7 @@ class MainActivityDecisionFlowTest {
                 .performClick()
 
             composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
-                hasText("现在决定")
+                hasText("帮我选")
             }
             assertFalse("正常首页不应显示直接餐厅搜索卡片", hasText("已经知道想吃什么？"))
             assertFalse(
@@ -410,7 +404,7 @@ class MainActivityDecisionFlowTest {
                 .performScrollTo()
                 .assertIsDisplayed()
             composeRule.closeHomePanel()
-            composeRule.onNodeWithText("现在决定")
+            composeRule.onNodeWithText("帮我选")
                 .assertIsDisplayed()
             assertFalse("选择地点后也不应显示直接餐厅搜索卡片", hasText("已经知道想吃什么？"))
             assertFalse(

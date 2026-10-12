@@ -1300,6 +1300,7 @@ export type PublicOperationalConfig = z.infer<
 
 export const FeatureConfigSchema = z
 	.object({
+		nearbyRestaurantCollectionEnabled: z.boolean().optional(),
 		coverageName: z.string(),
 		dataRightsMode: DataRightsModeSchema,
 		aiEnabled: z.boolean(),
@@ -1445,6 +1446,17 @@ export const PlaceSearchCoordinateSchema = z
 	.strict();
 export type PlaceSearchCoordinate = z.infer<typeof PlaceSearchCoordinateSchema>;
 
+// City-only presentation lookup. Origin coordinates remain transient JSON body
+// data; no detailed address, supplier identifiers or coordinates are returned.
+export const LocationCityRequestSchema = z.object({
+	location: PlaceSearchCoordinateSchema,
+}).strict();
+export type LocationCityRequest = z.infer<typeof LocationCityRequestSchema>;
+export const LocationCityResponseSchema = z.object({
+	city: z.string().trim().min(1).max(80).nullable(),
+}).strict();
+export type LocationCityResponse = z.infer<typeof LocationCityResponseSchema>;
+
 export const PlaceSearchRequestSchema = z
 	.object({
 		location: PlaceSearchCoordinateSchema,
@@ -1502,6 +1514,38 @@ export const PlaceSearchResponseSchema = z
 	})
 	.strict();
 export type PlaceSearchResponse = z.infer<typeof PlaceSearchResponseSchema>;
+
+// Authorized device-local collection is separate from ranking and account
+// persistence. The user's origin remains transient request data only.
+export const NearbyRestaurantRequestSchema = z.object({
+	location: PlaceSearchCoordinateSchema,
+	page: z.number().int().min(1).max(2).default(1),
+}).strict();
+export type NearbyRestaurantRequest = z.infer<typeof NearbyRestaurantRequestSchema>;
+export const NearbyRestaurantSchema = z.object({
+	provider: DataSourceCodeSchema,
+	providerPlaceId: z.string().trim().min(1).max(160),
+	name: z.string().trim().min(1).max(160),
+	address: z.string().max(240),
+	location: PlaceSearchCoordinateSchema,
+	sourceRating: z.number().min(0).max(5).nullable(),
+	averageCostYuan: z.number().nonnegative().max(20_000).nullable(),
+	openStatus: z.enum(["OPEN", "CLOSED", "UNKNOWN"]),
+	tags: z.array(z.string().min(1).max(80)).max(20),
+	phone: z.string().max(160).nullable(),
+	sourceAttribution: z.string().min(1).max(80),
+	dataMode: DataModeSchema,
+}).strict();
+export type NearbyRestaurant = z.infer<typeof NearbyRestaurantSchema>;
+export const NearbyRestaurantResponseSchema = z.object({
+	radiusMeters: z.literal(3500),
+	retentionDays: z.literal(90),
+	page: z.number().int().min(1).max(2),
+	nextPage: z.literal(2).nullable(),
+	truncated: z.boolean(),
+	restaurants: z.array(NearbyRestaurantSchema).max(25),
+}).strict();
+export type NearbyRestaurantResponse = z.infer<typeof NearbyRestaurantResponseSchema>;
 
 // Administrator HTTP contracts are deliberately separated from the public
 // account contract. An administrator bearer can only be resolved against the

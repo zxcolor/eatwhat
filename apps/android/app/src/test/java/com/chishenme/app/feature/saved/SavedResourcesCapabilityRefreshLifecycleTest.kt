@@ -66,6 +66,46 @@ import retrofit2.Response
 @OptIn(ExperimentalCoroutinesApi::class)
 class SavedResourcesCapabilityRefreshLifecycleTest {
     @Test
+    fun `history entry loads history first without fetching favorites`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val api = ControlledSavedResourcesApi()
+            val viewModel = viewModel(api)
+            runCurrent()
+            val config = enabledConfig().let {
+                it.copy(persistenceCapabilities = it.persistenceCapabilities!!.copy(historyEnabled = true))
+            }
+            viewModel.start(config, initialSection = SavedResourcesSection.HISTORY)
+            runCurrent()
+            assertEquals(SavedResourcesSection.HISTORY, viewModel.state.value.selectedSection)
+            assertTrue(SavedResourcesSection.HISTORY in viewModel.state.value.loadedSections)
+            assertEquals(0, api.listFavoritesCalls)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `history entry cannot enable a section disabled by the server`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        try {
+            val api = ControlledSavedResourcesApi().apply {
+                favoritePages.addLast(FavoritesPage(emptyList(), null))
+            }
+            val viewModel = viewModel(api)
+            runCurrent()
+            viewModel.start(enabledConfig(), initialSection = SavedResourcesSection.HISTORY)
+            runCurrent()
+            assertEquals(SavedResourcesSection.FAVORITES, viewModel.state.value.selectedSection)
+            assertFalse(SavedResourcesSection.HISTORY in viewModel.state.value.enabledSections)
+            assertFalse(SavedResourcesSection.HISTORY in viewModel.state.value.loadedSections)
+            assertEquals(1, api.listFavoritesCalls)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
     fun `collection load failure remains distinct from a real empty page until retry succeeds`() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         try {

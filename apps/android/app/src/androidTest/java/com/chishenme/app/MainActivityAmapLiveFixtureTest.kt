@@ -17,6 +17,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
@@ -116,6 +117,28 @@ class MainActivityAmapLiveFixtureTest {
     }
 
     @Test
+    fun homepageDock_keepsLocationAndMovesSettingsToPersonal() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            enterManualLocation(scenario)
+            composeRule.onNodeWithText("今天中午吃什么").assertIsDisplayed()
+            composeRule.onNodeWithText("What to eat？").assertIsDisplayed()
+            composeRule.onNodeWithText("设置").assertDoesNotExist()
+            composeRule.onNodeWithText("投票").assertDoesNotExist()
+            composeRule.onNodeWithTag("dock-history").performClick().assertIsSelected()
+            composeRule.onNodeWithTag("dock-personal").performClick().assertIsSelected()
+            composeRule.onNodeWithTag("personal-settings").assertIsDisplayed().performClick()
+            awaitText("设置与透明度")
+            composeRule.onNodeWithContentDescription("返回").performClick()
+            composeRule.onNodeWithTag("personal-conditions").assertIsDisplayed().performClick()
+            composeRule.closeHomePanel()
+            composeRule.onNodeWithTag("dock-home").assertIsSelected()
+            composeRule.onNodeWithText(MANUAL_LOCATION).assertIsDisplayed()
+            composeRule.onNodeWithTag("home-decide").assertIsDisplayed()
+        }
+        assertEquals(setOf("/v1/config"), requests.map { it.path }.toSet())
+    }
+
+    @Test
     fun liveAmapResponse_isAttributedUnscoredAndCannotLaunchOutboundActions() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             enterManualLocation(scenario)
@@ -128,7 +151,7 @@ class MainActivityAmapLiveFixtureTest {
             captureSyntheticScreenshot("settings-overview.png")
             composeRule.onNodeWithContentDescription("返回").performClick()
             assertHomePreferenceControls(enabled = false)
-            scrollHomeTo(hasClickAction() and hasText("现在决定"))
+            scrollHomeTo(hasClickAction() and hasText("帮我选"))
                 .assertIsDisplayed()
                 .performClick()
 
@@ -212,7 +235,7 @@ class MainActivityAmapLiveFixtureTest {
             composeRule.onNode(hasText("工作日午餐") and hasClickAction()).assertIsSelected()
             val error = "当前服务最远支持 1250 米，你选择了 1500 米。请调整最远距离后重试。"
             composeRule.closeHomePanel()
-            scrollHomeTo(hasText("现在决定") and hasClickAction()).performClick()
+            scrollHomeTo(hasText("帮我选") and hasClickAction()).performClick()
             val submittedRadii = requests.filter { it.path == "/v1/recommendations" }.map {
                 Json.parseToJsonElement(it.body).jsonObject.getValue("radiusMeters").jsonPrimitive.content
             }
@@ -230,7 +253,7 @@ class MainActivityAmapLiveFixtureTest {
             radiusOption("750 m").assertIsSelected()
             captureSyntheticScreenshot("single-radius-explicit-correction.png")
             composeRule.closeHomePanel()
-            scrollHomeTo(hasText("现在决定") and hasClickAction()).performClick()
+            scrollHomeTo(hasText("帮我选") and hasClickAction()).performClick()
 
             awaitResultsReady(scenario)
             scrollResultsTo(RESTAURANT_NAME)
@@ -375,7 +398,7 @@ class MainActivityAmapLiveFixtureTest {
 
     private fun enterManualLocation(scenario: ActivityScenario<MainActivity>) {
         composeRule.waitUntil(UI_TIMEOUT_MS) {
-            hasUiText("同意并继续") || hasUiText("现在决定")
+            hasUiText("同意并继续") || hasUiText("帮我选")
         }
         if (hasUiText("同意并继续")) {
             assertEquals("隐私同意前不得访问配置或地点服务", 0, server.requestCount)
@@ -389,7 +412,7 @@ class MainActivityAmapLiveFixtureTest {
             decisionViewModel = ViewModelProvider(activity)[DecisionViewModel::class.java]
         }
         composeRule.waitUntil(UI_TIMEOUT_MS) {
-            requests.any { it.path == "/v1/config" } && hasUiText("现在决定") &&
+            requests.any { it.path == "/v1/config" } && hasUiText("帮我选") &&
                 decisionViewModel.uiState.value.remoteFeatureConfig is RemoteFeatureConfigState.Ready
         }
         // The configuration notice can cover even the first scrolled location action
@@ -419,7 +442,7 @@ class MainActivityAmapLiveFixtureTest {
     }
 
     private fun scrollOverviewToTop() {
-        if (hasUiText("现在决定")) return
+        if (hasUiText("帮我选")) return
         composeRule.onNode(
             hasScrollToIndexAction() and !hasAnyAncestor(hasScrollToIndexAction()),
         ).performScrollToIndex(0)

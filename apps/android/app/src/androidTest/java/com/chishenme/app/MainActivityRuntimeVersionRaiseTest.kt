@@ -147,7 +147,7 @@ class MainActivityRuntimeVersionRaiseTest {
             composeRule.onNodeWithText(PRIVACY_ACCEPT_ACTION).performClick()
 
             composeRule.waitUntil(timeoutMillis = CONFIG_TIMEOUT_MS) {
-                configCallCount.get() == 1 && hasUiText("现在决定")
+                configCallCount.get() == 1 && hasUiText("帮我选")
             }
             scenario.onActivity { activity ->
                 originalActivity = activity
@@ -239,7 +239,7 @@ class MainActivityRuntimeVersionRaiseTest {
                 configCallCount.get() >= 4 &&
                     decisionViewModel.runtimeAppVersionGate.currentState.status ==
                     RuntimeAppVersionGate.Status.COMPATIBLE &&
-                    hasUiText("现在决定")
+                    hasUiText("帮我选")
             }
             val recoveredCompatibleGeneration = assertCompatibleConfiguration(decisionViewModel)
             assertTrue(
@@ -273,7 +273,7 @@ class MainActivityRuntimeVersionRaiseTest {
                 decisionViewModel.uiState.value.input.location?.label,
             )
 
-            composeRule.onNode(hasText("现在决定") and hasClickAction())
+            composeRule.onNode(hasText("帮我选") and hasClickAction())
                 .assertIsDisplayed()
                 .assertIsEnabled()
                 .performClick()
@@ -284,7 +284,7 @@ class MainActivityRuntimeVersionRaiseTest {
             }.isSuccess
             if (!reachedNewRecommendation) {
                 failWithDecisionDiagnostics(
-                    prefix = "兼容配置解锁后点击现在决定未产生结果；" +
+                    prefix = "兼容配置解锁后点击帮我选未产生结果；" +
                         "server.requestCount=${server.requestCount}",
                     viewModel = decisionViewModel,
                 )
@@ -342,7 +342,7 @@ class MainActivityRuntimeVersionRaiseTest {
             .assertIsDisplayed()
             .performClick()
         assertEquals(MANUAL_LOCATION, viewModel.uiState.value.input.location?.label)
-        composeRule.onNode(hasText("现在决定") and hasClickAction())
+        composeRule.onNode(hasText("帮我选") and hasClickAction())
             .assertIsDisplayed()
             .assertIsEnabled()
             .performClick()
@@ -695,7 +695,7 @@ class MainActivityRuntimeVersionRaiseTest {
         private const val NEW_RESTAURANT_NAME = "恢复后新推荐（虚构）"
 
         private val REMOTE_PRODUCT_TEXTS = listOf(
-            "现在决定",
+            "帮我选",
             "搜索附近餐厅 / 菜系 / 食物",
             "账号与安全",
             "收藏与账号记录",

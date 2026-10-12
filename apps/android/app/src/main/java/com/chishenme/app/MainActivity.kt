@@ -18,6 +18,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.chishenme.app.auth.qq.QqOAuthManager
 import com.chishenme.app.auth.wechat.WechatOAuthManager
 import com.chishenme.app.data.local.ThemePreference
+import com.chishenme.app.data.local.NearbyCacheCleanupService
 import com.chishenme.app.feature.consent.ConsentScreen
 import com.chishenme.app.feature.consent.ConsentViewModel
 import com.chishenme.app.ui.AppNavigation
@@ -28,17 +29,20 @@ import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+    private val launchTimestampMillis = System.currentTimeMillis()
     @Inject lateinit var qqOAuth: QqOAuthManager
     @Inject lateinit var wechatOAuth: WechatOAuthManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        NearbyCacheCleanupService.schedule(this)
         setContent {
             ChiShenMeApp(
                 window = window,
                 qqOAuth = qqOAuth,
                 wechatOAuth = wechatOAuth,
+                launchTimestampMillis = launchTimestampMillis,
             )
         }
     }
@@ -55,6 +59,7 @@ private fun ChiShenMeApp(
     window: Window,
     qqOAuth: QqOAuthManager,
     wechatOAuth: WechatOAuthManager,
+    launchTimestampMillis: Long,
     consentViewModel: ConsentViewModel = hiltViewModel(),
 ) {
     val accepted by consentViewModel.privacyAccepted.collectAsStateWithLifecycle()
@@ -96,6 +101,7 @@ private fun ChiShenMeApp(
                 acceptanceState = acceptanceState,
             )
             true -> AppNavigation(
+                launchTimestampMillis = launchTimestampMillis,
                 onWithdrawPrivacy = {
                     consentViewModel.withdrawPrivacy {
                         runCatching { wechatOAuth.revokePrivacyConsent() }

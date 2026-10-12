@@ -87,6 +87,6 @@ import { RecommendationsService } from "./recommendations.service.js";
 			},
 		},
 	],
-	exports: [PLACE_PROVIDER],
+	exports: [PLACE_PROVIDER, AmapPlaceProvider],
 })
 export class RecommendationsModule {}

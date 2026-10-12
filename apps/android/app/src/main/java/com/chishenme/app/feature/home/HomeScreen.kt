@@ -38,7 +38,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.LocationOn
-import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -128,9 +127,12 @@ private enum class LocationPermissionRequest { INITIAL_LOCATION, PRECISION_UPGRA
 fun HomeScreen(
     state: DecisionUiState,
     viewModel: DecisionViewModel,
-    onOpenSettings: () -> Unit,
     onReconnectService: () -> Unit,
     onRecommendationStarted: () -> Unit,
+    resolveCity: suspend (LocationChoice) -> String?,
+    conditionsRequested: Boolean = false,
+    onConditionsRequestConsumed: () -> Unit = {},
+    nearbyStatus: String? = null,
 ) {
     val context = LocalContext.current
     val activity = context.findActivity()
@@ -256,6 +258,13 @@ fun HomeScreen(
     var locationPanelOpen by rememberSaveable { mutableStateOf(false) }
     var conditionsPanelOpen by rememberSaveable { mutableStateOf(false) }
 
+    LaunchedEffect(conditionsRequested) {
+        if (conditionsRequested) {
+            conditionsPanelOpen = true
+            onConditionsRequestConsumed()
+        }
+    }
+
     HomeSurfaceTheme {
         val homeColors = currentHomeVisualColors()
         val serviceMessage = remoteServiceStatusMessage(state)
@@ -372,9 +381,11 @@ fun HomeScreen(
         ) { padding ->
             HomeLanding(
                 modifier = Modifier.padding(padding),
-                meal = state.input.mealPeriod,
-                availableMeals = availableMealPeriods.map { it.first }.toSet(),
-                locationLabel = state.input.location?.label,
+                locationLabel = resolvedHomeLocationLabel(
+                    state.input.location,
+                    state.remoteFeatureConfig is RemoteFeatureConfigState.Ready,
+                    resolveCity,
+                ),
                 locationDescription = when {
                     state.locationState is LocationUiState.Locating -> "正在定位"
                     state.input.location == null -> "尚未选择地点，点击定位或手动选择"
@@ -382,19 +393,9 @@ fun HomeScreen(
                     state.input.location.isApproximate -> "已选择大致位置"
                     else -> "已选择本次出发地点"
                 },
-                conditionsDescription = buildString {
-                    append("预算 ")
-                    append(state.input.budgetMaxYuan?.let { "每人 " + it + " 元以内" } ?: "不限")
-                    append("，可用 " + state.input.availableMinutes + " 分钟，")
-                    append(travelLabel(state.input.travelMode))
-                    append("，最远 " + state.input.radiusMeters + " 米")
-                    if (state.input.excludedCuisines.isNotEmpty()) append("，这次不吃 " + state.input.excludedCuisines.joinToString())
-                },
                 decisionEnabled = recommendationEnabled && !selectionUnavailable,
                 showNotice = serviceMessage != null || state.formError != null || state.radiusError != null || selectionUnavailable,
-                onMeal = viewModel::setMealPeriod,
                 onLocation = { locationPanelOpen = true },
-                onConditions = { conditionsPanelOpen = true },
                 onDecide = {
                     if (viewModel.recommend()) onRecommendationStarted()
                     else if (state.input.location == null) locationPanelOpen = true
@@ -421,13 +422,6 @@ fun HomeScreen(
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
-                    item {
-                        OutlinedButton(onClick = { conditionsPanelOpen = false; onOpenSettings() }) {
-                            Icon(Icons.Rounded.Settings, contentDescription = "设置", modifier = Modifier.size(20.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("设置与账号")
-                        }
-                    }
                     item { formNotice() }
                     item {
                         HomeCard {

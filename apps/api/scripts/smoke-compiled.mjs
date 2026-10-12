@@ -182,6 +182,19 @@ try {
 		longitude: 121.4737,
 		crs: "WGS84",
 	};
+	const city = await requireJson(
+		await fetch(`${baseUrl}/v1/location-city`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ location: shanghaiLocation }),
+			signal: AbortSignal.timeout(2_000),
+		}),
+		503,
+		"/v1/location-city",
+	);
+	if (city.code !== "LOCATION_CITY_UNAVAILABLE") {
+		throw new Error("/v1/location-city did not fail closed without a live provider");
+	}
 	const recommendations = await requireJson(
 		await fetch(`${baseUrl}/v1/recommendations`, {
 			method: "POST",
@@ -234,7 +247,7 @@ try {
 	}
 
 	console.log(
-		`Compiled API smoke passed on an ephemeral local port: /health 200, /health/ready 200, /v1/config 200, /v1/location-search DEMO 200, Shanghai /v1/recommendations NATIONWIDE 200, Shanghai /v1/place-search NATIONWIDE 200.`,
+		`Compiled API smoke passed on an ephemeral local port: /health 200, /health/ready 200, /v1/config 200, /v1/location-search DEMO 200, /v1/location-city fail-closed 503, Shanghai /v1/recommendations NATIONWIDE 200, Shanghai /v1/place-search NATIONWIDE 200.`,
 	);
 } finally {
 	await stopChild(child);

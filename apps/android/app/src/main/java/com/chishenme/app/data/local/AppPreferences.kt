@@ -18,11 +18,11 @@ import kotlinx.coroutines.flow.map
 enum class ThemePreference { SYSTEM, LIGHT, DARK }
 
 object ConsentDocumentVersions {
-    const val PRIVACY = "privacy-alpha-2026-08-20.1"
+    const val PRIVACY = "privacy-alpha-2026-10-11.2"
     const val TERMS = "terms-alpha-2026-08-20.1"
-    const val SDK = "sdk-list-alpha-2026-08-26.4"
+    const val SDK = "sdk-list-alpha-2026-10-11.2"
     const val AI = "ai-notice-alpha-2026-08-20.1"
-    const val DISPLAY = "内部 Alpha 2026-08-26.4"
+    const val DISPLAY = "内部 Alpha 2026-10-11.2"
 }
 
 @Singleton

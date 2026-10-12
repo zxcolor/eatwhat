@@ -9,6 +9,7 @@ import {
 	type WeatherContextRequest,
 } from "@chi-shen-me/contracts";
 import { Inject, Injectable, Optional } from "@nestjs/common";
+import { NearbyRestaurantsService } from "../nearby-restaurants/nearby-restaurants.service.js";
 import { APP_CONFIG, type AppConfig } from "../config/app-config.js";
 import { DataRightsPolicy } from "../config/data-rights-policy.js";
 import {
@@ -99,6 +100,7 @@ export class FeatureConfigService {
 		private readonly supportFeedback: SupportFeedbackService,
 		@Optional()
 		private readonly operationalConfig?: OperationalConfigService,
+		@Optional() private readonly nearbyRestaurants?: NearbyRestaurantsService,
 	) {}
 
 	private supportsProfile(
@@ -204,6 +206,7 @@ export class FeatureConfigService {
 					? "全国范围"
 					: operational.coverage.areaCode,
 			dataRightsMode: effectiveDataRightsMode,
+			nearbyRestaurantCollectionEnabled: this.nearbyRestaurants?.enabled ?? false,
 			aiEnabled,
 			accountsEnabled: this.config.features.accountsEnabled,
 			favoritesEnabled,

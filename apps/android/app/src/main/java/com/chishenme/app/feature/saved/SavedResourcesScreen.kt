@@ -83,6 +83,9 @@ fun SavedResourcesScreen(
     viewModel: SavedResourcesViewModel,
     onBack: () -> Unit,
     onOpenAccount: () -> Unit,
+    title: String = "收藏与账号记录",
+    navigationContentDescription: String = "返回设置",
+    bottomBar: @Composable () -> Unit = {},
 ) {
     val snackbar = remember { SnackbarHostState() }
     var clearTarget by remember { mutableStateOf<ClearTarget?>(null) }
@@ -104,10 +107,10 @@ fun SavedResourcesScreen(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             AppTopBar(
-                title = "收藏与账号记录",
+                title = title,
                 subtitle = "跨设备内容与私有操作",
                 onBack = onBack,
-                navigationContentDescription = "返回设置",
+                navigationContentDescription = navigationContentDescription,
                 actions = {
                     IconButton(
                         onClick = viewModel::refresh,
@@ -119,6 +122,7 @@ fun SavedResourcesScreen(
             )
         },
         snackbarHost = { AppSnackbarHost(snackbar) },
+        bottomBar = bottomBar,
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),

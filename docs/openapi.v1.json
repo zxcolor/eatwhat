@@ -338,6 +338,117 @@
 				}
 			}
 		},
+		"/v1/location-city": {
+			"post": {
+				"operationId": "resolveLocationCity",
+				"tags": [
+					"Location city"
+				],
+				"summary": "将用户授权取得的位置实时解析为所在城市",
+				"description": "经纬度仅在严格 JSON POST body 中传输，crs 必填。服务端转换为高德所需坐标后只请求逆地理编码 base 地址字段，仅返回 city，无法确定城市时返回 null。四大直辖市的空 city 按 province 回退。不返回详细地址，不缓存位置或响应，不写入日志或数据库。每 IP 每进程最多 30 次/60 秒，独立限流；供应商未启用或故障时返回安全 503。",
+				"parameters": [
+					{
+						"$ref": "#/components/parameters/RequestCorrelationId"
+					},
+					{
+						"$ref": "#/components/parameters/ClientContractVersion"
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/LocationCityRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "仅城市名称，无法确定时为 null",
+						"headers": {
+							"X-ChiShenMe-Contract-Version": {
+								"$ref": "#/components/headers/ContractVersion"
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/LocationCityResponse"
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "无效 JSON、坐标、缺少 crs 或存在未声明字段",
+						"headers": {
+							"X-ChiShenMe-Contract-Version": {
+								"$ref": "#/components/headers/ContractVersion"
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"oneOf": [
+										{
+											"$ref": "#/components/schemas/InvalidRequestError"
+										},
+										{
+											"$ref": "#/components/schemas/InvalidJsonError"
+										}
+									]
+								}
+							}
+						}
+					},
+					"413": {
+						"$ref": "#/components/responses/PayloadTooLarge"
+					},
+					"415": {
+						"$ref": "#/components/responses/UnsupportedMediaType"
+					},
+					"429": {
+						"$ref": "#/components/responses/RateLimited"
+					},
+					"500": {
+						"$ref": "#/components/responses/InternalError"
+					},
+					"503": {
+						"description": "城市信息供应商未启用或暂时不可用",
+						"headers": {
+							"X-ChiShenMe-Contract-Version": {
+								"$ref": "#/components/headers/ContractVersion"
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"requestId": {
+											"$ref": "#/components/schemas/ErrorRequestId"
+										},
+										"code": {
+											"const": "LOCATION_CITY_UNAVAILABLE"
+										},
+										"message": {
+											"const": "城市信息暂时无法获取"
+										}
+									},
+									"required": [
+										"requestId",
+										"code",
+										"message"
+									],
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/v1/location-search": {
 			"post": {
 				"operationId": "searchLocations",
@@ -1866,6 +1977,88 @@
 					},
 					"503": {
 						"$ref": "#/components/responses/AdminUnavailable"
+					}
+				}
+			}
+		},
+		"/v1/restaurants/nearby": {
+			"post": {
+				"operationId": "collectNearbyRestaurants",
+				"tags": [
+					"Nearby restaurants"
+				],
+				"summary": "获取附近 3.5 km 内餐厅供手机本地保存 90 天",
+				"description": "查询中心仅在 HTTPS JSON body 中短暂处理，不写入自有 URL、日志、模型或数据库。固定餐饮类型，最多两页，每页最多 25 条；第一页不足 25 条时提前结束。page 只能为 1 或 2。AMAP 关闭、被优先级排除或运营开关关闭时失败。手机按启动时间戳分别保存文件，不混合多次启动；账号持久化和推荐排序权限不因本能力扩展。每个 IP 最多 120 请求/60 秒。",
+				"parameters": [
+					{
+						"$ref": "#/components/parameters/RequestCorrelationId"
+					},
+					{
+						"$ref": "#/components/parameters/ClientContractVersion"
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/NearbyRestaurantRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "本页餐厅、下一页及两页上限标志",
+						"headers": {
+							"X-ChiShenMe-Contract-Version": {
+								"$ref": "#/components/headers/ContractVersion"
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/NearbyRestaurantResponse"
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "坐标或页号不合法",
+						"headers": {
+							"X-ChiShenMe-Contract-Version": {
+								"$ref": "#/components/headers/ContractVersion"
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"oneOf": [
+										{
+											"$ref": "#/components/schemas/InvalidRequestError"
+										},
+										{
+											"$ref": "#/components/schemas/InvalidJsonError"
+										}
+									]
+								}
+							}
+						}
+					},
+					"413": {
+						"$ref": "#/components/responses/PayloadTooLarge"
+					},
+					"415": {
+						"$ref": "#/components/responses/UnsupportedMediaType"
+					},
+					"429": {
+						"$ref": "#/components/responses/RateLimited"
+					},
+					"500": {
+						"$ref": "#/components/responses/InternalError"
+					},
+					"503": {
+						"$ref": "#/components/responses/PlaceSearchProviderUnavailable"
 					}
 				}
 			}
@@ -3524,6 +3717,7 @@
 			"FeatureConfig": {
 				"type": "object",
 				"properties": {
+					"nearbyRestaurantCollectionEnabled": { "type": "boolean" },
 					"coverageName": {
 						"type": "string"
 					},
@@ -6287,6 +6481,282 @@
 					"requestId",
 					"code",
 					"message"
+				],
+				"additionalProperties": false
+			},
+			"LocationCityRequest": {
+				"type": "object",
+				"properties": {
+					"location": {
+						"type": "object",
+						"properties": {
+							"latitude": {
+								"type": "number",
+								"minimum": -90,
+								"maximum": 90
+							},
+							"longitude": {
+								"type": "number",
+								"minimum": -180,
+								"maximum": 180
+							},
+							"crs": {
+								"type": "string",
+								"enum": [
+									"WGS84",
+									"GCJ02"
+								]
+							}
+						},
+						"required": [
+							"latitude",
+							"longitude",
+							"crs"
+						],
+						"additionalProperties": false
+					}
+				},
+				"required": [
+					"location"
+				],
+				"additionalProperties": false
+			},
+			"LocationCityResponse": {
+				"type": "object",
+				"properties": {
+					"city": {
+						"anyOf": [
+							{
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 80
+							},
+							{
+								"type": "null"
+							}
+						]
+					}
+				},
+				"required": [
+					"city"
+				],
+				"additionalProperties": false
+			},
+			"NearbyRestaurantRequest": {
+				"type": "object",
+				"properties": {
+					"location": {
+						"type": "object",
+						"properties": {
+							"latitude": {
+								"type": "number",
+								"minimum": -90,
+								"maximum": 90
+							},
+							"longitude": {
+								"type": "number",
+								"minimum": -180,
+								"maximum": 180
+							},
+							"crs": {
+								"type": "string",
+								"enum": [
+									"WGS84",
+									"GCJ02"
+								]
+							}
+						},
+						"required": [
+							"latitude",
+							"longitude",
+							"crs"
+						],
+						"additionalProperties": false
+					},
+					"page": {
+						"default": 1,
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 2
+					}
+				},
+				"required": [
+					"location"
+				],
+				"additionalProperties": false
+			},
+			"NearbyRestaurantResponse": {
+				"type": "object",
+				"properties": {
+					"radiusMeters": {
+						"type": "number",
+						"const": 3500
+					},
+					"retentionDays": {
+						"type": "number",
+						"const": 90
+					},
+					"page": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 2
+					},
+					"nextPage": {
+						"anyOf": [
+							{
+								"type": "number",
+								"const": 2
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"truncated": {
+						"type": "boolean"
+					},
+					"restaurants": {
+						"maxItems": 25,
+						"type": "array",
+						"items": {
+							"type": "object",
+							"properties": {
+								"provider": {
+									"type": "string",
+									"pattern": "^[A-Z][A-Z0-9_]{1,31}$"
+								},
+								"providerPlaceId": {
+									"type": "string",
+									"minLength": 1,
+									"maxLength": 160
+								},
+								"name": {
+									"type": "string",
+									"minLength": 1,
+									"maxLength": 160
+								},
+								"address": {
+									"type": "string",
+									"maxLength": 240
+								},
+								"location": {
+									"type": "object",
+									"properties": {
+										"latitude": {
+											"type": "number",
+											"minimum": -90,
+											"maximum": 90
+										},
+										"longitude": {
+											"type": "number",
+											"minimum": -180,
+											"maximum": 180
+										},
+										"crs": {
+											"type": "string",
+											"enum": [
+												"WGS84",
+												"GCJ02"
+											]
+										}
+									},
+									"required": [
+										"latitude",
+										"longitude",
+										"crs"
+									],
+									"additionalProperties": false
+								},
+								"sourceRating": {
+									"anyOf": [
+										{
+											"type": "number",
+											"minimum": 0,
+											"maximum": 5
+										},
+										{
+											"type": "null"
+										}
+									]
+								},
+								"averageCostYuan": {
+									"anyOf": [
+										{
+											"type": "number",
+											"minimum": 0,
+											"maximum": 20000
+										},
+										{
+											"type": "null"
+										}
+									]
+								},
+								"openStatus": {
+									"type": "string",
+									"enum": [
+										"OPEN",
+										"CLOSED",
+										"UNKNOWN"
+									]
+								},
+								"tags": {
+									"maxItems": 20,
+									"type": "array",
+									"items": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 80
+									}
+								},
+								"phone": {
+									"anyOf": [
+										{
+											"type": "string",
+											"maxLength": 160
+										},
+										{
+											"type": "null"
+										}
+									]
+								},
+								"sourceAttribution": {
+									"type": "string",
+									"minLength": 1,
+									"maxLength": 80
+								},
+								"dataMode": {
+									"type": "string",
+									"enum": [
+										"LIVE",
+										"DEMO"
+									]
+								}
+							},
+							"required": [
+								"provider",
+								"providerPlaceId",
+								"name",
+								"address",
+								"location",
+								"sourceRating",
+								"averageCostYuan",
+								"openStatus",
+								"tags",
+								"phone",
+								"sourceAttribution",
+								"dataMode"
+							],
+							"additionalProperties": false
+						}
+					}
+				},
+				"required": [
+					"radiusMeters",
+					"retentionDays",
+					"page",
+					"nextPage",
+					"truncated",
+					"restaurants"
 				],
 				"additionalProperties": false
 			}

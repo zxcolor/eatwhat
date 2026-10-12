@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.chishenme.app.data.AuthRepository
 import com.chishenme.app.data.local.AppPreferences
+import com.chishenme.app.data.local.NearbyRestaurantCache
 import com.chishenme.app.data.local.ThemePreference
 import dagger.Lazy
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -13,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -22,12 +24,16 @@ class ConsentViewModel @Inject constructor(
     private val authRepository: Lazy<AuthRepository>,
     private val withdrawalMarker: PrivacyWithdrawalMarkerStore,
     private val privacyAuthorizationGate: PrivacyAuthorizationGate,
+    private val nearbyCache: Lazy<NearbyRestaurantCache>,
 ) : ViewModel() {
     private val mutableWithdrawalPersistenceFailed = MutableStateFlow(false)
 
     private val privacyConsent = PrivacyConsentCoordinator(
         persistedConsent = preferences.privacyAccepted,
-        persistConsent = preferences::setPrivacyAccepted,
+        persistConsent = { accepted ->
+            preferences.setPrivacyAccepted(accepted)
+            if (!accepted) nearbyCache.get().clear()
+        },
         revokeAuthAttempts = {
             privacyAuthorizationGate.revoke()
             authRepository.get().revokeAuthAttemptsForPrivacyWithdrawal()
@@ -47,6 +53,7 @@ class ConsentViewModel @Inject constructor(
         },
         clearLocalSession = {
             authRepository.get().clearLocalSession()
+            if (withdrawalMarker.isBlocked()) nearbyCache.get().clear()
         },
         durableWithdrawalBlocked = withdrawalMarker::isBlocked,
         blockWithdrawalDurably = withdrawalMarker::block,
@@ -55,6 +62,15 @@ class ConsentViewModel @Inject constructor(
     )
 
     val privacyAccepted: StateFlow<Boolean?> = privacyConsent.privacyAccepted
+    init {
+        // Finish a withdrawal interrupted by process death even while the
+        // first-run screen is shown. This only deletes local files.
+        viewModelScope.launch {
+            privacyAccepted.collectLatest { accepted ->
+                if (accepted == false) runCatching { nearbyCache.get().clear() }
+            }
+        }
+    }
     private val acceptanceController = ConsentAcceptanceController(
         scope = viewModelScope,
         accept = privacyConsent::acceptPrivacy,

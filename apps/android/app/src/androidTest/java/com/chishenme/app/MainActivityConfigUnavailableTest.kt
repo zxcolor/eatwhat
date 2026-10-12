@@ -160,7 +160,7 @@ class MainActivityConfigUnavailableTest {
                 !hasUiText(CONFIG_UNAVAILABLE_MESSAGE)
             }
             composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
-                hasUiText("现在决定")
+                hasUiText("帮我选")
             }
             composeRule.homeManualLocationAction()
                 .performScrollTo()
@@ -180,9 +180,9 @@ class MainActivityConfigUnavailableTest {
                 MANUAL_LOCATION,
                 decisionViewModel.uiState.value.input.location?.label,
             )
-            composeRule.onNodeWithText("现在决定").performScrollTo().assertIsDisplayed()
+            composeRule.onNodeWithText("帮我选").performScrollTo().assertIsDisplayed()
             composeRule.captureUiRefinementScreenshot("config-unavailable-home-overview.png")
-            val decisionAction = composeRule.onNode(hasText("现在决定") and hasClickAction())
+            val decisionAction = composeRule.onNode(hasText("帮我选") and hasClickAction())
             if (!runCatching { decisionAction.assertIsDisplayed() }.isSuccess) {
                 decisionAction.performScrollTo()
             }
@@ -200,7 +200,7 @@ class MainActivityConfigUnavailableTest {
             }.isSuccess
             if (!reachedRecommendationScreen) {
                 failWithDecisionDiagnostics(
-                    prefix = "点击现在决定后未进入推荐结果或失败页；server.requestCount=${server.requestCount}",
+                    prefix = "点击帮我选后未进入推荐结果或失败页；server.requestCount=${server.requestCount}",
                     viewModel = decisionViewModel,
                 )
             }

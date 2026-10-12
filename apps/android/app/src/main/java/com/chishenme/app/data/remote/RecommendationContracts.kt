@@ -257,6 +257,7 @@ data class RecommendationEvent(
 
 @Serializable
 data class FeatureConfig(
+	val nearbyRestaurantCollectionEnabled: Boolean = false,
     val coverageName: String,
     val dataRightsMode: DataRightsMode,
     val aiEnabled: Boolean,

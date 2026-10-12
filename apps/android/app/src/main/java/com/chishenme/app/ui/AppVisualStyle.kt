@@ -79,6 +79,7 @@ object AppDimens {
 
 object AppMotion {
     const val SelectionMillis = 180
+    val SelectionEasing = androidx.compose.animation.core.CubicBezierEasing(.77f, 0f, .175f, 1f)
     const val ContentMillis = 260
     const val SheetMillis = 420
 }

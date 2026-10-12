@@ -90,8 +90,8 @@ fun ConsentScreen(
                 )
                 ConsentFeature(
                     icon = { Icon(Icons.Rounded.LocationOn, null) },
-                    title = "位置只为这一顿",
-                    body = "精确位置仅用于当次推荐，不写入历史或分析事件。拒绝定位后仍可手动选址。",
+                    title = "打开应用时发现附近餐厅",
+                    body = "同意后请求定位，收集 3.5 km 内最多两页餐厅，与本次用户位置和定位精度一起，按启动时间分别保存到本机 90 天。拒绝定位后仍可手动选址。",
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 ConsentFeature(
@@ -218,7 +218,7 @@ internal fun DocumentDialog(document: ConsentDocument, onDismiss: () -> Unit) {
     when (document) {
         ConsentDocument.PRIVACY -> {
             title = "隐私政策摘要"
-            content = "精确坐标或你主动选择的固定地点只随 HTTPS 地点搜索/推荐请求提交给自有后端。仅当 AMAP 完成授权门禁并明确启用时，后端才会把单次查询中心转换为 GCJ-02 后提交高德；请求结束后不跨请求持久化高德 POI，坐标也不会进入行为事件或错误日志。游客无需注册。本页是内部 Alpha 摘要；涉及真实个人信息的邀请测试前，必须替换为包含公司主体、联系方式、处理目的、保留期限和权利入口的完整政策。"
+            content = "同意本政策并允许定位后，打开应用时会获取当前位置，通过 HTTPS 自有后端查询附近 3.5 km 内最多两页餐厅。已取得餐厅数据存储权，门店资料与本次用户经纬度、坐标系和定位精度（米）一起，按每次启动时间戳命名为独立 JSON 文件，保存于应用私有目录，保留 90 天，到期清理；系统未提供有效精度时记录为空，不推测精度。撤回隐私同意会停止收集并删除这些餐厅与定位记录。用户查询中心不进入行为事件或错误日志，服务端不保存位置记录。高德启用时，后端把单次查询中心转换为 GCJ-02 后提交高德。精确位置被拒绝时保存系统提供的大致位置与精度，范围以该位置为中心；拒绝所有定位权限仍可手动选址。游客无需注册。本页是内部 Alpha 摘要；邀请测试前需提供完整主体、联系方式及权利入口。"
         }
         ConsentDocument.TERMS -> {
             title = "用户协议摘要"

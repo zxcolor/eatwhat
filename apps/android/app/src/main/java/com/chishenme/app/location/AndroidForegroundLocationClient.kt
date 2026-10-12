@@ -23,7 +23,7 @@ class AndroidForegroundLocationClient @Inject constructor(
     @ApplicationContext private val context: Context,
 ) : ForegroundLocationClient {
     // The framework location service is not touched until currentLocation(), which is only
-    // reachable after privacy consent and an explicit tap on "自动定位".
+    // reachable after privacy consent and runtime location permission.
     private val locationManager: LocationManager by lazy {
         context.getSystemService(LocationManager::class.java)
     }
@@ -118,7 +118,7 @@ class AndroidForegroundLocationClient @Inject constructor(
             latitude = latitude,
             longitude = longitude,
             accuracyMeters = accuracy.toDouble().takeIf {
-                hasAccuracy() && it.isFinite() && it > 0.0 && it <= MAX_COORDINATE_ACCURACY_METERS
+                hasAccuracy() && it.isFinite() && it > 0.0
             },
             // Android framework Location is defined in the WGS84 datum.
             crs = CoordinateReferenceSystem.WGS84,
@@ -129,6 +129,5 @@ class AndroidForegroundLocationClient @Inject constructor(
 
     private companion object {
         const val PER_PROVIDER_TIMEOUT_MILLIS = 6_000L
-        const val MAX_COORDINATE_ACCURACY_METERS = 10_000.0
     }
 }
