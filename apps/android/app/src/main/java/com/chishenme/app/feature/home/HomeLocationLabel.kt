@@ -7,6 +7,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.platform.LocalContext
+import com.chishenme.app.data.remote.CoordinateReferenceSystem
 import com.chishenme.app.domain.LocationChoice
 import java.util.Locale
 import kotlin.coroutines.resume
@@ -15,17 +16,33 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
-/** Resolve only an already authorized foreground fix; never replace its coordinates. */
+/** Resolve the city of an already authorized foreground fix; never replace its coordinates. */
 @Composable
-internal fun resolvedHomeLocationLabel(location: LocationChoice?): String? {
+internal fun resolvedHomeLocationLabel(
+    location: LocationChoice?,
+    remoteEnabled: Boolean,
+    resolveCity: suspend (LocationChoice) -> String?,
+): String? {
     val context = LocalContext.current
-    val automatic = location?.label in setOf("我的当前位置", "我的大致位置")
-    val fallback = if (automatic && location != null) {
-        String.format(Locale.ROOT, "%.4f, %.4f", location.coordinate.latitude, location.coordinate.longitude)
-    } else location?.label
-    val label by produceState(fallback, location) {
+    val fallback = if (location != null) "城市暂未获取" else null
+    val label by produceState(fallback, location, remoteEnabled) {
         value = fallback
-        if (!automatic || location == null || !Geocoder.isPresent()) return@produceState
+        if (location != null && remoteEnabled) {
+            val city = withTimeoutOrNull(4_000) {
+                try { resolveCity(location) }
+                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (_: Exception) { null }
+            }
+            if (!city.isNullOrBlank()) {
+                value = city
+                return@produceState
+            }
+        }
+        // System Geocoder expects WGS84. A manual provider selection may carry GCJ-02;
+        // do not misinterpret it or fall back to its street/name as a city.
+        if (location == null || location.coordinate.crs != CoordinateReferenceSystem.WGS84 ||
+            !Geocoder.isPresent()
+        ) return@produceState
         val address = withTimeoutOrNull(4_000) {
             try {
                 val geocoder = Geocoder(context, Locale.SIMPLIFIED_CHINESE)
@@ -52,11 +69,17 @@ internal fun resolvedHomeLocationLabel(location: LocationChoice?): String? {
             } catch (_: Exception) { null }
         }
         address?.let {
-            val name = listOf(it.locality, it.subLocality, it.thoroughfare, it.subThoroughfare)
-                .filterNotNull().filter(String::isNotBlank).distinct().joinToString("")
-                .ifBlank { it.getAddressLine(0).orEmpty() }
-            if (name.isNotBlank()) value = if (location.isApproximate) "$name 附近" else name
+            homeCityName(it.locality, it.adminArea)?.let { city -> value = city }
         }
     }
     return label
+}
+
+/** A municipality may be reported as adminArea with a district in locality. */
+internal fun homeCityName(locality: String?, adminArea: String?): String? {
+    val administration = adminArea?.trim()?.takeIf(String::isNotEmpty)
+    val municipality = administration?.takeIf {
+        it.removeSuffix("市") in setOf("北京", "上海", "天津", "重庆")
+    }
+    return municipality ?: locality?.trim()?.takeIf(String::isNotEmpty)
 }

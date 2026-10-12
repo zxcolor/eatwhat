@@ -1446,6 +1446,17 @@ export const PlaceSearchCoordinateSchema = z
 	.strict();
 export type PlaceSearchCoordinate = z.infer<typeof PlaceSearchCoordinateSchema>;
 
+// City-only presentation lookup. Origin coordinates remain transient JSON body
+// data; no detailed address, supplier identifiers or coordinates are returned.
+export const LocationCityRequestSchema = z.object({
+	location: PlaceSearchCoordinateSchema,
+}).strict();
+export type LocationCityRequest = z.infer<typeof LocationCityRequestSchema>;
+export const LocationCityResponseSchema = z.object({
+	city: z.string().trim().min(1).max(80).nullable(),
+}).strict();
+export type LocationCityResponse = z.infer<typeof LocationCityResponseSchema>;
+
 export const PlaceSearchRequestSchema = z
 	.object({
 		location: PlaceSearchCoordinateSchema,

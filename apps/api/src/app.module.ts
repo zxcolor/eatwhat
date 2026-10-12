@@ -11,6 +11,7 @@ import { FavoritesModule } from "./favorites/favorites.module.js";
 import { FeatureConfigModule } from "./feature-config/feature-config.module.js";
 import { HealthModule } from "./health/health.module.js";
 import { LocationSearchModule } from "./location-search/location-search.module.js";
+import { LocationCityModule } from "./location-city/location-city.module.js";
 import { OperationalConfigModule } from "./operational-config/operational-config.module.js";
 import { PlaceSearchModule } from "./place-search/place-search.module.js";
 import { PrivateFeedbackModule } from "./private-feedback/private-feedback.module.js";
@@ -29,6 +30,7 @@ import { SupportFeedbackModule } from "./support-feedback/support-feedback.modul
 		FeatureConfigModule,
 		FavoritesModule,
 		LocationSearchModule,
+		LocationCityModule,
 		PlaceSearchModule,
 		RecommendationsModule,
 		RecommendationEventsModule,

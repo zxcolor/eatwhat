@@ -18,22 +18,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
-import com.chishenme.app.ui.AppDock
 import com.chishenme.app.ui.AppIcons
-import com.chishenme.app.ui.AppTab
 import com.chishenme.app.ui.AppTopBar
 
 /** Settings stay reachable for guests without entering the authentication flow. */
 @Composable
 fun PersonalScreen(
-    onSelectTab: (AppTab) -> Unit,
     onOpenAccount: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenConditions: () -> Unit,
 ) {
     Scaffold(
         topBar = { AppTopBar(title = "个人", subtitle = "账号、偏好与设置") },
-        bottomBar = { AppDock(AppTab.PERSONAL, onSelectTab) },
     ) { padding ->
         Column(
             Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp),

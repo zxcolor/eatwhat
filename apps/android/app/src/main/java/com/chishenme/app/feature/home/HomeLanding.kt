@@ -96,7 +96,7 @@ private fun HomeLocation(label: String?, description: String, onClick: () -> Uni
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 color = color,
-                style = MaterialTheme.typography.titleLarge,
+                style = MaterialTheme.typography.titleMedium,
             )
             Canvas(Modifier.size(12.dp)) {
                 drawLine(color, Offset(1f, size.height * .35f), Offset(size.width * .5f, size.height * .72f), 1.7.dp.toPx(), StrokeCap.Round)

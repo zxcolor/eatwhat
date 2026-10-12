@@ -1,17 +1,19 @@
 package com.chishenme.app
 
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Scaffold
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.Text
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -24,7 +26,7 @@ import com.chishenme.app.data.local.ThemePreference
 import com.chishenme.app.feature.account.PersonalScreen
 import com.chishenme.app.feature.home.HomeLanding
 import com.chishenme.app.feature.home.HomeSurfaceTheme
-import com.chishenme.app.ui.AppDock
+import com.chishenme.app.ui.AppTabShell
 import com.chishenme.app.ui.AppTab
 import com.chishenme.app.ui.theme.ChiShenMeTheme
 import java.util.concurrent.atomic.AtomicInteger
@@ -95,6 +97,40 @@ class HomeLandingTest {
         assertEquals(1, conditions.get())
     }
 
+    @Test
+    fun dock_staysFixedWhileIndicatorSlidesAndRetargets() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                activity.setContent {
+                    ChiShenMeTheme(ThemePreference.LIGHT) {
+                        AppTabShell(tab, { tab = it }) { modifier ->
+                            Box(modifier) { Text(tab.label, Modifier.testTag("tab-content")) }
+                        }
+                    }
+                }
+            }
+            val dock = composeRule.onNodeWithTag("app-dock").fetchSemanticsNode().boundsInRoot
+            val home = composeRule.onNodeWithTag("dock-indicator").fetchSemanticsNode().boundsInRoot
+            composeRule.mainClock.autoAdvance = false
+            composeRule.onNodeWithTag("dock-history").performClick()
+            composeRule.mainClock.advanceTimeByFrame()
+            composeRule.onNodeWithTag("tab-content").assertTextContains("历史")
+            composeRule.mainClock.advanceTimeBy(80)
+            val moving = composeRule.onNodeWithTag("dock-indicator").fetchSemanticsNode().boundsInRoot
+            val history = composeRule.onNodeWithTag("dock-history").fetchSemanticsNode().boundsInRoot
+            org.junit.Assert.assertTrue(moving.left > home.left && moving.left < history.left)
+            assertEquals(dock, composeRule.onNodeWithTag("app-dock").fetchSemanticsNode().boundsInRoot)
+            composeRule.onNodeWithTag("dock-personal").performClick()
+            composeRule.mainClock.advanceTimeBy(240)
+            composeRule.onNodeWithTag("tab-content").assertTextContains("个人")
+            val indicator = composeRule.onNodeWithTag("dock-indicator").fetchSemanticsNode().boundsInRoot
+            val personal = composeRule.onNodeWithTag("dock-personal").fetchSemanticsNode().boundsInRoot
+            org.junit.Assert.assertEquals(personal.left, indicator.left, 1f)
+            assertEquals(dock, composeRule.onNodeWithTag("app-dock").fetchSemanticsNode().boundsInRoot)
+            composeRule.mainClock.autoAdvance = true
+        }
+    }
+
     private fun withHome(enabled: Boolean = true, largeText: Boolean = false, assertions: () -> Unit) {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
@@ -103,24 +139,24 @@ class HomeLandingTest {
                         val density = LocalDensity.current
                         CompositionLocalProvider(LocalDensity provides Density(density.density, if (largeText) 1.6f else 1f)) {
                             HomeSurfaceTheme {
-                                if (tab == AppTab.PERSONAL) {
-                                    PersonalScreen(
-                                        onSelectTab = { tab = it },
-                                        onOpenAccount = {},
-                                        onOpenSettings = { settings.incrementAndGet() },
-                                        onOpenConditions = { conditions.incrementAndGet() },
-                                    )
-                                } else {
-                                    Scaffold(bottomBar = { AppDock(tab) { tab = it } }) { padding ->
-                                        HomeLanding(
-                                            modifier = Modifier.padding(padding),
-                                            locationLabel = if (largeText) "用于验证省略展示与触控的长地点名称" else null,
-                                            locationDescription = "合成界面测试，无真实位置",
-                                            decisionEnabled = enabled,
-                                            showNotice = false,
-                                            onLocation = { locations.incrementAndGet() },
-                                            onDecide = { decisions.incrementAndGet() },
-                                        )
+                                AppTabShell(tab, { tab = it }) { contentModifier ->
+                                    Box(contentModifier) {
+                                        if (tab == AppTab.PERSONAL) {
+                                            PersonalScreen(
+                                                onOpenAccount = {},
+                                                onOpenSettings = { settings.incrementAndGet() },
+                                                onOpenConditions = { conditions.incrementAndGet() },
+                                            )
+                                        } else {
+                                            HomeLanding(
+                                                locationLabel = if (largeText) "用于验证省略展示与触控的长地点名称" else null,
+                                                locationDescription = "合成界面测试，无真实位置",
+                                                decisionEnabled = enabled,
+                                                showNotice = false,
+                                                onLocation = { locations.incrementAndGet() },
+                                                onDecide = { decisions.incrementAndGet() },
+                                            )
+                                        }
                                     }
                                 }
                             }

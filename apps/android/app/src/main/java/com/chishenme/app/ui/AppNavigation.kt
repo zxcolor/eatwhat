@@ -3,11 +3,8 @@ package com.chishenme.app.ui
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -23,6 +20,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.chishenme.app.feature.decision.DecisionViewModel
@@ -34,6 +32,7 @@ import com.chishenme.app.feature.account.PersonalScreen
 import com.chishenme.app.feature.detail.DetailSessionExpiredScreen
 import com.chishenme.app.feature.detail.RestaurantDetailScreen
 import com.chishenme.app.feature.home.HomeScreen
+import com.chishenme.app.feature.home.HomeCityViewModel
 import com.chishenme.app.feature.nearby.NearbyCollectionViewModel
 import com.chishenme.app.feature.nearby.StartupNearbyCollection
 import com.chishenme.app.feature.nearby.NearbyPhase
@@ -71,6 +70,7 @@ fun AppNavigation(
     launchTimestampMillis: Long = System.currentTimeMillis(),
     decisionViewModel: DecisionViewModel = hiltViewModel(),
     nearbyViewModel: NearbyCollectionViewModel = hiltViewModel(),
+    cityViewModel: HomeCityViewModel = hiltViewModel(),
 ) {
     val decisionState by decisionViewModel.uiState.collectAsStateWithLifecycle()
     val nearbyState by nearbyViewModel.state.collectAsStateWithLifecycle()
@@ -122,6 +122,7 @@ fun AppNavigation(
     }
 
     val withdrawPrivacy: () -> Unit = {
+        cityViewModel.clear()
         nearbyViewModel.stop()
         decisionViewModel.clearSelectedResult()
         decisionViewModel.clearForPrivacyWithdrawal()
@@ -181,246 +182,242 @@ fun AppNavigation(
         }
     }
 
-    NavHost(
-        navController = navController,
-        startDestination = Routes.Home,
-        enterTransition = {
-            fadeIn(tween(AppMotion.ContentMillis)) +
-                slideInHorizontally(tween(AppMotion.ContentMillis)) { fullWidth -> fullWidth / 14 }
-        },
-        exitTransition = {
-            fadeOut(tween(AppMotion.SelectionMillis)) +
-                slideOutHorizontally(tween(AppMotion.SelectionMillis)) { fullWidth -> -fullWidth / 18 }
-        },
-        popEnterTransition = {
-            fadeIn(tween(AppMotion.ContentMillis)) +
-                slideInHorizontally(tween(AppMotion.ContentMillis)) { fullWidth -> -fullWidth / 14 }
-        },
-        popExitTransition = {
-            fadeOut(tween(AppMotion.SelectionMillis)) +
-                slideOutHorizontally(tween(AppMotion.SelectionMillis)) { fullWidth -> fullWidth / 18 }
-        },
-    ) {
-        composable(Routes.Home) {
-            HomeScreen(
-                state = decisionState,
-                viewModel = decisionViewModel,
-                onSelectTab = selectTab,
-                onReconnectService = refreshConfigAndInvalidateResultSessions,
-                onRecommendationStarted = { navController.navigate(Routes.Results) },
-                conditionsRequested = conditionsRequested,
-                onConditionsRequestConsumed = { conditionsRequested = false },
-                nearbyStatus = when (nearbyState.phase) {
-                    NearbyPhase.LOCATING -> if (nearbyState.attempt <= 1) "正在获取当前位置…" else "正在重试定位（${nearbyState.attempt - 1}/5）…"
-                    NearbyPhase.COLLECTING -> "正在保存附近餐厅，已保存 ${nearbyState.count} 家…"
-                    NearbyPhase.DONE -> if (nearbyState.location != null) "本次已保存 ${nearbyState.count} 家附近餐厅，保留 90 天" else null
-                    else -> null
-                },
-            )
-        }
-        composable(Routes.Personal) {
-            PersonalScreen(
-                onSelectTab = selectTab,
-                onOpenAccount = { navController.navigate(Routes.Account) },
-                onOpenSettings = { navController.navigate(Routes.Settings) },
-                onOpenConditions = {
-                    conditionsRequested = true
-                    selectTab(AppTab.HOME)
-                },
-            )
-        }
-        composable(Routes.History) {
-            val savedViewModel: SavedResourcesViewModel = hiltViewModel()
-            val savedState by savedViewModel.state.collectAsStateWithLifecycle()
-            LaunchedEffect(decisionState.remoteFeatureConfig, runtimeVersionGateState) {
-                savedViewModel.start(
-                    effectiveFeatureConfig,
-                    runtimeVersionGateState.trustedConfigurationGeneration,
-                    initialSection = SavedResourcesSection.HISTORY,
+    val backStackEntry by navController.currentBackStackEntryAsState()
+    val selectedTab = when (backStackEntry?.destination?.route ?: Routes.Home) {
+        Routes.Home -> AppTab.HOME
+        Routes.History -> AppTab.HISTORY
+        Routes.Personal -> AppTab.PERSONAL
+        else -> null
+    }
+    AppTabShell(selectedTab, selectTab) { contentModifier ->
+        NavHost(
+            modifier = contentModifier,
+            navController = navController,
+            startDestination = Routes.Home,
+            enterTransition = { EnterTransition.None },
+            exitTransition = { ExitTransition.None },
+            popEnterTransition = { EnterTransition.None },
+            popExitTransition = { ExitTransition.None },
+        ) {
+            composable(Routes.Home) {
+                HomeScreen(
+                    state = decisionState,
+                    viewModel = decisionViewModel,
+                    onReconnectService = refreshConfigAndInvalidateResultSessions,
+                    onRecommendationStarted = { navController.navigate(Routes.Results) },
+                    resolveCity = cityViewModel::resolve,
+                    conditionsRequested = conditionsRequested,
+                    onConditionsRequestConsumed = { conditionsRequested = false },
+                    nearbyStatus = when (nearbyState.phase) {
+                        NearbyPhase.LOCATING -> if (nearbyState.attempt <= 1) "正在获取当前位置…" else "正在重试定位（${nearbyState.attempt - 1}/5）…"
+                        NearbyPhase.COLLECTING -> "正在保存附近餐厅，已保存 ${nearbyState.count} 家…"
+                        NearbyPhase.DONE -> if (nearbyState.location != null) "本次已保存 ${nearbyState.count} 家附近餐厅，保留 90 天" else null
+                        else -> null
+                    },
                 )
             }
-            SavedResourcesScreen(
-                state = savedState,
-                viewModel = savedViewModel,
-                onBack = { selectTab(AppTab.HOME) },
-                onOpenAccount = { navController.navigate(Routes.Account) },
-                title = "历史",
-                navigationContentDescription = "返回首页",
-                bottomBar = { AppDock(AppTab.HISTORY, selectTab) },
-            )
-        }
-        composable(Routes.Results) {
-            ResultsScreen(
-                state = decisionState,
-                onBack = { navController.popBackStack() },
-                onRetry = decisionViewModel::retry,
-                onReroll = decisionViewModel::reroll,
-                onOpenDetail = { result ->
-                    val ready = decisionViewModel.uiState.value.loadState
-                        as? RecommendationLoadState.Ready
-                    if (ready?.trustedCompatibleConfiguration == true &&
-                        ready.response.results.any { it.resultToken == result.resultToken } &&
-                        decisionViewModel.recommendationSessionState(result.resultToken) ==
-                        ResultSessionState.CURRENT &&
-                        decisionViewModel.selectResultForDetail(result.resultToken)
-                    ) {
-                        runCatching { navController.navigate(Routes.Detail) }
-                            .onSuccess {
-                                decisionViewModel.recordEvent(result, RecommendationEventType.DETAIL)
-                            }
-                            .onFailure { decisionViewModel.clearSelectedResult() }
-                    }
-                },
-            )
-        }
-        composable(Routes.Detail) {
-            val persistenceViewModel: SavedResourcesViewModel = hiltViewModel()
-            val persistenceState by persistenceViewModel.state.collectAsStateWithLifecycle()
-            LaunchedEffect(decisionState.remoteFeatureConfig, runtimeVersionGateState) {
-                persistenceViewModel.applyCapabilities(
-                    effectiveFeatureConfig,
-                    runtimeVersionGateState.trustedConfigurationGeneration,
-                )
-            }
-            val closeDetail: () -> Unit = {
-                if (navController.popBackStack()) decisionViewModel.clearSelectedResult()
-            }
-            val result = decisionViewModel.selectedResultForDetail()
-            val ready = decisionState.loadState as? RecommendationLoadState.Ready
-            val resultSessionState = result?.let {
-                decisionViewModel.recommendationSessionState(it.resultToken)
-            }
-            if (result == null || ready == null || !ready.trustedCompatibleConfiguration ||
-                resultSessionState != ResultSessionState.CURRENT ||
-                ready.response.results.none {
-                    it.resultToken == result.resultToken
-                }
-            ) {
-                DetailSessionExpiredScreen(onBack = closeDetail)
-            } else {
-                RestaurantDetailScreen(
-                    result = result,
-                    resultSessionState = resultSessionState,
-                    resultSessionStateProvider = {
-                        decisionViewModel.recommendationSessionState(result.resultToken)
-                    },
-                    persistenceState = persistenceState,
-                    onBack = closeDetail,
-                    onEvent = { type -> decisionViewModel.recordEvent(result, type) },
-                    onFavorite = { group ->
-                        if (decisionViewModel.recommendationSessionState(result.resultToken) ==
-                            ResultSessionState.CURRENT
-                        ) {
-                            persistenceViewModel.createFavorite(
-                                effectiveFeatureConfig,
-                                ready.response,
-                                result,
-                                group,
-                            )
-                        }
-                    },
-                    onPrivateFeedback = { type ->
-                        if (decisionViewModel.recommendationSessionState(result.resultToken) ==
-                            ResultSessionState.CURRENT
-                        ) {
-                            persistenceViewModel.createPrivateFeedback(
-                                effectiveFeatureConfig,
-                                ready.response,
-                                result,
-                                type,
-                            )
-                        }
-                    },
+            composable(Routes.Personal) {
+                PersonalScreen(
                     onOpenAccount = { navController.navigate(Routes.Account) },
-                    onConsumePersistenceMessage = persistenceViewModel::consumeMessage,
+                    onOpenSettings = { navController.navigate(Routes.Settings) },
+                    onOpenConditions = {
+                        conditionsRequested = true
+                        selectTab(AppTab.HOME)
+                    },
                 )
             }
-        }
-        composable(Routes.Settings) {
-            // Settings state is not needed by the launch/home flow. Scope its
-            // ViewModel and collectors to this destination so DataStore/history
-            // work starts only when the user opens Settings.
-            val settingsViewModel: SettingsViewModel = hiltViewModel()
-            val aiEnabled by settingsViewModel.aiEnabled.collectAsStateWithLifecycle()
-            val theme by settingsViewModel.theme.collectAsStateWithLifecycle()
-            val decisionHistory by settingsViewModel.decisionHistory.collectAsStateWithLifecycle()
-            val nearbyCacheMessage by settingsViewModel.nearbyCacheMessage.collectAsStateWithLifecycle()
-            val preferenceVector by
-                settingsViewModel.recommendationPreferenceVector.collectAsStateWithLifecycle()
-            val preferenceVectorStored by
-                settingsViewModel.recommendationPreferenceVectorStored.collectAsStateWithLifecycle()
-
-            SettingsScreen(
-                aiEnabled = aiEnabled,
-                aiServiceAvailable = effectiveFeatureConfig?.aiEnabled == true,
-                theme = theme,
-                preferenceVector = preferenceVector,
-                preferenceVectorStored = preferenceVectorStored,
-                preferenceVectorCanAffectRanking =
-                    effectiveFeatureConfig?.dataRightsMode == DataRightsMode.LICENSED_ENRICHMENT,
-                onAiEnabledChange = settingsViewModel::setAiEnabled,
-                onThemeChange = settingsViewModel::setTheme,
-                onPreferenceVectorChange = settingsViewModel::setRecommendationPreferenceVector,
-                onResetPreferenceVector = settingsViewModel::resetRecommendationPreferenceVector,
-                onClearPreferenceVector = settingsViewModel::clearRecommendationPreferenceVector,
-                onBack = { navController.popBackStack() },
-                decisionHistory = decisionHistory,
-                onClearDecisionHistory = settingsViewModel::clearDecisionHistory,
-                onClearNearbyRestaurants = {
-                    nearbyViewModel.clearStatus()
-                    settingsViewModel.clearNearbyRestaurants()
-                },
-                nearbyCacheMessage = nearbyCacheMessage,
-                onOpenAccount = { navController.navigate(Routes.Account) },
-                onOpenSavedResources = { navController.navigate(Routes.SavedResources) },
-                onOpenSupportFeedback = {
-                    if (supportFeedbackEnabled) {
-                        navController.navigate(Routes.SupportFeedback)
+            composable(Routes.History) {
+                val savedViewModel: SavedResourcesViewModel = hiltViewModel()
+                val savedState by savedViewModel.state.collectAsStateWithLifecycle()
+                LaunchedEffect(decisionState.remoteFeatureConfig, runtimeVersionGateState) {
+                    savedViewModel.start(
+                        effectiveFeatureConfig,
+                        runtimeVersionGateState.trustedConfigurationGeneration,
+                        initialSection = SavedResourcesSection.HISTORY,
+                    )
+                }
+                SavedResourcesScreen(
+                    state = savedState,
+                    viewModel = savedViewModel,
+                    onBack = { selectTab(AppTab.HOME) },
+                    onOpenAccount = { navController.navigate(Routes.Account) },
+                    title = "历史",
+                    navigationContentDescription = "返回首页",
+                )
+            }
+            composable(Routes.Results) {
+                ResultsScreen(
+                    state = decisionState,
+                    onBack = { navController.popBackStack() },
+                    onRetry = decisionViewModel::retry,
+                    onReroll = decisionViewModel::reroll,
+                    onOpenDetail = { result ->
+                        val ready = decisionViewModel.uiState.value.loadState
+                            as? RecommendationLoadState.Ready
+                        if (ready?.trustedCompatibleConfiguration == true &&
+                            ready.response.results.any { it.resultToken == result.resultToken } &&
+                            decisionViewModel.recommendationSessionState(result.resultToken) ==
+                            ResultSessionState.CURRENT &&
+                            decisionViewModel.selectResultForDetail(result.resultToken)
+                        ) {
+                            runCatching { navController.navigate(Routes.Detail) }
+                                .onSuccess {
+                                    decisionViewModel.recordEvent(result, RecommendationEventType.DETAIL)
+                                }
+                                .onFailure { decisionViewModel.clearSelectedResult() }
+                        }
+                    },
+                )
+            }
+            composable(Routes.Detail) {
+                val persistenceViewModel: SavedResourcesViewModel = hiltViewModel()
+                val persistenceState by persistenceViewModel.state.collectAsStateWithLifecycle()
+                LaunchedEffect(decisionState.remoteFeatureConfig, runtimeVersionGateState) {
+                    persistenceViewModel.applyCapabilities(
+                        effectiveFeatureConfig,
+                        runtimeVersionGateState.trustedConfigurationGeneration,
+                    )
+                }
+                val closeDetail: () -> Unit = {
+                    if (navController.popBackStack()) decisionViewModel.clearSelectedResult()
+                }
+                val result = decisionViewModel.selectedResultForDetail()
+                val ready = decisionState.loadState as? RecommendationLoadState.Ready
+                val resultSessionState = result?.let {
+                    decisionViewModel.recommendationSessionState(it.resultToken)
+                }
+                if (result == null || ready == null || !ready.trustedCompatibleConfiguration ||
+                    resultSessionState != ResultSessionState.CURRENT ||
+                    ready.response.results.none {
+                        it.resultToken == result.resultToken
                     }
-                },
-                supportFeedbackEnabled = supportFeedbackEnabled,
-                minimumSupportedVersion = effectiveFeatureConfig?.minimumSupportedVersion,
-                onWithdrawPrivacy = withdrawPrivacy,
-            )
-        }
-        composable(Routes.Account) {
-            val accountViewModel: AccountViewModel = hiltViewModel()
-            val accountState by accountViewModel.state.collectAsStateWithLifecycle()
-            AccountScreen(
-                state = accountState,
-                remoteFeatureConfig = accountFeatureConfig,
-                viewModel = accountViewModel,
-                onBack = { navController.popBackStack() },
-            )
-        }
-        composable(Routes.SavedResources) {
-            val savedViewModel: SavedResourcesViewModel = hiltViewModel()
-            val savedState by savedViewModel.state.collectAsStateWithLifecycle()
-            LaunchedEffect(decisionState.remoteFeatureConfig, runtimeVersionGateState) {
-                savedViewModel.start(
-                    effectiveFeatureConfig,
-                    runtimeVersionGateState.trustedConfigurationGeneration,
+                ) {
+                    DetailSessionExpiredScreen(onBack = closeDetail)
+                } else {
+                    RestaurantDetailScreen(
+                        result = result,
+                        resultSessionState = resultSessionState,
+                        resultSessionStateProvider = {
+                            decisionViewModel.recommendationSessionState(result.resultToken)
+                        },
+                        persistenceState = persistenceState,
+                        onBack = closeDetail,
+                        onEvent = { type -> decisionViewModel.recordEvent(result, type) },
+                        onFavorite = { group ->
+                            if (decisionViewModel.recommendationSessionState(result.resultToken) ==
+                                ResultSessionState.CURRENT
+                            ) {
+                                persistenceViewModel.createFavorite(
+                                    effectiveFeatureConfig,
+                                    ready.response,
+                                    result,
+                                    group,
+                                )
+                            }
+                        },
+                        onPrivateFeedback = { type ->
+                            if (decisionViewModel.recommendationSessionState(result.resultToken) ==
+                                ResultSessionState.CURRENT
+                            ) {
+                                persistenceViewModel.createPrivateFeedback(
+                                    effectiveFeatureConfig,
+                                    ready.response,
+                                    result,
+                                    type,
+                                )
+                            }
+                        },
+                        onOpenAccount = { navController.navigate(Routes.Account) },
+                        onConsumePersistenceMessage = persistenceViewModel::consumeMessage,
+                    )
+                }
+            }
+            composable(Routes.Settings) {
+                // Settings state is not needed by the launch/home flow. Scope its
+                // ViewModel and collectors to this destination so DataStore/history
+                // work starts only when the user opens Settings.
+                val settingsViewModel: SettingsViewModel = hiltViewModel()
+                val aiEnabled by settingsViewModel.aiEnabled.collectAsStateWithLifecycle()
+                val theme by settingsViewModel.theme.collectAsStateWithLifecycle()
+                val decisionHistory by settingsViewModel.decisionHistory.collectAsStateWithLifecycle()
+                val nearbyCacheMessage by settingsViewModel.nearbyCacheMessage.collectAsStateWithLifecycle()
+                val preferenceVector by
+                    settingsViewModel.recommendationPreferenceVector.collectAsStateWithLifecycle()
+                val preferenceVectorStored by
+                    settingsViewModel.recommendationPreferenceVectorStored.collectAsStateWithLifecycle()
+
+                SettingsScreen(
+                    aiEnabled = aiEnabled,
+                    aiServiceAvailable = effectiveFeatureConfig?.aiEnabled == true,
+                    theme = theme,
+                    preferenceVector = preferenceVector,
+                    preferenceVectorStored = preferenceVectorStored,
+                    preferenceVectorCanAffectRanking =
+                        effectiveFeatureConfig?.dataRightsMode == DataRightsMode.LICENSED_ENRICHMENT,
+                    onAiEnabledChange = settingsViewModel::setAiEnabled,
+                    onThemeChange = settingsViewModel::setTheme,
+                    onPreferenceVectorChange = settingsViewModel::setRecommendationPreferenceVector,
+                    onResetPreferenceVector = settingsViewModel::resetRecommendationPreferenceVector,
+                    onClearPreferenceVector = settingsViewModel::clearRecommendationPreferenceVector,
+                    onBack = { navController.popBackStack() },
+                    decisionHistory = decisionHistory,
+                    onClearDecisionHistory = settingsViewModel::clearDecisionHistory,
+                    onClearNearbyRestaurants = {
+                        nearbyViewModel.clearStatus()
+                        settingsViewModel.clearNearbyRestaurants()
+                    },
+                    nearbyCacheMessage = nearbyCacheMessage,
+                    onOpenAccount = { navController.navigate(Routes.Account) },
+                    onOpenSavedResources = { navController.navigate(Routes.SavedResources) },
+                    onOpenSupportFeedback = {
+                        if (supportFeedbackEnabled) {
+                            navController.navigate(Routes.SupportFeedback)
+                        }
+                    },
+                    supportFeedbackEnabled = supportFeedbackEnabled,
+                    minimumSupportedVersion = effectiveFeatureConfig?.minimumSupportedVersion,
+                    onWithdrawPrivacy = withdrawPrivacy,
                 )
             }
-            SavedResourcesScreen(
-                state = savedState,
-                viewModel = savedViewModel,
-                onBack = { navController.popBackStack() },
-                onOpenAccount = { navController.navigate(Routes.Account) },
-            )
-        }
-        composable(Routes.SupportFeedback) {
-            val supportViewModel: SupportFeedbackViewModel = hiltViewModel()
-            val supportState by supportViewModel.state.collectAsStateWithLifecycle()
-            LaunchedEffect(supportFeedbackEnabled) {
-                supportViewModel.start(supportFeedbackEnabled)
+            composable(Routes.Account) {
+                val accountViewModel: AccountViewModel = hiltViewModel()
+                val accountState by accountViewModel.state.collectAsStateWithLifecycle()
+                AccountScreen(
+                    state = accountState,
+                    remoteFeatureConfig = accountFeatureConfig,
+                    viewModel = accountViewModel,
+                    onBack = { navController.popBackStack() },
+                )
             }
-            SupportFeedbackScreen(
-                state = supportState,
-                serverCapabilityEnabled = supportFeedbackEnabled,
-                viewModel = supportViewModel,
-                onBack = { navController.popBackStack() },
-            )
+            composable(Routes.SavedResources) {
+                val savedViewModel: SavedResourcesViewModel = hiltViewModel()
+                val savedState by savedViewModel.state.collectAsStateWithLifecycle()
+                LaunchedEffect(decisionState.remoteFeatureConfig, runtimeVersionGateState) {
+                    savedViewModel.start(
+                        effectiveFeatureConfig,
+                        runtimeVersionGateState.trustedConfigurationGeneration,
+                    )
+                }
+                SavedResourcesScreen(
+                    state = savedState,
+                    viewModel = savedViewModel,
+                    onBack = { navController.popBackStack() },
+                    onOpenAccount = { navController.navigate(Routes.Account) },
+                )
+            }
+            composable(Routes.SupportFeedback) {
+                val supportViewModel: SupportFeedbackViewModel = hiltViewModel()
+                val supportState by supportViewModel.state.collectAsStateWithLifecycle()
+                LaunchedEffect(supportFeedbackEnabled) {
+                    supportViewModel.start(supportFeedbackEnabled)
+                }
+                SupportFeedbackScreen(
+                    state = supportState,
+                    serverCapabilityEnabled = supportFeedbackEnabled,
+                    viewModel = supportViewModel,
+                    onBack = { navController.popBackStack() },
+                )
+            }
         }
     }
 }

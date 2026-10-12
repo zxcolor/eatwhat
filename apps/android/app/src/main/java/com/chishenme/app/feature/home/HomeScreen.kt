@@ -113,8 +113,6 @@ import com.chishenme.app.feature.config.RemoteFeatureConfigState
 import com.chishenme.app.location.LocationAccess
 import com.chishenme.app.location.LocationSettingsTarget
 import com.chishenme.app.ui.AppIcons
-import com.chishenme.app.ui.AppDock
-import com.chishenme.app.ui.AppTab
 import com.chishenme.app.ui.AppSnackbarHost
 import com.chishenme.app.location.LocationUiState
 import com.chishenme.app.location.presentation
@@ -129,9 +127,9 @@ private enum class LocationPermissionRequest { INITIAL_LOCATION, PRECISION_UPGRA
 fun HomeScreen(
     state: DecisionUiState,
     viewModel: DecisionViewModel,
-    onSelectTab: (AppTab) -> Unit,
     onReconnectService: () -> Unit,
     onRecommendationStarted: () -> Unit,
+    resolveCity: suspend (LocationChoice) -> String?,
     conditionsRequested: Boolean = false,
     onConditionsRequestConsumed: () -> Unit = {},
     nearbyStatus: String? = null,
@@ -380,11 +378,14 @@ fun HomeScreen(
         Scaffold(
             containerColor = homeColors.page,
             snackbarHost = { AppSnackbarHost(snackbarHostState) },
-            bottomBar = { AppDock(AppTab.HOME, onSelectTab) },
         ) { padding ->
             HomeLanding(
                 modifier = Modifier.padding(padding),
-                locationLabel = resolvedHomeLocationLabel(state.input.location),
+                locationLabel = resolvedHomeLocationLabel(
+                    state.input.location,
+                    state.remoteFeatureConfig is RemoteFeatureConfigState.Ready,
+                    resolveCity,
+                ),
                 locationDescription = when {
                     state.locationState is LocationUiState.Locating -> "正在定位"
                     state.input.location == null -> "尚未选择地点，点击定位或手动选择"

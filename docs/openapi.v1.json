@@ -338,6 +338,117 @@
 				}
 			}
 		},
+		"/v1/location-city": {
+			"post": {
+				"operationId": "resolveLocationCity",
+				"tags": [
+					"Location city"
+				],
+				"summary": "将用户授权取得的位置实时解析为所在城市",
+				"description": "经纬度仅在严格 JSON POST body 中传输，crs 必填。服务端转换为高德所需坐标后只请求逆地理编码 base 地址字段，仅返回 city，无法确定城市时返回 null。四大直辖市的空 city 按 province 回退。不返回详细地址，不缓存位置或响应，不写入日志或数据库。每 IP 每进程最多 30 次/60 秒，独立限流；供应商未启用或故障时返回安全 503。",
+				"parameters": [
+					{
+						"$ref": "#/components/parameters/RequestCorrelationId"
+					},
+					{
+						"$ref": "#/components/parameters/ClientContractVersion"
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/LocationCityRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "仅城市名称，无法确定时为 null",
+						"headers": {
+							"X-ChiShenMe-Contract-Version": {
+								"$ref": "#/components/headers/ContractVersion"
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/LocationCityResponse"
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "无效 JSON、坐标、缺少 crs 或存在未声明字段",
+						"headers": {
+							"X-ChiShenMe-Contract-Version": {
+								"$ref": "#/components/headers/ContractVersion"
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"oneOf": [
+										{
+											"$ref": "#/components/schemas/InvalidRequestError"
+										},
+										{
+											"$ref": "#/components/schemas/InvalidJsonError"
+										}
+									]
+								}
+							}
+						}
+					},
+					"413": {
+						"$ref": "#/components/responses/PayloadTooLarge"
+					},
+					"415": {
+						"$ref": "#/components/responses/UnsupportedMediaType"
+					},
+					"429": {
+						"$ref": "#/components/responses/RateLimited"
+					},
+					"500": {
+						"$ref": "#/components/responses/InternalError"
+					},
+					"503": {
+						"description": "城市信息供应商未启用或暂时不可用",
+						"headers": {
+							"X-ChiShenMe-Contract-Version": {
+								"$ref": "#/components/headers/ContractVersion"
+							}
+						},
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {
+										"requestId": {
+											"$ref": "#/components/schemas/ErrorRequestId"
+										},
+										"code": {
+											"const": "LOCATION_CITY_UNAVAILABLE"
+										},
+										"message": {
+											"const": "城市信息暂时无法获取"
+										}
+									},
+									"required": [
+										"requestId",
+										"code",
+										"message"
+									],
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/v1/location-search": {
 			"post": {
 				"operationId": "searchLocations",
@@ -6370,6 +6481,64 @@
 					"requestId",
 					"code",
 					"message"
+				],
+				"additionalProperties": false
+			},
+			"LocationCityRequest": {
+				"type": "object",
+				"properties": {
+					"location": {
+						"type": "object",
+						"properties": {
+							"latitude": {
+								"type": "number",
+								"minimum": -90,
+								"maximum": 90
+							},
+							"longitude": {
+								"type": "number",
+								"minimum": -180,
+								"maximum": 180
+							},
+							"crs": {
+								"type": "string",
+								"enum": [
+									"WGS84",
+									"GCJ02"
+								]
+							}
+						},
+						"required": [
+							"latitude",
+							"longitude",
+							"crs"
+						],
+						"additionalProperties": false
+					}
+				},
+				"required": [
+					"location"
+				],
+				"additionalProperties": false
+			},
+			"LocationCityResponse": {
+				"type": "object",
+				"properties": {
+					"city": {
+						"anyOf": [
+							{
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 80
+							},
+							{
+								"type": "null"
+							}
+						]
+					}
+				},
+				"required": [
+					"city"
 				],
 				"additionalProperties": false
 			},
