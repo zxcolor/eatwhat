@@ -14,6 +14,7 @@
 - `pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build` 通过：Node 1,300 项通过，3 项既有 PostgreSQL 条件项跳过；编译 API smoke 通过。
 - `assembleAlpha` 通过；`testDebugUnitTest lintDebug` 通过：461 项 JVM 测试全部成功，Lint 0 错误、19 条警告。新增城市字段选择、坐标请求、同坐标复用/并发和隐私撤回迟到响应等测试。
 - 在原模拟器实际点击三个 Dock 按钮，所有按钮的设备坐标逐页一致；截图确认灰色选中背景位于对应项。线上接口返回城市后，首页实际显示“北京市”，没有坐标文本。测试使用之前指定的公共地标模拟 GPS，不代表真实用户 GPS 测量。
+- 设备截图：[城市首页](./screenshots/stable-dock-city-20261012/home-city.png)、[个人页固定 Dock](./screenshots/stable-dock-city-20261012/personal-fixed-dock.png)。仅含城市级位置与未登录界面，不包含精确位置或账号资料。
 - 最新启动记录 COMPLETE、2 页、50 家餐厅，位置和精度存在。原始文件与页面截图只在忽略目录保存。
 - `assembleFixture assembleFixtureAndroidTest` 通过；只读独立模拟器中的 HomeLandingTest 4 项全部通过，覆盖固定 Dock、背景途中滑动及重新定位、禁用态导航、浅色和深色大字号截图。首次两项截图因 System UI ANR 弹窗失败，原始日志已保留；恢复隔离模拟器系统界面后完整重跑通过，没有改动断言或应用数据。测试模拟器已关闭，原模拟器保持运行。
 
