@@ -148,12 +148,7 @@ class MainActivityDecisionFlowTest {
                 .assertIsDisplayed()
                 .performClick()
                 .assertIsSelected()
-            scrollListTo("附近方位图")
-            composeRule.onNodeWithText("附近方位图")
-                .performScrollTo()
-                .assertIsDisplayed()
-                .performClick()
-                .assertIsSelected()
+            assertListOnlyPresentation()
 
             recreateActivity(scenario)
             composeRule.waitUntil(timeoutMillis = STARTUP_TIMEOUT_MS) {
@@ -167,12 +162,7 @@ class MainActivityDecisionFlowTest {
             composeRule.onNodeWithText(RESULTS_HEADING).assertIsDisplayed()
             scrollListTo("仅营业中")
             composeRule.onNodeWithText("仅营业中").assertIsSelected()
-            scrollListTo("附近方位图")
-            composeRule.onNodeWithText("附近方位图").assertIsSelected()
-            scrollListTo("附近方位图（非道路导航图）")
-            composeRule.onNodeWithText("附近方位图（非道路导航图）")
-                .performScrollTo()
-                .assertIsDisplayed()
+            assertListOnlyPresentation()
 
             scrollListTo(PRIMARY_DEMO_RESTAURANT, substring = true)
             composeRule.onNode(
@@ -248,16 +238,20 @@ class MainActivityDecisionFlowTest {
                 .performScrollTo()
                 .assertIsDisplayed()
                 .assertIsSelected()
-            scrollListTo("附近方位图")
-            composeRule.onNodeWithText("附近方位图")
-                .performScrollTo()
-                .assertIsDisplayed()
-                .assertIsSelected()
-            scrollListTo("附近方位图（非道路导航图）")
-            composeRule.onNodeWithText("附近方位图（非道路导航图）")
-                .performScrollTo()
-                .assertIsDisplayed()
+            assertListOnlyPresentation()
+            scrollListTo("本次结果筛选")
+            composeRule.captureUiRefinementScreenshot("results-list-only.png")
         }
+    }
+
+    private fun assertListOnlyPresentation() {
+        composeRule.onNodeWithText("列表").assertDoesNotExist()
+        composeRule.onNodeWithText("附近方位图").assertDoesNotExist()
+        scrollListTo("首个候选")
+        composeRule.onNodeWithText("首个候选")
+            .performScrollTo()
+            .assertIsDisplayed()
+        composeRule.onNodeWithText("附近方位图（非道路导航图）").assertDoesNotExist()
     }
 
     @Test

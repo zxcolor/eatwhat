@@ -47,7 +47,7 @@ internal fun HomeLanding(
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState())
                 .padding(horizontal = 18.dp, vertical = if (compact) 16.dp else 28.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(
                 "今天中午吃什么",
@@ -58,7 +58,7 @@ internal fun HomeLanding(
             )
             HomeLocation(locationLabel, locationDescription, onLocation)
             if (showNotice) notice()
-            Spacer(Modifier.height(if (compact) 0.dp else 8.dp))
+            Spacer(Modifier.height(if (compact) 0.dp else 4.dp))
             HomeDecisionCard(decisionEnabled, onDecide)
         }
     }

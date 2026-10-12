@@ -31,7 +31,7 @@
 - `/v1/config` 还返回当前运行配置的脱敏 `recommendationDefaults`（固定 `NATIONWIDE`、客户端建议半径、服务端最大半径）与 `minimumSupportedVersions`（Android 及可选 iOS/小程序）。建议半径不是服务端自动默认，推荐请求仍必须显式提交 `radiusMeters`。为兼容已部署旧响应，两个新对象在共享契约中可缺省，但当前服务总是发出。旧 `minimumSupportedVersion` 继续等于 Android 值。公开投影不含坐标、供应商身份、Secret、管理员或版本历史，也不代表上游健康/readiness。
 - 公开推荐结果已移除稳定 `providerPlaceId`，只返回两小时、请求作用域的 43 字符 HMAC `resultToken`。推荐事件只提交 `requestId/resultToken/type/occurredAt`；服务端从短期映射解析真实来源，同一 token 的同类事件只能接受一次。
 - 客户端在展示前再次拒绝明确停业、超半径、已知超预算和明确命中排除菜系的响应；未知价格或营业信息只做风险提示，不伪造事实。
-- 会话内推荐餐厅详情同时按服务端逐项 `actions` 与本地必要字段决定是否提供地图查询、复制地址和安全拨号；动作未授权、缺少电话、缺少地址或缺少导航查询信息时，对应按钮保持禁用并显示明确原因，Intent 工厂仍会再次拒绝执行。第三方 POI 不进入导航参数、SavedState 或本地持久化。推荐结果和详情选择只在 Activity 级内存 ViewModel 中跨配置重建保留；结果页仅把“仅营业中”等安全筛选和列表/方位图展示偏好写入可恢复 UI 状态，餐厅对象、坐标和 `resultToken` 不进入 Bundle、SavedState 或持久化。DEMO 结果的已开放动作只用于本地 UI 验收并带虚构数据警示；分享字段在全部 provider 上关闭。
+- 会话内推荐餐厅详情同时按服务端逐项 `actions` 与本地必要字段决定是否提供地图查询、复制地址和安全拨号；动作未授权、缺少电话、缺少地址或缺少导航查询信息时，对应按钮保持禁用并显示明确原因，Intent 工厂仍会再次拒绝执行。第三方 POI 不进入导航参数、SavedState 或本地持久化。推荐结果和详情选择只在 Activity 级内存 ViewModel 中跨配置重建保留；结果页固定展示候选列表，已移除附近方位图及展示切换；仅把“仅营业中”等安全筛选写入可恢复 UI 状态，餐厅对象、坐标和 `resultToken` 不进入 Bundle、SavedState 或持久化。DEMO 结果的已开放动作只用于本地 UI 验收并带虚构数据警示；分享字段在全部 provider 上关闭。
 - 本机最近决策使用字段白名单，只保留时间、餐段、模式、预算、用时、交通和结果数量，最多 30 条、90 天；不保存位置或餐厅信息，可单独清空，撤回隐私同意时原子删除。
 - API 全国坐标与半径校验、硬过滤、透明排序、Top 3 多样性、规则版本和确定性 AI 回退；不存在北京或四环地理门禁。
 - `LIVE_DISPLAY_ONLY` 与 `LICENSED_ENRICHMENT` 双数据权利模式；后者已按实际供应商逐项查询数据库 authorization operation。

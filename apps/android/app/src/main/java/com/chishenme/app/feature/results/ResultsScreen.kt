@@ -3,11 +3,9 @@ package com.chishenme.app.feature.results
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -16,8 +14,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -59,20 +55,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.LiveRegionMode
-import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
-import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
@@ -362,17 +350,12 @@ private fun ReadyContent(
         return
     }
 
-    // Only harmless presentation/filter primitives are saveable. The response,
+    // Only harmless filter primitives are saveable. The response,
     // tokens, POI fields and coordinates remain exclusively in the Activity
     // ViewModel and disappear on process death.
-    var presentationName by rememberSaveable(response.requestId) {
-        mutableStateOf(ResultsPresentation.LIST.name)
-    }
     var openNowOnly by rememberSaveable(response.requestId) { mutableStateOf(false) }
     var knownPriceWithinBudgetOnly by rememberSaveable(response.requestId) { mutableStateOf(false) }
     var cuisineTagQuery by rememberSaveable(response.requestId) { mutableStateOf("") }
-    val presentation = ResultsPresentation.entries.firstOrNull { it.name == presentationName }
-        ?: ResultsPresentation.LIST
     val filter = remember(openNowOnly, knownPriceWithinBudgetOnly, cuisineTagQuery) {
         RecommendationResultsFilterState(
             openNowOnly = openNowOnly,
@@ -439,13 +422,6 @@ private fun ReadyContent(
         }
 
         item {
-            ResultsPresentationToggle(
-                selected = presentation,
-                onSelected = { presentationName = it.name },
-            )
-        }
-
-        item {
             ResultsLocalFilters(
                 filter = filter,
                 budgetMaxYuan = context.budgetMaxYuan,
@@ -463,7 +439,7 @@ private fun ReadyContent(
                     onClear = { updateFilter(RecommendationResultsFilterState()) },
                 )
             }
-        } else if (presentation == ResultsPresentation.LIST) {
+        } else {
             if (primaryResult != null) {
                 item {
                     AppSectionHeader(
@@ -542,17 +518,6 @@ private fun ReadyContent(
                     } else {
                         null
                     },
-                )
-            }
-        } else {
-            item {
-                NearbyOrientationMap(
-                    context = context,
-                    results = filteredResults,
-                    dataRightsMode = response.dataRightsMode,
-                    detailActionsAvailable = accessPolicy.detailActionsAvailable,
-                    onSelect = onSelect,
-                    onShowList = { presentationName = ResultsPresentation.LIST.name },
                 )
             }
         }
@@ -652,80 +617,6 @@ private fun ResultsHero(
             )
         }
     }
-}
-
-private enum class ResultsPresentation {
-    LIST,
-    ORIENTATION,
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ResultsPresentationToggle(
-    selected: ResultsPresentation,
-    onSelected: (ResultsPresentation) -> Unit,
-) {
-    val palette = currentAppVisualPalette()
-    Surface(
-        color = palette.cardMuted,
-        shape = RoundedCornerShape(AppDimens.CompactRadius),
-        border = BorderStroke(1.dp, palette.border),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            ResultsPresentationChip(
-                selected = selected == ResultsPresentation.LIST,
-                onClick = { onSelected(ResultsPresentation.LIST) },
-                label = "列表",
-                modifier = Modifier.weight(1f),
-                selectedColor = palette.accentSoft,
-            )
-            ResultsPresentationChip(
-                selected = selected == ResultsPresentation.ORIENTATION,
-                onClick = { onSelected(ResultsPresentation.ORIENTATION) },
-                label = "附近方位图",
-                modifier = Modifier.weight(1f),
-                selectedColor = palette.accentSoft,
-            )
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ResultsPresentationChip(
-    selected: Boolean,
-    onClick: () -> Unit,
-    label: String,
-    selectedColor: Color,
-    modifier: Modifier = Modifier,
-) {
-    FilterChip(
-        selected = selected,
-        onClick = onClick,
-        label = { Text(label, fontWeight = FontWeight.SemiBold) },
-        leadingIcon = if (selected) {
-            { Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
-        } else {
-            null
-        },
-        modifier = modifier.heightIn(min = AppDimens.MinTouchTarget),
-        shape = RoundedCornerShape(AppDimens.CompactRadius),
-        colors = FilterChipDefaults.filterChipColors(
-            containerColor = Color.Transparent,
-            labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            selectedContainerColor = selectedColor,
-            selectedLabelColor = MaterialTheme.colorScheme.primary,
-        ),
-        border = FilterChipDefaults.filterChipBorder(
-            enabled = true,
-            selected = selected,
-            borderColor = Color.Transparent,
-            selectedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.58f),
-        ),
-    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -845,260 +736,6 @@ private fun EmptyFilteredResults(
     }
 }
 
-@Composable
-private fun NearbyOrientationMap(
-    context: RecommendationContext,
-    results: List<RecommendationResult>,
-    dataRightsMode: DataRightsMode,
-    detailActionsAvailable: Boolean,
-    onSelect: (RecommendationResult) -> Unit,
-    onShowList: () -> Unit,
-) {
-    val projection = remember(context, results) {
-        NearbyOrientationProjector.project(context, results)
-    }
-    val resultsByRank = remember(results) { results.associateBy(RecommendationResult::rank) }
-    val gridColor = MaterialTheme.colorScheme.outlineVariant
-    val axisColor = MaterialTheme.colorScheme.outline
-    val palette = currentAppVisualPalette()
-    val mapFill = palette.blueSoft.copy(alpha = 0.56f)
-
-    AppCard {
-        AppSectionHeader(
-            title = "附近方位图（非道路导航图）",
-            subtitle = "只表示本次起点与结果的大致相对方位；不含道路、入口、实时路况或导航能力。",
-        )
-        Surface(
-            shape = RoundedCornerShape(AppDimens.CardRadius),
-            color = palette.cardMuted,
-            border = BorderStroke(1.dp, palette.border),
-        ) {
-            BoxWithConstraints(
-                modifier = Modifier.fillMaxWidth().height(MAP_HEIGHT).padding(8.dp),
-            ) {
-                Canvas(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .clearAndSetSemantics {
-                            contentDescription = projection.accessibilitySummary(dataRightsMode)
-                        },
-                ) {
-                    val center = Offset(size.width / 2f, size.height / 2f)
-                    val radiusX = size.width * 0.4f
-                    val radiusY = size.height * 0.4f
-                    val outerBounds = Rect(
-                        left = center.x - radiusX,
-                        top = center.y - radiusY,
-                        right = center.x + radiusX,
-                        bottom = center.y + radiusY,
-                    )
-                    val innerBounds = Rect(
-                        left = center.x - radiusX / 2f,
-                        top = center.y - radiusY / 2f,
-                        right = center.x + radiusX / 2f,
-                        bottom = center.y + radiusY / 2f,
-                    )
-                    drawOval(color = mapFill, topLeft = outerBounds.topLeft, size = outerBounds.size)
-                    drawOval(
-                        color = gridColor,
-                        topLeft = outerBounds.topLeft,
-                        size = outerBounds.size,
-                        style = Stroke(width = 2.dp.toPx()),
-                    )
-                    drawOval(
-                        color = gridColor,
-                        topLeft = innerBounds.topLeft,
-                        size = innerBounds.size,
-                        style = Stroke(width = 1.dp.toPx()),
-                    )
-                    drawLine(
-                        color = axisColor,
-                        start = Offset(center.x, center.y - radiusY),
-                        end = Offset(center.x, center.y + radiusY),
-                        strokeWidth = 1.dp.toPx(),
-                    )
-                    drawLine(
-                        color = axisColor,
-                        start = Offset(center.x - radiusX, center.y),
-                        end = Offset(center.x + radiusX, center.y),
-                        strokeWidth = 1.dp.toPx(),
-                    )
-                }
-
-                CompassLabel("北", Modifier.align(Alignment.TopCenter))
-                CompassLabel("东", Modifier.align(Alignment.CenterEnd))
-                CompassLabel("南", Modifier.align(Alignment.BottomCenter))
-                CompassLabel("西", Modifier.align(Alignment.CenterStart))
-
-                val markerScale = LocalDensity.current.fontScale.coerceIn(1f, 1.35f)
-                val userMarkerSize = USER_MARKER_SIZE * markerScale
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier
-                        .offset(
-                            x = maxWidth * CENTER_FRACTION - userMarkerSize / 2f,
-                            y = maxHeight * CENTER_FRACTION - userMarkerSize / 2f,
-                        )
-                        .size(userMarkerSize)
-                        .clearAndSetSemantics { },
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text("你", fontWeight = FontWeight.Bold)
-                    }
-                }
-
-                projection.points.forEach { point ->
-                    val result = resultsByRank[point.rank] ?: return@forEach
-                    val markerSize = (
-                        if (point.isPrimary) PRIMARY_MARKER_SIZE else ALTERNATIVE_MARKER_SIZE
-                    ) * markerScale
-                    val markerX = (maxWidth * point.xFraction - markerSize / 2f)
-                        .coerceIn(0.dp, maxWidth - markerSize)
-                    val markerY = (maxHeight * point.yFraction - markerSize / 2f)
-                        .coerceIn(0.dp, maxHeight - markerSize)
-                    val markerModifier = Modifier
-                        .offset(
-                            x = markerX,
-                            y = markerY,
-                        )
-                        .size(markerSize)
-                    val markerColor = if (point.isPrimary) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.tertiary
-                    }
-                    val markerContentColor = if (point.isPrimary) {
-                        MaterialTheme.colorScheme.onPrimary
-                    } else {
-                        MaterialTheme.colorScheme.onTertiary
-                    }
-                    if (detailActionsAvailable) {
-                        Surface(
-                            onClick = { onSelect(result) },
-                            shape = CircleShape,
-                            color = markerColor,
-                            contentColor = markerContentColor,
-                            tonalElevation = 5.dp,
-                            modifier = markerModifier.semantics(mergeDescendants = true) {
-                                contentDescription = point.accessibilityDescription(dataRightsMode)
-                                role = Role.Button
-                            },
-                        ) {
-                            OrientationMarkerLabel(point.rank)
-                        }
-                    } else {
-                        Surface(
-                            shape = CircleShape,
-                            color = markerColor,
-                            contentColor = markerContentColor,
-                            tonalElevation = 5.dp,
-                            modifier = markerModifier.clearAndSetSemantics {
-                                contentDescription = point.accessibilityDescription(dataRightsMode)
-                            },
-                        ) {
-                            OrientationMarkerLabel(point.rank)
-                        }
-                    }
-                }
-            }
-        }
-
-        Text(
-            "外圈约 " + distanceLabel(projection.scaleMeters) + if (
-                dataRightsMode == DataRightsMode.LIVE_DISPLAY_ONLY
-            ) {
-                "；数字表示数据源原始顺序。"
-            } else {
-                "；数字表示原推荐排名。"
-            },
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        projection.points.forEach { point ->
-            val result = resultsByRank[point.rank] ?: return@forEach
-            if (detailActionsAvailable) {
-                TextButton(
-                    onClick = { onSelect(result) },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(
-                        point.rank.toString() + ". " + point.restaurantName + " · " +
-                            point.direction.displayName + " · " +
-                            orientationDistanceLabel(point.calculatedDistanceMeters),
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(resultOrderLabel(point, dataRightsMode))
-                }
-            } else {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        point.rank.toString() + ". " + point.restaurantName + " · " +
-                            point.direction.displayName + " · " +
-                            orientationDistanceLabel(point.calculatedDistanceMeters),
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(resultOrderLabel(point, dataRightsMode))
-                }
-            }
-        }
-        if (projection.skippedCount > 0) {
-            AppStatusBanner(
-                title = "部分结果未绘制",
-                body = "有 " + projection.skippedCount +
-                    " 条因坐标基准不一致、距离异常或坐标无效而未绘制；列表仍完整可用。",
-                tone = AppTone.WARNING,
-                icon = Icons.Rounded.Warning,
-            )
-        }
-        if (projection.points.isEmpty()) {
-            OutlinedButton(onClick = onShowList, modifier = Modifier.fillMaxWidth()) {
-                Text("切换列表查看全部结果")
-            }
-        }
-    }
-}
-
-@Composable
-private fun OrientationMarkerLabel(rank: Int) {
-    Box(contentAlignment = Alignment.Center) {
-        Text(
-            rank.toString(),
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.clearAndSetSemantics { },
-        )
-    }
-}
-
-internal fun resultOrderLabel(
-    point: NearbyOrientationPoint,
-    dataRightsMode: DataRightsMode,
-): String = if (dataRightsMode == DataRightsMode.LIVE_DISPLAY_ONLY) {
-    if (point.isPrimary) "首个候选" else "数据源顺序第 ${point.rank} 个"
-} else {
-    if (point.isPrimary) "主推荐" else "备选"
-}
-
-@Composable
-private fun CompassLabel(label: String, modifier: Modifier) {
-    Text(
-        label,
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = modifier.padding(6.dp).clearAndSetSemantics { },
-    )
-}
-
-private fun orientationDistanceLabel(meters: Double): String = if (meters < 1_000.0) {
-    "约 " + meters.toInt() + " 米"
-} else {
-    "约 " + oneDecimal(meters / 1_000.0) + " 公里"
-}
-
 internal fun alternativeHeading(totalResultCount: Int): String {
     val alternativeCount = (totalResultCount - 1).coerceAtLeast(0)
     return if (alternativeCount == 1) {
@@ -1109,11 +746,6 @@ internal fun alternativeHeading(totalResultCount: Int): String {
 }
 
 private const val MAX_CUISINE_QUERY_LENGTH = 30
-private const val CENTER_FRACTION = 0.5f
-private val MAP_HEIGHT = 340.dp
-private val USER_MARKER_SIZE = 42.dp
-private val PRIMARY_MARKER_SIZE = 54.dp
-private val ALTERNATIVE_MARKER_SIZE = 48.dp
 
 @Composable
 private fun RecommendationCard(

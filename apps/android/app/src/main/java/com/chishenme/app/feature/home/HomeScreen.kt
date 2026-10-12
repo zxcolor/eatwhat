@@ -384,7 +384,7 @@ fun HomeScreen(
         ) { padding ->
             HomeLanding(
                 modifier = Modifier.padding(padding),
-                locationLabel = state.input.location?.label,
+                locationLabel = resolvedHomeLocationLabel(state.input.location),
                 locationDescription = when {
                     state.locationState is LocationUiState.Locating -> "正在定位"
                     state.input.location == null -> "尚未选择地点，点击定位或手动选择"
@@ -393,14 +393,13 @@ fun HomeScreen(
                     else -> "已选择本次出发地点"
                 },
                 decisionEnabled = recommendationEnabled && !selectionUnavailable,
-                showNotice = serviceMessage != null || state.formError != null || state.radiusError != null || selectionUnavailable || nearbyStatus != null,
+                showNotice = serviceMessage != null || state.formError != null || state.radiusError != null || selectionUnavailable,
                 onLocation = { locationPanelOpen = true },
                 onDecide = {
                     if (viewModel.recommend()) onRecommendationStarted()
                     else if (state.input.location == null) locationPanelOpen = true
                 },
                 notice = {
-                    nearbyStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     serviceMessage?.let { RemoteServiceStatusCard(it, onReconnectService) }
                     if (selectionUnavailable) {
                         Text("当前餐段暂未开放，请选择可用餐段或重新连接服务。", color = MaterialTheme.colorScheme.error)
