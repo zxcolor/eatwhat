@@ -95,6 +95,10 @@ $script:RequiredMappings = @(
         BundleRelative = 'scripts/restore-database.sh'
     },
     [pscustomobject]@{
+        SourceRelative = 'infra/ecs/scripts/restore-extension-plan.sh'
+        BundleRelative = 'scripts/restore-extension-plan.sh'
+    },
+    [pscustomobject]@{
         SourceRelative = 'infra/ecs/scripts/rollback-database.sh'
         BundleRelative = 'scripts/rollback-database.sh'
     },
@@ -121,6 +125,10 @@ $script:RequiredMappings = @(
     [pscustomobject]@{
         SourceRelative = 'infra/postgres/bootstrap-extensions.sql'
         BundleRelative = 'sql/bootstrap-extensions.sql'
+    },
+    [pscustomobject]@{
+        SourceRelative = 'infra/postgres/restore-extensions.sql'
+        BundleRelative = 'sql/restore-extensions.sql'
     },
     [pscustomobject]@{
         SourceRelative = 'infra/postgres/role-grants.sql'
@@ -900,6 +908,12 @@ function Assert-EcsOperationalGates {
     if (-not $restore.Contains('chi_shen_me_restore_') -or
         -not $restore.Contains('--single-transaction') -or
         -not $restore.Contains('--role=schema_migrator') -or
+        -not $restore.Contains('--use-list="$2"') -or
+        -not $restore.Contains('backup PostGIS image differs from the running restore image') -or
+        -not $restore.Contains('source "$script_dir/restore-extension-plan.sh"') -or
+        -not $restore.Contains('run_extension_phase grant') -or
+        -not $restore.Contains('run_extension_phase revoke') -or
+        -not $restore.Contains('cmp -s "$extension_acl_before" "$extension_acl_after"') -or
         -not $restore.Contains('mutation_lock="$lock_directory/mutation.lock"') -or
         -not $restore.Contains('restore_lock="$lock_directory/postgres-restore.lock"') -or
         -not $restore.Contains('readlink -f -- "/proc/$$/fd/8"') -or

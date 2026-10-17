@@ -169,6 +169,10 @@ API Schema 校验 -> 全国坐标、半径和用户约束校验
   `verify-database-backup.sh` 复核精确文件集合、SHA-256 和 `pg_restore --list`；
   `restore-database.sh` 只恢复到全新的隔离数据库，不覆盖活动数据库。服务器本地
   dump 仍必须配合 ECS 快照和异机副本，隔离恢复通过也不等于已经执行生产回滚。
+- 隔离恢复先核对备份与运行容器的 PostGIS 镜像 ID，再按严格 TOC 允许清单预建扩展。
+  全部业务与扩展配置数据仍由 `schema_migrator` 在一次 `pg_restore --single-transaction`
+  中恢复；仅临时开放精确配置表 INSERT、序列 UPDATE 和所需 schema USAGE，随后撤回并核对
+  规范化 ACL/owner 与基线完全一致。未知扩展、缺失配置项或不匹配镜像在建库前拒绝。
 - Android 完整工件门禁统一为：
 
   ```powershell

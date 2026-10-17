@@ -394,6 +394,18 @@ scripts/restore-database.sh \
 单事务恢复、重新授予最小权限和核对 `schema_migrations` 的整个区间持续持有。锁冲突立即失败且
 不会创建恢复库。成功后保留恢复库作为证据；删除恢复库属于另一次明确且可审计的操作，不由该脚本代办。
 
+创建前还会核对备份 `postgis_image_id` 与实际运行容器的镜像 ID，并严格校验 TOC。
+允许的扩展为 `pgcrypto`、`postgis` 及备份确实包含的 `fuzzystrmatch`、
+`postgis_tiger_geocoder`、`postgis_topology`；普通数据库 provision 不会因此启用可选扩展。
+恢复专用 SQL 检查扩展版本、schema、owner，以及精确配置对象的 extension membership 和
+`extconfig` 注册。仅跳过已预建扩展及 `tiger`/`topology` schema 的创建项，所有配置数据和序列
+状态均保留，与业务数据一起以 `schema_migrator` 完成一次单事务恢复。临时权限仅包括精确
+配置表 INSERT、`topology.topology_id_seq` UPDATE 和所需 schema USAGE；恢复后撤回并核对
+ACL/owner 基线。恢复阶段失败会清理本次新建的失败库，原备份和活动库不变；恢复完成后若仅临时
+清单清理失败，脚本返回非零并保留已完成的恢复库供排查。序列 `setval` 本身不随事务回滚，
+所以失败库不可留作成功恢复使用。未知扩展或扩展 schema 中的额外对象须
+先独立审查，不能通过删除 TOC 数据项、扩大迁移角色权限或截断配置表来绕过。
+
 ## 7. 明确的数据库回滚
 
 生产回滚必须显式提供与备份编号绑定的确认文本：
