@@ -111,4 +111,6 @@ printf 'ADMIN_CONFIG_ROLLBACK_SCRIPT_FIXTURE=OK\n'
 # Local execution remains opt-in so an ordinary script check never opens a DB.
 if [[ "${GITHUB_ACTIONS:-}" == 'true' || "${ECS_DATABASE_SCRIPT_PSQL_E2E:-}" == '1' ]]; then
   bash "$fixture_dir/database-restore-psql.sh"
+  bash "$fixture_dir/database-restore-extensions.sh"
+  bash "$fixture_dir/database-restore-main.sh"
 fi
