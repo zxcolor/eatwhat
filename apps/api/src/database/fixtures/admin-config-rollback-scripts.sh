@@ -106,3 +106,9 @@ assert_postgres_unchanged() { return 1; }
 if rollback_old_api; then fail 'rollback ignored PostgreSQL change'; fi
 
 printf 'ADMIN_CONFIG_ROLLBACK_SCRIPT_FIXTURE=OK\n'
+
+# CI invokes this fixture from its isolated PostgreSQL integration job.
+# Local execution remains opt-in so an ordinary script check never opens a DB.
+if [[ "${GITHUB_ACTIONS:-}" == 'true' || "${ECS_DATABASE_SCRIPT_PSQL_E2E:-}" == '1' ]]; then
+  bash "$fixture_dir/database-restore-psql.sh"
+fi

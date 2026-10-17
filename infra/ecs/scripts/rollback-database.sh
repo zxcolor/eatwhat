@@ -115,8 +115,12 @@ if [[ "$rollback_kind" == 'wechat-union-aliases' ]]; then
     die 'schema 0012 downgrade is forbidden after any WeChat Union alias was stored'
 fi
 
+# psql expands variables in stdin SQL, but sends -c SQL directly to the server.
 for candidate in "$restore_database" "$preserved_database" "$failed_database"; do
-  existing="$(run_bootstrap_psql postgres -qAt -v candidate="$candidate" -c "SELECT 1 FROM pg_database WHERE datname = :'candidate';")"
+  existing="$(run_bootstrap_psql postgres -qAt -v candidate="$candidate" <<'SQL'
+SELECT 1 FROM pg_database WHERE datname = :'candidate';
+SQL
+)"
   [[ -z "$existing" ]] || die "rollback database name already exists: $candidate"
 done
 
@@ -134,13 +138,16 @@ cleanup() {
   if [[ "$completed" != 'true' && "$source_renamed" == 'true' ]]; then
     docker compose --env-file deployment.env stop --timeout 30 api >/dev/null 2>&1 || true
     if [[ "$target_activated" == 'true' ]]; then
-      run_bootstrap_psql postgres -qAt -v database=chi_shen_me -c \
-        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :'database' AND pid <> pg_backend_pid();" >/dev/null 2>&1 || true
-      run_bootstrap_psql postgres -v current=chi_shen_me -v failed="$failed_database" -c \
-        'ALTER DATABASE :"current" RENAME TO :"failed";' >/dev/null 2>&1 || true
+      run_bootstrap_psql postgres -qAt -v database=chi_shen_me <<'SQL' >/dev/null 2>&1 || true
+SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :'database' AND pid <> pg_backend_pid();
+SQL
+      run_bootstrap_psql postgres -v current=chi_shen_me -v failed="$failed_database" <<'SQL' >/dev/null 2>&1 || true
+ALTER DATABASE :"current" RENAME TO :"failed";
+SQL
     fi
-    run_bootstrap_psql postgres -v preserved="$preserved_database" -v current=chi_shen_me -c \
-      'ALTER DATABASE :"preserved" RENAME TO :"current";' >/dev/null 2>&1 || true
+    run_bootstrap_psql postgres -v preserved="$preserved_database" -v current=chi_shen_me <<'SQL' >/dev/null 2>&1 || true
+ALTER DATABASE :"preserved" RENAME TO :"current";
+SQL
     docker compose --env-file deployment.env up -d api >/dev/null 2>&1 || true
     "$script_dir/verify-runtime.sh" >/dev/null 2>&1 || true
   fi
@@ -149,13 +156,16 @@ cleanup() {
 trap cleanup EXIT
 
 docker compose --env-file deployment.env stop --timeout 30 api >/dev/null
-run_bootstrap_psql postgres -qAt -v database=chi_shen_me -c \
-  "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :'database' AND pid <> pg_backend_pid();" >/dev/null
-run_bootstrap_psql postgres -v current=chi_shen_me -v preserved="$preserved_database" -c \
-  'ALTER DATABASE :"current" RENAME TO :"preserved";'
+run_bootstrap_psql postgres -qAt -v database=chi_shen_me <<'SQL' >/dev/null
+SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :'database' AND pid <> pg_backend_pid();
+SQL
+run_bootstrap_psql postgres -v current=chi_shen_me -v preserved="$preserved_database" <<'SQL'
+ALTER DATABASE :"current" RENAME TO :"preserved";
+SQL
 source_renamed='true'
-run_bootstrap_psql postgres -v restored="$restore_database" -v current=chi_shen_me -c \
-  'ALTER DATABASE :"restored" RENAME TO :"current";'
+run_bootstrap_psql postgres -v restored="$restore_database" -v current=chi_shen_me <<'SQL'
+ALTER DATABASE :"restored" RENAME TO :"current";
+SQL
 target_activated='true'
 
 docker compose --env-file deployment.env up -d api >/dev/null
