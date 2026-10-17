@@ -11,7 +11,7 @@
 - API 固定为自有阿里云服务 `https://api.eatwhat.pro`，保留合法域名校验。
 - 微信后台须将该 HTTPS 域名配置为 request 合法域名；定位须完成平台相应接口与隐私声明配置。
 - `project.private.config.json` 仅本地保存，不提交。
-- 本轮未上传小程序或部署服务器；真实扫码、登录和定位另行验收。
+- 尚未上传小程序；真实扫码、登录和定位另行验收。后端发布进度与验证证据见 [PR #23](https://github.com/zxcolor/eatwhat/pull/23)。
 
 ## 开发与验证
 
@@ -36,7 +36,7 @@ pnpm exec biome lint apps/wechat/lib apps/wechat/pages apps/wechat/app.js apps/w
 | `pnpm lint`、`git diff --check` | 通过 |
 | `scripts/start-api-local.ps1 -EnvFile .env.local.example -ValidateOnly` | 通过；另实跑 `verify.ps1` 中子进程密钥隔离检查块 |
 
-完整 `scripts/verify.ps1` 尚未运行：当前进程未提供受控 Alpha 微信/QQ 公开 AppID；没有执行 Android 构建、GitHub CI、生产迁移、真实微信登录或真机定位。本轮验证不能替代合并/上线门禁。
+完整 `scripts/verify.ps1 -AlphaApiBaseUrl 'https://api.eatwhat.pro/'` 已在当前进程注入受控 Alpha 微信/QQ 公开 AppID 后通过，涵盖 Node 检查、部署包门禁、Android Debug / Fixture / Alpha 构建与 APK 完整性检查。分支与 PR 的 GitHub CI 也已通过；每次新提交仍须重新检查当前 HEAD，具体提交和运行链接记录在 PR 中。数据库部署演练、真实微信登录与真机定位分别验收，不能由这些本地测试替代。
 
 ## 微信登录与多端账号
 
