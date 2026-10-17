@@ -732,8 +732,36 @@ jobs:
       - name: Install dependencies and PostgreSQL client
         run: |
           pnpm install --frozen-lockfile
+          # pg_dump must match the PostgreSQL 17 service, not Ubuntu's default 16.
+          # The runner image removes its build-time PGDG source. Reject an
+          # unexpected retained source instead of risking conflicting Signed-By.
+          for source in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+            [[ -f "$source" ]] || continue
+            if grep -Fq 'apt.postgresql.org' "$source"; then
+              printf 'Unexpected existing PGDG source: %s\n' "$source" >&2
+              exit 1
+            fi
+          done
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl --fail --silent --show-error --location \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            --output /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+          printf '%s\n' \
+            'Types: deb' \
+            'URIs: https://apt.postgresql.org/pub/repos/apt' \
+            'Suites: noble-pgdg' \
+            'Architectures: amd64' \
+            'Components: main' \
+            'Signed-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc' \
+            | sudo tee /etc/apt/sources.list.d/pgdg.sources >/dev/null
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends postgresql-client
+          sudo apt-get install -y --no-install-recommends postgresql-client-17
+          printf '%s\n' /usr/lib/postgresql/17/bin >> "$GITHUB_PATH"
+          for tool in psql pg_dump pg_restore; do
+            version="$(/usr/lib/postgresql/17/bin/"$tool" --version)"
+            printf '%s\n' "$version"
+            [[ "$version" =~ PostgreSQL\)\ 17[.] ]]
+          done
       - name: Bootstrap extensions and isolated least-privilege roles
         env:
           PGHOST: 127.0.0.1

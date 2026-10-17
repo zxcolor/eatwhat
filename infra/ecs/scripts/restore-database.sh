@@ -85,6 +85,12 @@ postgres_container="$(docker compose --env-file deployment.env ps -q postgres)"
 [[ -n "$postgres_container" ]] || die 'PostgreSQL container is missing'
 [[ "$(docker inspect --format '{{.State.Status}}/{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$postgres_container")" == 'running/healthy' ]] ||
   die 'PostgreSQL container is not healthy'
+recorded_postgis_image="$(sed -n 's/^postgis_image_id=//p' "$backup_dir/METADATA.txt")"
+[[ "$recorded_postgis_image" =~ ^sha256:[0-9a-f]{64}$ &&
+   "$recorded_postgis_image" == "$(docker inspect --format '{{.Image}}' "$postgres_container")" ]] ||
+  die 'backup PostGIS image differs from the running restore image'
+
+source "$script_dir/restore-extension-plan.sh"
 
 run_bootstrap_psql() {
   local database="$1"
@@ -106,6 +112,17 @@ completed='false'
 cleanup() {
   local status="$?"
   if [[ -n "${restored_ledger:-}" ]]; then rm -f -- "$restored_ledger"; fi
+  if [[ -n "${filtered_restore_list:-}" ]]; then rm -f -- "$filtered_restore_list"; fi
+  if [[ -n "${extension_acl_before:-}" ]]; then rm -f -- "$extension_acl_before"; fi
+  if [[ -n "${extension_acl_after:-}" ]]; then rm -f -- "$extension_acl_after"; fi
+  if [[ -n "${container_restore_list:-}" ]]; then
+    if ! docker exec "$postgres_container" rm -f -- "$container_restore_list" >/dev/null; then
+      printf 'container restore list cleanup failed\n' >&2
+      # Preserve the original restore failure, but never report a clean success
+      # when the new container-side temporary file could not be removed.
+      if [[ "$status" -eq 0 ]]; then status=1; fi
+    fi
+  fi
   if [[ "$completed" != 'true' && "$created" == 'true' ]]; then
     run_bootstrap_psql postgres -qAt -v target="$restore_database" <<'SQL' >/dev/null || true
 SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :'target' AND pid <> pg_backend_pid();
@@ -118,16 +135,32 @@ SQL
 }
 trap cleanup EXIT
 
+# Validate every extension and its configuration-data records before creation.
+filtered_restore_list="$(mktemp /tmp/chi-shen-me-restore-list.XXXXXXXX)"
+restore_extensions="$(prepare_restore_extension_plan "$backup_dir/RESTORE_LIST.txt" "$filtered_restore_list" postgres_bootstrap)" ||
+  die 'backup extension restore plan was rejected'
+extension_acl_before="$(mktemp /tmp/chi-shen-me-restore-acl-before.XXXXXXXX)"
+extension_acl_after="$(mktemp /tmp/chi-shen-me-restore-acl-after.XXXXXXXX)"
+generated_container_restore_list="$(docker exec "$postgres_container" sh -eu -c 'umask 077; mktemp /tmp/chi-shen-me-restore-list.XXXXXXXX')"
+[[ "$generated_container_restore_list" =~ ^/tmp/chi-shen-me-restore-list[.][A-Za-z0-9]{8}$ ]] ||
+  die 'container restore list path is invalid'
+container_restore_list="$generated_container_restore_list"
+docker exec -i "$postgres_container" sh -eu -c 'cat > "$1"' sh "$container_restore_list" <"$filtered_restore_list"
+
 run_bootstrap_psql postgres -v target="$restore_database" <<'SQL'
 CREATE DATABASE :"target" OWNER schema_migrator TEMPLATE template0 ENCODING 'UTF8';
 SQL
 created='true'
 
-run_bootstrap_psql "$restore_database" \
-  -v migration_owner=schema_migrator \
-  -v runtime_role=api_runtime \
-  -v maintenance_role=retention_worker \
-  <"$bundle_root/sql/bootstrap-extensions.sql"
+run_extension_phase() {
+  run_bootstrap_psql "$restore_database" -qAt \
+    -v migration_owner=schema_migrator \
+    -v restore_extensions="$restore_extensions" \
+    -v restore_phase="$1" <"$bundle_root/sql/restore-extensions.sql"
+}
+run_extension_phase prepare
+run_extension_phase snapshot >"$extension_acl_before"
+run_extension_phase grant
 
 docker compose --env-file deployment.env exec -T postgres sh -eu -c '
   export PGPASSWORD="$(cat /run/secrets/postgres_bootstrap_password)"
@@ -142,8 +175,14 @@ docker compose --env-file deployment.env exec -T postgres sh -eu -c '
     --no-owner \
     --no-acl \
     --no-comments \
+    --use-list="$2" \
     --role=schema_migrator
-' sh "$restore_database" <"$backup_dir/chi_shen_me.pgdump"
+' sh "$restore_database" "$container_restore_list" <"$backup_dir/chi_shen_me.pgdump"
+
+run_extension_phase revoke
+run_extension_phase snapshot >"$extension_acl_after"
+cmp -s "$extension_acl_before" "$extension_acl_after" ||
+  die 'extension ownership or privileges changed during restore'
 
 {
   printf '\\set ON_ERROR_STOP on\n'
