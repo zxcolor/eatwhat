@@ -21,4 +21,5 @@
     <view wx:if="{{item.address}}" class="muted address">{{item.address}}</view>
     <view class="muted source">{{item.mode}} · {{item.sourceLabel}}</view>
   </view>
+  <view class="card"><view class="section-title">公共地标示例</view><view class="muted">以下是预设的近似位置，不是你的当前位置。只在你主动选择后作为推荐起点。</view><view class="chips"><button wx:for="{{landmarks}}" wx:key="index" class="chip" data-index="{{item.index}}" bindtap="landmark" disabled="{{busy || locating}}">{{item.name}}</button></view></view>
 </view>

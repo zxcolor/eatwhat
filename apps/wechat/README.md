@@ -21,14 +21,14 @@ node --test apps/wechat/tests/*.test.cjs
 pnpm exec biome lint apps/wechat/lib apps/wechat/pages apps/wechat/app.js apps/wechat/tests apps/wechat/scripts
 ```
 
-`check` / `build` 脚本只检查 JS 语法、JSON、页面文件与配置；不能替代微信开发者工具编译或真机验收。开发工具的首次实际编译发现 WXML 表达式转义错误，修正后首页、个人页与设置页已正常显示，深色/跟随系统切换正常，调试器为 0 errors。基础库 preload、热重载与 `reportRealtimeAction` 提示仍保留，未屏蔽警告。
+`check` / `build` 脚本只检查 JS 语法、JSON、页面文件与配置；不能替代微信开发者工具编译或真机验收。首次实际编译的 WXML 表达式错误已修正。首页、个人、设置、本机最近决策、附近缓存未授权态与反馈关闭态已在模拟器实际查看，深色/跟随系统切换正常，调试器为 0 errors。基础库 preload、热重载与 `reportRealtimeAction` 提示仍保留，未屏蔽警告。
 
 2026-10-17 本地验证记录：
 
 | 命令或检查 | 结果 |
 | --- | --- |
-| `node apps/wechat/scripts/check.cjs` | 8 页语法与配置通过 |
-| `node --test apps/wechat/tests/*.test.cjs` | 76 项通过，合成数据 |
+| `node apps/wechat/scripts/check.cjs` | 12 页语法与配置通过 |
+| `node --test apps/wechat/tests/*.test.cjs` | 181 项通过，合成数据 |
 | `pnpm --filter @chi-shen-me/contracts test` | 106 项通过，含 OpenAPI 路由与 schema 对照 |
 | `pnpm --filter @chi-shen-me/contracts typecheck` | 通过 |
 | `pnpm --filter @chi-shen-me/api test` | 1012 项通过；13 项需专用 PostgreSQL 环境的测试默认跳过；编译与本机临时端口冒烟通过 |
@@ -53,4 +53,6 @@ Android 原生 OAuth 接口保留原语义，不能接收小程序 code；小程
 
 ## 当前范围
 
-参见 [安卓功能对照](./PARITY.md)。这是从零重建的第一批功能，尚未宣称完成安卓全部功能或生产登录验收。
+参见 [安卓功能对照](./PARITY.md)。主要页面和账号/记录流程已移植；尚不宣称完成安卓全部功能或生产验收。小程序首次微信绑定、导出到本地文件及平台实际权限/身份/动作验收仍未完成。账号令牌只驻留内存，退出小程序后需要重新登录。
+
+隐私说明版本为 v2：本机决策摘要与独立选择的附近缓存有明确保留期，旧版同意状态不能自动授权新行为。撤回先停止请求，再清除账号状态、本机摘要及附近缓存；存储失败明确提示，并可从设置重试。

@@ -12,6 +12,11 @@
       <view wx:if="{{actionNotice}}" class="muted action-notice">{{actionNotice}}</view>
     </view>
     <view wx:if="{{error}}" class="error">{{error}}</view>
+    <view class="card"><view class="section-title">收藏与私有反馈</view><view class="muted">{{saveNotice}}</view>
+      <button wx:if="{{canFavorite}}" class="secondary" bindtap="saveFavorite" disabled="{{saveBusy || favoriteSaved}}">{{favoriteSaved ? '已收藏' : '加入收藏'}}</button>
+      <view wx:if="{{canFeedback}}" class="chips"><button wx:for="{{feedbackTypes}}" wx:key="type" class="chip" data-type="{{item.type}}" bindtap="feedback" disabled="{{saveBusy || item.submitted}}">{{item.label}}{{item.submitted ? ' · 已记录' : ''}}</button></view>
+      <button class="secondary" bindtap="openSaved" disabled="{{saveBusy}}">查看收藏与账号记录</button>
+    </view>
     <view class="card"><view class="section-title">为什么推荐</view><view wx:for="{{result.reasons}}" wx:key="code" class="reason">{{item.text}}</view><view wx:if="{{result.tags.length}}" class="chips"><text wx:for="{{result.tags}}" wx:key="*this" class="chip">{{item}}</text></view></view>
     <view class="card"><view class="section-title">到店前确认</view><view wx:for="{{result.warnings}}" wx:key="*this" class="muted warning">{{item}}</view><view class="muted warning">营业状态、价格和到店时间可能变化，请以商户实际情况为准。</view></view>
   </block>

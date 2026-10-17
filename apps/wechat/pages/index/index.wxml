@@ -6,7 +6,7 @@
     </button>
     <view class="consent-card" wx:if="{{!consent}}">
       <view class="label">先了解我们如何使用数据</view>
-      <view class="muted consent-copy">定位由你主动选择，只用于本次推荐。推荐结果和位置信息不保存到本机。</view>
+      <view class="muted consent-copy">定位由你主动选择。最近决策仅保存条件摘要；附近餐厅与位置缓存需要你单独开启。</view>
       <text class="link policy-link" bindtap="privacy">阅读隐私说明</text>
       <button class="primary" bindtap="accept">同意并开始</button>
     </view>
@@ -26,7 +26,8 @@
       <image class="empty-icon" src="/assets/history.svg"/>
       <view class="section-title">{{historyEnabled ? '账号记录' : '暂无可查看的历史'}}</view>
       <view class="muted">{{historyMessage}}</view>
-      <button class="secondary" data-page="account" bindtap="open">账号与安全</button>
+      <button class="secondary" data-page="local-records" bindtap="open">本机最近决策</button>
+      <button class="secondary" data-page="saved" bindtap="open">收藏与账号记录</button>
     </view>
   </view>
   <view class="tab-content" wx:else>
@@ -40,6 +41,7 @@
     <button class="personal-card" data-page="settings" bindtap="open">
       <image class="personal-icon" src="/assets/settings.svg"/><view class="personal-text"><view class="label">设置</view><view class="muted">主题、隐私与偏好设置</view></view><text class="arrow">›</text>
     </button>
+    <button class="personal-card" data-page="saved" bindtap="open"><image class="personal-icon" src="/assets/history.svg"/><view class="personal-text"><view class="label">收藏与账号记录</view><view class="muted">想去、常吃与私有反馈</view></view><text class="arrow">›</text></button>
   </view>
   <view class="dock-wrap">
     <view class="dock">

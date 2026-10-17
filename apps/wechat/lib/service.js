@@ -113,7 +113,9 @@ function validatePath(path) {
   }
   return route;
 }
-function request(path, options) {
+function request(path, options) { return executeRequest(path, options, false); }
+function requestBytes(path, options) { return executeRequest(path, options, true); }
+function executeRequest(path, options, binary) {
   options = options || {};
   if (!state.consent) return Promise.reject(failure('请先阅读并同意隐私政策。', 'CONSENT_REQUIRED'));
   let route;
@@ -121,7 +123,12 @@ function request(path, options) {
   let headers;
   try {
     route = validatePath(path);
+    if (binary) {
+      assert(/^\/v1\/account\/exports\/[0-9a-f-]+\/content$/i.test(route) && path === route && TOKEN.test(options.token || ''), '导出请求无效。', 'INVALID_PATH');
+      assert(integer(options.maxBytes, 1, 10485760), '导出大小限制无效。', 'INVALID_INPUT');
+    }
     method = options.method === undefined ? 'GET' : options.method;
+    if (binary) assert(method === 'GET' && options.data === undefined, '导出请求无效。', 'INVALID_INPUT');
     assert(oneOf(method, ['GET', 'POST', 'DELETE', 'PATCH', 'PUT']), '请求方式无效。', 'INVALID_INPUT');
     assert(method !== 'GET' || options.data === undefined, '读取请求不得携带敏感参数。', 'INVALID_INPUT');
     headers = { [CONTRACT_HEADER]: '1', 'Content-Type': 'application/json' };
@@ -144,7 +151,7 @@ function request(path, options) {
       assert(typeof wx !== 'undefined' && typeof wx.request === 'function', '网络服务暂不可用。', 'NETWORK_UNAVAILABLE');
       entry.task = wx.request({
         url: API_BASE + path, method, data: options.data, header: headers,
-        timeout: 15000, dataType: 'json', responseType: 'text', enableCache: false,
+        timeout: binary ? 20000 : 15000, dataType: binary ? 'other' : 'json', responseType: binary ? 'arraybuffer' : 'text', enableCache: false,
         success(response) {
           if (entry.settled) return;
           try {
@@ -164,7 +171,13 @@ function request(path, options) {
                   : status >= 500 ? '服务暂时不可用，请稍后重试。' : '本次请求未能完成，请检查输入后重试。';
               throw failure(message, `HTTP_${status}`, status);
             }
-            entry.finish(null, response.data);
+            if (route === '/v1/support-feedback') assert(response.statusCode === 202, '反馈服务响应未通过校验。', 'INVALID_RESPONSE');
+            if (binary) {
+              const headers = {};
+              Object.keys(header).forEach(key => { const lower = key.toLowerCase(); assert(headers[lower] === undefined); headers[lower] = String(header[key]); });
+              assert(response.statusCode === 200 && !headers.location && response.data instanceof ArrayBuffer && response.data.byteLength <= options.maxBytes && response.data.byteLength > 0, '导出内容未通过传输校验。', 'INVALID_RESPONSE');
+              entry.finish(null, { bytes: response.data, headers });
+            } else entry.finish(null, response.data);
           } catch (error) { entry.finish(safeFailures.has(error) ? error : invalidResponse()); }
         },
         fail() { entry.finish(epoch !== state.epoch || !state.consent ? cancelled() : failure('网络连接失败，请检查网络后重试。', 'NETWORK_ERROR')); },
@@ -413,4 +426,14 @@ async function recommend() {
   }
 }
 
-module.exports = { VERSION, DEFAULT_FILTERS, state, setConsent, refreshConfig, request, searchLocations, cityFor, recommend, setLocation, setFilters, invalidate };
+function recordEvent(index, type, expectedResponse) {
+  const response = state.results;
+  if (!state.consent || state.status !== 'ready' || !state.config?.serviceCapabilities.recommendationsEnabled || !response || response !== expectedResponse || !Number.isInteger(index) || !response.results[index] || !oneOf(type, ['IMPRESSION', 'DETAIL', 'NAVIGATION', 'CALL', 'REROLL'])) return Promise.resolve(false);
+  const age = Date.now() - Date.parse(response.generatedAt);
+  if (!Number.isFinite(age) || age < -60000 || age >= 7200000) return Promise.resolve(false);
+  const epoch = state.epoch;
+  const data = { requestId: response.requestId, resultToken: response.results[index].resultToken, type, occurredAt: new Date().toISOString() };
+  return request('/v1/recommendation-events', { method: 'POST', data }).then(() => epoch === state.epoch && state.results === response, () => false);
+}
+
+module.exports = { VERSION, DEFAULT_FILTERS, state, setConsent, refreshConfig, request, requestBytes, searchLocations, cityFor, recommend, recordEvent, setLocation, setFilters, invalidate };

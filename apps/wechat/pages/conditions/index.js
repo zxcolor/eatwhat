@@ -1,4 +1,5 @@
 const service = require('../../lib/service');
+const decisionUi = require('../../lib/decision-ui');
 const CUISINES = ['中式快餐', '面食', '米饭', '火锅', '川湘菜', '清真', '素食', '西餐'];
 const BASE_OPTIONS = {
   decisionMode: [{ value: 'QUICK', label: '帮我决定' }, { value: 'GUIDED', label: '按条件选' }],
@@ -10,7 +11,7 @@ const BASE_OPTIONS = {
 const WEATHER = [{ value: 'NONE', label: '不使用' }, { value: 'MINIMIZE_EXPOSURE', label: '少在户外停留' }, { value: 'WARMING', label: '想吃喝暖一点' }, { value: 'COOLING', label: '想吃喝清凉一点' }];
 
 Page({
-  data: { themeClass: '', filters: {}, options: {}, cuisines: [], preferredCuisines: [], locationLabel: '', hasLocation: false, canRecommend: false, softPreferences: false, showWeather: false, summary: '', error: '', selectionError: '', connecting: false },
+  data: { themeClass: '', filters: {}, options: {}, cuisines: [], preferredCuisines: [], preferences: [], aiAvailable: false, locationLabel: '', hasLocation: false, canRecommend: false, softPreferences: false, showWeather: false, summary: '', error: '', selectionError: '', connecting: false },
   onShow() {
     getApp().syncPage(this);
     if (!service.state.consent) return wx.reLaunch({ url: '/pages/index/index' });
@@ -56,6 +57,8 @@ Page({
       showWeather: capabilities.userReportedWeatherEnabled === true || (filters.weatherContext && filters.weatherContext.kind !== 'NONE'),
       cuisines: CUISINES.map((name) => ({ name, selected: (filters.excludedCuisines || []).includes(name) })),
       preferredCuisines: CUISINES.map((name) => ({ name, selected: (filters.preferredCuisines || []).includes(name) })),
+      preferences: [['quality', '品质'], ['time', '时间'], ['budget', '预算'], ['mealMatch', '餐次适合'], ['diversity', '多样性']].map(([key, label]) => ({ key, label, value: filters.preferenceVector[key] })),
+      aiAvailable: !!(recommendationsEnabled && config.aiEnabled && filters.target === 'MEAL' && filters.mealPeriod === 'LUNCH' && filters.weatherContext.kind === 'NONE'),
       summary: `${filters.budgetMaxYuan == null ? '预算不限' : `${filters.budgetMaxYuan} 元内`} · ${filters.availableMinutes} 分钟 · ${travel ? travel.label : '步行'} · ${filters.radiusMeters / 1000} 公里`,
     });
   },
@@ -68,6 +71,14 @@ Page({
     this.setData({ error: '' });
     this.sync();
   },
+  scenario(event) { this._draft = decisionUi.scenario(this._draft, event.currentTarget.dataset.value); this.sync(); },
+  preference(event) {
+    const key = event.currentTarget.dataset.key;
+    const value = Number(event.detail.value);
+    if (!this.data.softPreferences || !Object.keys(this._draft.preferenceVector).includes(key) || !Number.isInteger(value) || value < 0 || value > 100) return;
+    this._draft.preferenceVector = { ...this._draft.preferenceVector, [key]: value }; this.sync();
+  },
+  ai(event) { this._draft.aiAssistanceEnabled = this.data.aiAvailable && event.detail.value === true; this.sync(); },
   toggleCuisine(event) {
     const name = event.currentTarget.dataset.name;
     const preferred = event.currentTarget.dataset.preferred === 'yes';

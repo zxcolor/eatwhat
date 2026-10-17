@@ -1,6 +1,7 @@
 <view class="page {{themeClass}}">
   <view class="title">这一餐，怎么选</view><view class="subtitle">只为你一个人，选出最多 3 个用餐候选。</view>
   <view class="card" bindtap="location"><view class="label">出发地点</view><view class="row location-row"><text>{{locationLabel}}</text><text class="muted">更换 ›</text></view></view>
+  <view class="card"><view class="section-title">快捷场景</view><view class="chips"><button class="chip" data-value="IN_A_HURRY" bindtap="scenario">赶时间</button><button class="chip" data-value="WORKDAY_LUNCH" bindtap="scenario">工作午餐</button><button class="chip" data-value="BUSINESS_TRIP" bindtap="scenario">出差</button></view></view>
   <view class="card">
     <view class="section-title">决定方式</view>
     <view class="chips"><button wx:for="{{options.decisionMode}}" wx:key="value" class="chip {{item.selected ? 'selected' : ''}}" data-key="decisionMode" data-index="{{item.index}}" bindtap="select">{{item.label}}</button></view>
@@ -23,6 +24,8 @@
     <view class="section-title">最远距离</view><view class="chips"><button wx:for="{{options.radiusMeters}}" wx:key="value" class="chip {{item.selected ? 'selected' : ''}}" data-key="radiusMeters" data-index="{{item.index}}" bindtap="select">{{item.label}}</button></view>
     <block wx:if="{{softPreferences}}"><view class="section-title">探索偏好</view><view class="chips"><button wx:for="{{options.explorationMode}}" wx:key="value" class="chip {{item.selected ? 'selected' : ''}}" data-key="explorationMode" data-index="{{item.index}}" bindtap="select">{{item.label}}</button></view><view class="section-title">更想吃</view><view class="chips"><button wx:for="{{preferredCuisines}}" wx:key="name" class="chip {{item.selected ? 'selected' : ''}}" data-name="{{item.name}}" data-preferred="yes" bindtap="toggleCuisine">{{item.name}}</button></view></block>
     <view class="section-title">这次不吃</view><view class="chips"><button wx:for="{{cuisines}}" wx:key="name" class="chip {{item.selected ? 'selected' : ''}}" data-name="{{item.name}}" bindtap="toggleCuisine">{{item.name}}</button></view>
+    <block wx:if="{{softPreferences}}"><view class="section-title">偏好权重</view><view wx:for="{{preferences}}" wx:key="key"><view class="row"><text>{{item.label}}</text><text class="muted">{{item.value}}</text></view><slider min="0" max="100" step="5" value="{{item.value}}" data-key="{{item.key}}" bindchange="preference" activeColor="#345a45" /></view></block>
+    <view wx:if="{{aiAvailable}}" class="row"><text>辅助说明</text><switch checked="{{filters.aiAssistanceEnabled}}" bindchange="ai" color="#345a45" /></view>
   </view>
   <view wx:if="{{error || selectionError}}" class="error">{{error || selectionError}}</view>
   <view wx:if="{{!canRecommend}}" class="card"><view class="muted">云端服务尚未连接或当前未开放推荐。</view><button class="secondary" bindtap="refresh" loading="{{connecting}}" disabled="{{connecting}}">重新连接</button></view>

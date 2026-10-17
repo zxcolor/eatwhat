@@ -8,3 +8,15 @@
 .notice { padding: 24rpx; color: var(--accent); line-height: 1.65; }
 .footer-links { display: flex; gap: 20rpx; }
 .footer-links button { flex: 1; margin: 0; }
+.account-section { padding-top: 32rpx; margin-top: 24rpx; border-top: 1rpx solid var(--line); }
+.text-action { margin: 12rpx 0 0; padding: 0; background: transparent; color: var(--accent); text-align: left; font-size: 25rpx; line-height: 1.8; }
+.text-action::after { border: 0; }
+.scope-row { display: flex; align-items: center; justify-content: space-between; gap: 24rpx; }
+.export-status { padding: 24rpx 0; line-height: 1.9; overflow-wrap: anywhere; }
+.export-reader { margin-top: 28rpx; padding-top: 24rpx; border-top: 1rpx solid var(--line); }
+.export-body { height: 560rpx; margin-top: 20rpx; padding: 20rpx; box-sizing: border-box; border: 1rpx solid var(--line); border-radius: 16rpx; font-family: monospace; font-size: 23rpx; line-height: 1.6; white-space: pre-wrap; word-break: break-all; }
+.reader-actions { display: flex; gap: 20rpx; }
+.reader-actions button { flex: 1; }
+.danger-action { margin-top: 24rpx; border: 1rpx solid #a83745; background: transparent; color: #a83745; border-radius: 20rpx; font-size: 28rpx; }
+.theme-dark .danger-action { border-color: #f3a2ad; color: #f3a2ad; }
+.delete-panel { padding-top: 28rpx; margin-top: 28rpx; border-top: 1rpx solid var(--line); }

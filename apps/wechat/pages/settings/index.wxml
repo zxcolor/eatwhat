@@ -20,7 +20,9 @@
     <view class="section-title">隐私</view>
     <button class="secondary" bindtap="openPrivacy">查看隐私说明</button>
     <button wx:if="{{consent}}" class="secondary" bindtap="withdrawConsent">撤回隐私同意</button>
-    <view class="muted">定位由你主动发起。撤回同意将清除本次位置、推荐结果和登录状态。</view>
+    <view class="muted">撤回同意将停止服务请求，并清除本次状态与本机决策、附近缓存。</view>
   </view>
+  <view class="card"><view class="section-title">本机数据</view><button class="secondary" data-page="local-records" bindtap="open">最近决策与清理</button><button class="secondary" data-page="nearby" bindtap="open">附近餐厅缓存</button><view wx:if="{{localDataError}}" class="error">{{localDataError}}<button class="secondary" bindtap="retryCleanup">撤回同意并重试清理</button></view></view>
+  <view class="card"><view class="section-title">帮助</view><button class="secondary" data-page="support" bindtap="open">问题反馈</button></view>
   <view class="card"><view class="row"><text class="label">吃什么 · 微信小程序</text><text class="muted">{{version}}</text></view><view class="muted setting-description">从零构建中的开发版本。</view></view>
 </view>

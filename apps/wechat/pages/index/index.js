@@ -15,8 +15,8 @@ Page({
     this.setData({consent,status,error,historyEnabled,
       historyMessage:!consent ? '请先在首页阅读并同意隐私说明。'
         : status !== 'ready' ? '服务状态尚未确认，可在设置中重新检查。'
-        : historyEnabled ? '账号记录同步将在后续版本接入。'
-        : '当前服务未开放历史记录。推荐结果不会保存到本机。'});
+        : historyEnabled ? '登录后查看跨设备账号记录，或查看本机最近决策摘要。'
+        : '当前服务未开放账号历史。仍可查看不含餐厅和位置的本机决策摘要。'});
     if (!consent || !location) {
       this._citySequence += 1; this._cityLocation = null;
       this.setData({city:'当前位置'});
@@ -37,7 +37,7 @@ Page({
   privacy() { wx.navigateTo({url:'/pages/privacy/index'}); },
   open(event) {
     const page = event.currentTarget.dataset.page;
-    if (!['account','settings','conditions','location'].includes(page)) return;
+    if (!['account','settings','conditions','location','saved','local-records','nearby','support'].includes(page)) return;
     if (page !== 'settings' && !service.state.consent) {
       this.setData({tab:0});
       wx.showToast({title:'请先阅读并同意隐私说明',icon:'none'});

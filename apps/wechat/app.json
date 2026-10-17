@@ -7,7 +7,11 @@
     "pages/detail/index",
     "pages/account/index",
     "pages/settings/index",
-    "pages/privacy/index"
+    "pages/privacy/index",
+    "pages/support/index",
+    "pages/saved/index",
+    "pages/local-records/index",
+    "pages/nearby/index"
   ],
   "window": {
     "navigationBarTextStyle": "black",

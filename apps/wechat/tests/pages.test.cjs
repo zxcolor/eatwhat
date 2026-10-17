@@ -63,6 +63,7 @@ function harness(name, initial = state(), methods = {}) {
     async recommend() { initial.results = response(); return initial.results; },
     async refreshConfig() { initial.config = config(); initial.status = 'ready'; },
     async searchLocations() { return { dataMode: 'LIVE', results: [], notice: null }; },
+    async recordEvent() { return true; },
     ...methods,
   };
   const wx = new Proxy({}, {
@@ -73,7 +74,11 @@ function harness(name, initial = state(), methods = {}) {
   });
   const source = fs.readFileSync(path.join(__dirname, '..', 'pages', name, 'index.js'), 'utf8');
   vm.runInNewContext(source, {
-    require(moduleName) { assert.equal(moduleName, '../../lib/service'); return service; },
+    require(moduleName) {
+      if (moduleName === '../../lib/saved') return require('../lib/saved').createSavedClient(service, { view: () => ({ signedIn: false, authenticationRevision: 0 }) });
+      if (moduleName === '../../lib/decision-ui') return require('../lib/decision-ui');
+      assert.equal(moduleName, '../../lib/service'); return service;
+    },
     Page(value) { definition = value; }, wx,
     getApp: () => ({ syncPage(page) { page.setData({ themeClass: 'theme-dark' }); } }),
     getCurrentPages: () => [{ route: 'pages/index/index' }],

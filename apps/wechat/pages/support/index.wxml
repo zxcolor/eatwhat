@@ -1,0 +1,14 @@
+<view class="page {{themeClass}}">
+  <view class="title">问题反馈</view><view class="subtitle">告诉我们，哪里还可以做得更好。</view>
+  <view wx:if="{{!enabled}}" class="card muted">反馈服务当前尚未开放。你可以通过原邀请测试渠道联系测试负责人。</view>
+  <view wx:else class="card">
+    <view class="chips"><button wx:for="{{categories}}" wx:key="value" class="chip {{category === item.value ? 'selected' : ''}}" data-value="{{item.value}}" bindtap="category" disabled="{{busy}}">{{item.label}}</button></view>
+    <textarea class="feedback-input" value="{{message}}" bindinput="input" maxlength="4400" disabled="{{busy}}" placeholder="请描述问题（10–2000 字），不要填写验证码、密码或精确个人位置。" auto-height />
+    <view class="muted">{{length}} / 2000 · 正文只保留在当前页面，离开即清除。</view>
+    <view wx:if="{{error}}" class="error">{{error}}</view>
+    <view wx:if="{{guestConfirmationRequired}}"><button class="secondary" bindtap="login">重新登录</button><button class="secondary" bindtap="confirmGuest">改为游客身份重试</button></view>
+    <button class="primary" bindtap="submit" disabled="{{!canSubmit}}" loading="{{busy}}">提交反馈</button>
+    <view class="muted">提交后，服务端在工单关闭后保留 180 天。</view>
+  </view>
+  <view wx:if="{{result}}" class="card"><view class="section-title">已收到反馈</view><view class="muted">编号：{{result.feedbackId}}</view></view>
+</view>

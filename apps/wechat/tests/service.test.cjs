@@ -68,6 +68,34 @@ function harness() {
 }
 test.afterEach(() => { delete global.wx; });
 
+test('binary export is authenticated, size limited and invalidated with the service epoch', async () => {
+  const h = harness(); await h.ready();
+  await assert.rejects(h.service.requestBytes('/v1/config', { token: TOKEN, maxBytes: 100 }), { code: 'INVALID_PATH' });
+  let pending = h.service.requestBytes(`/v1/account/exports/${ID}/content`, { token: TOKEN, maxBytes: 100 });
+  assert.equal(h.calls[1].options.responseType, 'arraybuffer'); assert.equal(h.calls[1].options.header.Authorization, `Bearer ${TOKEN}`);
+  h.reply(1, new Uint8Array([1, 2]).buffer); assert.equal((await pending).bytes.byteLength, 2);
+  pending = h.service.requestBytes(`/v1/account/exports/${ID}/content`, { token: TOKEN, maxBytes: 1 });
+  h.reply(2, new Uint8Array([1, 2]).buffer); await assert.rejects(pending, { code: 'INVALID_RESPONSE' });
+  pending = h.service.requestBytes(`/v1/account/exports/${ID}/content`, { token: TOKEN, maxBytes: 100 });
+  h.service.invalidate(); await assert.rejects(pending, { code: 'CANCELLED' }); assert.equal(h.calls[3].aborted, true);
+});
+
+test('recommendation events bind to the current result and never contain coordinates', async () => {
+  const h = harness(); await h.ready(); const result = response(); h.service.state.results = result;
+  assert.equal(await h.service.recordEvent(0, 'DETAIL', response()), false);
+  const pending = h.service.recordEvent(0, 'DETAIL', result);
+  assert.deepEqual(Object.keys(h.calls[1].options.data), ['requestId', 'resultToken', 'type', 'occurredAt']);
+  h.reply(1, {}); assert.equal(await pending, true);
+  h.service.state.results = null; assert.equal(await h.service.recordEvent(0, 'CALL', result), false);
+});
+
+test('support feedback requires its accepted HTTP status rather than any successful body', async () => {
+  const h = harness(); await h.ready();
+  const pending = h.service.request('/v1/support-feedback', { method: 'POST', data: { submissionId: ID, category: 'PRODUCT', message: '合成测试反馈内容足够长。' } });
+  h.reply(1, { feedbackId: ID, accepted: true, retentionAfterClosureDays: 180 }, 200);
+  await assert.rejects(pending, { code: 'INVALID_RESPONSE' });
+});
+
 test('no network before consent, including account transport and config', async () => {
   const { service: s, calls } = harness();
   assert.equal(s.VERSION, '0.1.11-alpha');

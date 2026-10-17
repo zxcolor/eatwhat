@@ -1,7 +1,13 @@
 const service = require('../../lib/service');
+// Public landmark examples from Android BuiltInQuickLocations; never device locations.
+const LANDMARKS = [
+  ['北京电子科技学院', 39.83639, 116.27362, 100], ['北京大学东门', 39.9928, 116.3109, 80],
+  ['清华大学东门', 40.0030, 116.3269, 80], ['中国人民大学东门', 39.9700, 116.3212, 80],
+  ['北京师范大学东门', 39.9614, 116.3720, 80], ['国贸地铁站', 39.9091, 116.4612, 100],
+];
 
 Page({
-  data: { themeClass: '', query: '', places: [], notice: '', error: '', busy: false, locating: false, canSearch: false, locationLabel: '' },
+  data: { themeClass: '', query: '', places: [], landmarks: LANDMARKS.map((place, index) => ({ index, name: place[0] })), notice: '', error: '', busy: false, locating: false, canSearch: false, locationLabel: '' },
   onLoad() { this._sequence = 0; this._places = []; },
   onShow() {
     getApp().syncPage(this);
@@ -63,6 +69,15 @@ Page({
       service.setLocation(place.location, place.name.slice(0, 80));
       this.done();
     } catch (error) { this.setData({ error: error.message || '地点信息无效，请重新搜索。' }); }
+  },
+  landmark(event) {
+    if (!this._active || !service.state.consent || this.data.busy || this.data.locating) return;
+    const place = LANDMARKS[Number(event.currentTarget.dataset.index)];
+    if (!place) return;
+    try {
+      service.setLocation({ latitude: place[1], longitude: place[2], accuracyMeters: place[3], crs: 'WGS84' }, `${place[0]}（地标示例）`);
+      this.done();
+    } catch (error) { this.setData({ error: error.message }); }
   },
   locate() {
     if (this.data.locating || this.data.busy || !service.state.consent) return;
