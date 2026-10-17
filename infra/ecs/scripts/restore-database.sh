@@ -94,7 +94,11 @@ run_bootstrap_psql() {
     sh "$database" "$@"
 }
 
-existing="$(run_bootstrap_psql postgres -qAt -v target="$restore_database" -c "SELECT 1 FROM pg_database WHERE datname = :'target';")"
+# psql expands variables in stdin SQL, but sends -c SQL directly to the server.
+existing="$(run_bootstrap_psql postgres -qAt -v target="$restore_database" <<'SQL'
+SELECT 1 FROM pg_database WHERE datname = :'target';
+SQL
+)"
 [[ -z "$existing" ]] || die "restore database already exists: $restore_database"
 
 created='false'
@@ -103,16 +107,20 @@ cleanup() {
   local status="$?"
   if [[ -n "${restored_ledger:-}" ]]; then rm -f -- "$restored_ledger"; fi
   if [[ "$completed" != 'true' && "$created" == 'true' ]]; then
-    run_bootstrap_psql postgres -qAt -v target="$restore_database" -c \
-      "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :'target' AND pid <> pg_backend_pid();" >/dev/null || true
-    run_bootstrap_psql postgres -qAt -v target="$restore_database" -c 'DROP DATABASE IF EXISTS :"target";' >/dev/null || true
+    run_bootstrap_psql postgres -qAt -v target="$restore_database" <<'SQL' >/dev/null || true
+SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :'target' AND pid <> pg_backend_pid();
+SQL
+    run_bootstrap_psql postgres -qAt -v target="$restore_database" <<'SQL' >/dev/null || true
+DROP DATABASE IF EXISTS :"target";
+SQL
   fi
   return "$status"
 }
 trap cleanup EXIT
 
-run_bootstrap_psql postgres -v target="$restore_database" -c \
-  'CREATE DATABASE :"target" OWNER schema_migrator TEMPLATE template0 ENCODING '\''UTF8'\'';'
+run_bootstrap_psql postgres -v target="$restore_database" <<'SQL'
+CREATE DATABASE :"target" OWNER schema_migrator TEMPLATE template0 ENCODING 'UTF8';
+SQL
 created='true'
 
 run_bootstrap_psql "$restore_database" \
