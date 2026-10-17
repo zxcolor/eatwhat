@@ -22,6 +22,8 @@ const WECHAT_UNION_ALIASES_PENDING_MIGRATION = Object.freeze({
 	fileName: "0012_wechat_union_aliases.sql",
 });
 const AUTH_BRIDGE_APPROVED_PLAN_HEAD = Object.freeze({
+	// Historical authentication bridges were approved only through schema 0013.
+	// A schema 0014 release must start from the completed 0013 deployment instead.
 	version: 13,
 	name: "admin_config_control",
 	fileName: "0013_admin_config_control.sql",

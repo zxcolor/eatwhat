@@ -1098,6 +1098,66 @@
 				}
 			}
 		},
+		"/v1/auth/wechat-miniprogram/login": {
+			"post": {
+				"operationId": "loginWechatMiniProgram",
+				"tags": [
+					"Authentication"
+				],
+				"summary": "使用小程序微信临时代码登录已有跨端账号",
+				"description": "wx.login code 仅由服务器用固定小程序 AppID/AppSecret 调用 code2Session。以同一微信开放平台 realm 中已验证的 UnionID HMAC 匹配已有活动账号，签发 MINIPROGRAM 会话。不接受客户端的 OpenID、UnionID、AppID、realm 或目标 userId；缺失 UnionID、未关联、身份撤销或账号待删除均拒绝登录，不创建新账号。",
+				"parameters": [
+					{
+						"$ref": "#/components/parameters/RequestCorrelationId"
+					},
+					{
+						"$ref": "#/components/parameters/ClientContractVersion"
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/WechatMiniProgramLoginRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"$ref": "#/components/responses/AuthSession"
+					},
+					"400": {
+						"$ref": "#/components/responses/AuthBadRequest"
+					},
+					"401": {
+						"$ref": "#/components/responses/AuthUnauthorized"
+					},
+					"403": {
+						"$ref": "#/components/responses/AuthForbidden"
+					},
+					"409": {
+						"$ref": "#/components/responses/AuthConflict"
+					},
+					"413": {
+						"$ref": "#/components/responses/PayloadTooLarge"
+					},
+					"415": {
+						"$ref": "#/components/responses/UnsupportedMediaType"
+					},
+					"429": {
+						"$ref": "#/components/responses/RateLimited"
+					},
+					"500": {
+						"$ref": "#/components/responses/InternalError"
+					},
+					"503": {
+						"$ref": "#/components/responses/AuthUnavailable"
+					}
+				}
+			}
+		},
 		"/v1/auth/login": {
 			"post": {
 				"operationId": "login",
@@ -3821,6 +3881,10 @@
 					"accountsEnabled": { "type": "boolean" },
 					"registrationEnabled": { "type": "boolean" },
 					"phoneEnabled": { "type": "boolean" },
+					"wechatMiniProgramEnabled": {
+						"type": "boolean",
+						"description": "仅独立小程序 code2Session 通道已启用且数据库可用时为 true；缺省视为关闭。"
+					},
 					"wechatEnabled": { "type": "boolean" },
 					"emailEnabled": { "type": "boolean" },
 					"qqEnabled": { "type": "boolean" },
@@ -4080,6 +4144,54 @@
 						"additionalProperties": false
 					}
 				]
+			},
+			"WechatMiniProgramLoginRequest": {
+				"type": "object",
+				"properties": {
+					"code": {
+						"type": "string",
+						"minLength": 8,
+						"maxLength": 2048,
+						"pattern": "^[A-Za-z0-9._~+/=-]+$"
+					},
+					"device": {
+						"type": "object",
+						"properties": {
+							"installationId": {
+								"type": "string",
+								"format": "uuid",
+								"pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+							},
+							"label": {
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 80
+							},
+							"platform": {
+								"type": "string",
+								"const": "MINIPROGRAM"
+							},
+							"appVersion": {
+								"type": "string",
+								"minLength": 1,
+								"maxLength": 32,
+								"pattern": "^\\d+(?:\\.\\d+){0,3}(?:[-+][A-Za-z0-9.-]+)?$"
+							}
+						},
+						"required": [
+							"installationId",
+							"label",
+							"platform",
+							"appVersion"
+						],
+						"additionalProperties": false
+					}
+				},
+				"required": [
+					"code",
+					"device"
+				],
+				"additionalProperties": false
 			},
 			"LoginRequest": {
 				"oneOf": [

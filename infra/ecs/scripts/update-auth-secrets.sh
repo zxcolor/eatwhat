@@ -256,7 +256,7 @@ assert_wechat_union_aliases_ready() {
 
   active_transition="$(read_env_value "$active_deploy/deployment.env" AUTH_SCHEMA_TRANSITION_MODE)"
   [[ "$active_transition" == 'none' ]] ||
-    die 'WeChat authentication requires the final non-transition schema 0013 release'
+    die 'WeChat authentication requires a final non-transition schema 0013 or 0014 release'
   active_realm="$(read_env_value "$active_deploy/deployment.env" WECHAT_OPEN_PLATFORM_REALM_ID)"
   candidate_realm="$(read_env_value "$deployment_env" WECHAT_OPEN_PLATFORM_REALM_ID)"
   [[ "$active_realm" =~ ^[a-z0-9][a-z0-9._-]{0,63}$ ]] ||
@@ -278,7 +278,9 @@ assert_wechat_union_aliases_ready() {
       'export PGPASSWORD="$(cat /run/secrets/postgres_bootstrap_password)"; exec psql -X -qAt -v ON_ERROR_STOP=1 -v expected_wechat_realm="$1" -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
       sh "$active_realm" <<'SQL'
 SELECT (
-  (SELECT count(*) = 13 AND min(version) = 1 AND max(version) = 13
+  (SELECT ((count(*) = 13 AND min(version) = 1 AND max(version) = 13)
+       OR (count(*) = 14 AND min(version) = 1 AND max(version) = 14
+         AND bool_or(version = 14 AND name = 'wechat_miniprogram_login')))
      AND bool_or(version = 12 AND name = 'wechat_union_aliases')
      AND bool_or(version = 13 AND name = 'admin_config_control')
    FROM public.schema_migrations)
@@ -334,7 +336,20 @@ SELECT (
 SQL
   )"
   [[ "$database_acl_ready" == 't' ]] ||
-    die 'schema 0013 and WeChat Union alias least-privilege ACL smoke must pass before enabling WeChat'
+    die 'exact schema 0013 or 0014 and WeChat Union alias least-privilege ACL smoke must pass before enabling WeChat'
+}
+
+assert_wechat_miniprogram_ready() {
+  # Reuse the active-release, stable realm and Union alias ACL proof. The
+  # separate resolver is only present in exact schema 0014 and never creates
+  # accounts or binding rows. Its complete ACL check runs before any file write.
+  assert_wechat_union_aliases_ready
+  (
+    cd "$active_deploy"
+    docker compose --env-file deployment.env exec -T postgres sh -eu -c \
+      'export PGPASSWORD="$(cat /run/secrets/postgres_bootstrap_password)"; exec psql -X -qAt -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+      <"$bundle_root/sql/verify-wechat-miniprogram-login.sql"
+  ) >/dev/null || die 'exact schema 0014 and Mini Program resolver least-privilege ACL smoke must pass before enabling Mini Program login'
 }
 
 assert_qq_identity_state_change_ready() {
@@ -554,6 +569,7 @@ target_accounts_enabled='false'
 target_phone_auth_enabled='false'
 target_email_auth_enabled='false'
 target_wechat_auth_enabled='false'
+target_wechat_miniprogram_auth_enabled='false'
 target_qq_auth_enabled='false'
 target_qq_union_id_enabled='false'
 target_qq_union_id_namespace_initialized="$current_qq_union_id_namespace_initialized"
@@ -566,6 +582,7 @@ fi
 
 declare -a input_names=(
   ACCOUNTS_ENABLED PHONE_AUTH_ENABLED EMAIL_AUTH_ENABLED WECHAT_AUTH_ENABLED
+  WECHAT_MINIPROGRAM_AUTH_ENABLED
   QQ_AUTH_ENABLED QQ_UNION_ID_ENABLED ALIBABA_CLOUD_ECS_METADATA
 )
 if [[ "$mode" == '--apply' ]]; then
@@ -573,13 +590,14 @@ if [[ "$mode" == '--apply' ]]; then
   target_phone_auth_enabled="$(read_env_value "$config_file" PHONE_AUTH_ENABLED)"
   target_email_auth_enabled="$(read_env_value "$config_file" EMAIL_AUTH_ENABLED)"
   target_wechat_auth_enabled="$(read_env_value "$config_file" WECHAT_AUTH_ENABLED)"
+  target_wechat_miniprogram_auth_enabled="$(read_env_value "$config_file" WECHAT_MINIPROGRAM_AUTH_ENABLED)"
   target_qq_auth_enabled="$(read_env_value "$config_file" QQ_AUTH_ENABLED)"
   target_qq_union_id_enabled="$(read_env_value "$config_file" QQ_UNION_ID_ENABLED)"
   target_ram_role="$(read_env_value "$config_file" ALIBABA_CLOUD_ECS_METADATA)"
   [[ "$target_accounts_enabled" == 'true' ]] || die '--apply requires ACCOUNTS_ENABLED=true; use --disable to close accounts'
   for switch_value in \
     "$target_phone_auth_enabled" "$target_email_auth_enabled" \
-    "$target_wechat_auth_enabled" "$target_qq_auth_enabled" \
+    "$target_wechat_auth_enabled" "$target_wechat_miniprogram_auth_enabled" "$target_qq_auth_enabled" \
     "$target_qq_union_id_enabled"; do
     [[ "$switch_value" == 'true' || "$switch_value" == 'false' ]] || die 'authentication switches must be true or false'
   done
@@ -607,6 +625,9 @@ if [[ "$mode" == '--apply' ]]; then
   if [[ "$target_wechat_auth_enabled" == 'true' ]]; then
     input_names+=(WECHAT_APP_ID WECHAT_APP_SECRET)
   fi
+  if [[ "$target_wechat_miniprogram_auth_enabled" == 'true' ]]; then
+    input_names+=(WECHAT_MINIPROGRAM_APP_ID WECHAT_MINIPROGRAM_APP_SECRET)
+  fi
   if [[ "$target_qq_auth_enabled" == 'true' ]]; then
     input_names+=(QQ_APP_ID QQ_APP_KEY)
   fi
@@ -619,6 +640,9 @@ if [[ "$mode" != '--legacy-drain' && "$current_schema_transition_mode" == 'wecha
 fi
 if [[ "$mode" == '--apply' && "$target_wechat_auth_enabled" == 'true' ]]; then
   assert_wechat_union_aliases_ready
+fi
+if [[ "$mode" == '--apply' && "$target_wechat_miniprogram_auth_enabled" == 'true' ]]; then
+  assert_wechat_miniprogram_ready
 fi
 if [[ "$mode" != '--legacy-drain' ]]; then
   retires_legacy_auth_configuration='false'
@@ -710,6 +734,8 @@ if [[ "$mode" == '--apply' ]]; then
     !/^SMTP_/ &&
     !/^WECHAT_APP_ID=/ &&
     !/^WECHAT_APP_SECRET=/ &&
+    !/^WECHAT_MINIPROGRAM_APP_ID=/ &&
+    !/^WECHAT_MINIPROGRAM_APP_SECRET=/ &&
     !/^QQ_APP_ID=/ &&
     !/^QQ_APP_KEY=/
   ' "$api_env" >"$api_candidate"
@@ -718,6 +744,7 @@ if [[ "$mode" == '--apply' ]]; then
     !/^PHONE_AUTH_ENABLED=/ &&
     !/^EMAIL_AUTH_ENABLED=/ &&
     !/^WECHAT_AUTH_ENABLED=/ &&
+    !/^WECHAT_MINIPROGRAM_AUTH_ENABLED=/ &&
     !/^QQ_AUTH_ENABLED=/ &&
     !/^QQ_UNION_ID_ENABLED=/ &&
     !/^ALIBABA_CLOUD_ECS_METADATA=/ &&
@@ -744,6 +771,8 @@ elif [[ "$mode" == '--disable' ]]; then
     !/^SMTP_/ &&
     !/^WECHAT_APP_ID=/ &&
     !/^WECHAT_APP_SECRET=/ &&
+    !/^WECHAT_MINIPROGRAM_APP_ID=/ &&
+    !/^WECHAT_MINIPROGRAM_APP_SECRET=/ &&
     !/^QQ_APP_ID=/ &&
     !/^QQ_APP_KEY=/
   ' "$api_env" >"$api_candidate"
@@ -829,6 +858,7 @@ awk '
   !/^PHONE_AUTH_ENABLED=/ &&
   !/^EMAIL_AUTH_ENABLED=/ &&
   !/^WECHAT_AUTH_ENABLED=/ &&
+  !/^WECHAT_MINIPROGRAM_AUTH_ENABLED=/ &&
   !/^QQ_AUTH_ENABLED=/ &&
   !/^QQ_UNION_ID_ENABLED=/ &&
   !/^ALIBABA_CLOUD_ECS_METADATA=/
@@ -839,6 +869,7 @@ awk '
   printf 'PHONE_AUTH_ENABLED=%s\n' "$target_phone_auth_enabled"
   printf 'EMAIL_AUTH_ENABLED=%s\n' "$target_email_auth_enabled"
   printf 'WECHAT_AUTH_ENABLED=%s\n' "$target_wechat_auth_enabled"
+  printf 'WECHAT_MINIPROGRAM_AUTH_ENABLED=%s\n' "$target_wechat_miniprogram_auth_enabled"
   printf 'QQ_AUTH_ENABLED=%s\n' "$target_qq_auth_enabled"
   printf 'QQ_UNION_ID_ENABLED=%s\n' "$target_qq_union_id_enabled"
   printf 'ALIBABA_CLOUD_ECS_METADATA=%s\n' "$target_ram_role"

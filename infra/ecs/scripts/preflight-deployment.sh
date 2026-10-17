@@ -183,6 +183,7 @@ declare -a deployment_names=(
   RETENTION_MODE
   SHARED_STATE_DIRECTORY
   WECHAT_AUTH_ENABLED
+  WECHAT_MINIPROGRAM_AUTH_ENABLED
   WECHAT_OPEN_PLATFORM_REALM_ID
 )
 assert_exact_env_keys "$deployment_env" "${deployment_names[@]}"
@@ -204,6 +205,7 @@ accounts_enabled="$(read_deployment_value ACCOUNTS_ENABLED)"
 phone_auth_enabled="$(read_deployment_value PHONE_AUTH_ENABLED)"
 email_auth_enabled="$(read_deployment_value EMAIL_AUTH_ENABLED)"
 wechat_auth_enabled="$(read_deployment_value WECHAT_AUTH_ENABLED)"
+wechat_miniprogram_auth_enabled="$(read_deployment_value WECHAT_MINIPROGRAM_AUTH_ENABLED)"
 wechat_open_platform_realm_id="$(read_deployment_value WECHAT_OPEN_PLATFORM_REALM_ID)"
 qq_auth_enabled="$(read_deployment_value QQ_AUTH_ENABLED)"
 qq_union_id_enabled="$(read_deployment_value QQ_UNION_ID_ENABLED)"
@@ -323,13 +325,13 @@ if [[ -e "$current_link" || -L "$current_link" ]]; then
     fi
   fi
 fi
-for auth_switch in "$accounts_enabled" "$phone_auth_enabled" "$email_auth_enabled" "$wechat_auth_enabled" "$qq_auth_enabled" "$qq_union_id_enabled"; do
+for auth_switch in "$accounts_enabled" "$phone_auth_enabled" "$email_auth_enabled" "$wechat_auth_enabled" "$wechat_miniprogram_auth_enabled" "$qq_auth_enabled" "$qq_union_id_enabled"; do
   [[ "$auth_switch" == 'true' || "$auth_switch" == 'false' ]] || die 'authentication switches must be true or false'
 done
 if [[ "$accounts_enabled" == 'true' ]]; then
   [[ "$phone_auth_enabled" == 'true' ]] || die 'PHONE_ONLY accounts require SMS phone authentication'
 else
-  [[ "$phone_auth_enabled" == 'false' && "$email_auth_enabled" == 'false' && "$wechat_auth_enabled" == 'false' && "$qq_auth_enabled" == 'false' && "$qq_union_id_enabled" == 'false' ]] ||
+  [[ "$phone_auth_enabled" == 'false' && "$email_auth_enabled" == 'false' && "$wechat_auth_enabled" == 'false' && "$wechat_miniprogram_auth_enabled" == 'false' && "$qq_auth_enabled" == 'false' && "$qq_union_id_enabled" == 'false' ]] ||
     die 'authentication channels must stay disabled when accounts are disabled'
 fi
 if [[ "$auth_schema_transition_mode" == 'legacy_phone_drain' && "$accounts_enabled" != 'false' ]]; then
@@ -337,6 +339,9 @@ if [[ "$auth_schema_transition_mode" == 'legacy_phone_drain' && "$accounts_enabl
 fi
 if [[ "$auth_schema_transition_mode" == 'wechat_union_aliases_pending' && "$wechat_auth_enabled" != 'false' ]]; then
   die 'wechat_union_aliases_pending requires WECHAT_AUTH_ENABLED=false'
+fi
+if [[ "$wechat_miniprogram_auth_enabled" == 'true' && "$auth_schema_transition_mode" != 'none' ]]; then
+  die 'Mini Program authentication requires AUTH_SCHEMA_TRANSITION_MODE=none'
 fi
 if [[ "$qq_union_id_enabled" == 'true' && "$qq_auth_enabled" != 'true' ]]; then
   die 'QQ_UNION_ID_ENABLED requires QQ_AUTH_ENABLED'
@@ -423,6 +428,20 @@ if [[ "$identity_continuity_count" -eq 3 ]]; then
 fi
 if [[ "$wechat_auth_enabled" == 'true' ]]; then
   api_env_names+=(WECHAT_APP_ID WECHAT_APP_SECRET)
+fi
+mini_provider_env_count="$(count_present_env_keys "$secrets_dir/api.env" \
+  WECHAT_MINIPROGRAM_APP_ID WECHAT_MINIPROGRAM_APP_SECRET)"
+[[ "$mini_provider_env_count" -eq 0 || "$mini_provider_env_count" -eq 2 ]] ||
+  die 'api.env contains an incomplete Mini Program provider credential group'
+if [[ "$wechat_miniprogram_auth_enabled" == 'true' ]]; then
+  api_env_names+=(WECHAT_MINIPROGRAM_APP_ID WECHAT_MINIPROGRAM_APP_SECRET)
+fi
+# A prevalidated schema 0014 rollback may keep this channel disabled while the
+# shared api.env gains its credentials during candidate activation. Accept the
+# complete unused group so that rollback remains valid; config loading below
+# still proves the channel is disabled and exposes no provider configuration.
+if [[ "$wechat_miniprogram_auth_enabled" == 'false' && "$mini_provider_env_count" -eq 2 ]]; then
+  api_env_names+=(WECHAT_MINIPROGRAM_APP_ID WECHAT_MINIPROGRAM_APP_SECRET)
 fi
 if [[ "$phone_auth_enabled" == 'true' ]]; then
   api_env_names+=(
@@ -517,6 +536,7 @@ if ! docker run --rm --network none --read-only \
   --env PHONE_AUTH_ENABLED="$phone_auth_enabled" \
   --env EMAIL_AUTH_ENABLED="$email_auth_enabled" \
   --env WECHAT_AUTH_ENABLED="$wechat_auth_enabled" \
+  --env WECHAT_MINIPROGRAM_AUTH_ENABLED="$wechat_miniprogram_auth_enabled" \
   --env WECHAT_OPEN_PLATFORM_REALM_ID="$wechat_open_platform_realm_id" \
   --env QQ_AUTH_ENABLED="$qq_auth_enabled" \
   --env QQ_UNION_ID_ENABLED="$qq_union_id_enabled" \
@@ -554,6 +574,7 @@ if ! docker run --rm --network none --read-only \
           PHONE_AUTH_ENABLED: "true",
           EMAIL_AUTH_ENABLED: hasOtpContinuity ? "true" : "false",
           WECHAT_AUTH_ENABLED: "false",
+          WECHAT_MINIPROGRAM_AUTH_ENABLED: "false",
           QQ_AUTH_ENABLED: "false",
           QQ_UNION_ID_ENABLED: "false",
           ALIYUN_PNVS_SIGN_NAME: "continuity",
@@ -586,6 +607,11 @@ if ! docker run --rm --network none --read-only \
       config.phone.enabled !== (process.env.PHONE_AUTH_ENABLED === "true" && enabled) ||
       config.email.enabled !== (process.env.EMAIL_AUTH_ENABLED === "true" && enabled) ||
       config.wechat.enabled !== (process.env.WECHAT_AUTH_ENABLED === "true" && enabled) ||
+      config.wechatMiniProgram.enabled !== (process.env.WECHAT_MINIPROGRAM_AUTH_ENABLED === "true" && enabled) ||
+      config.wechatMiniProgram.openPlatformRealmId !==
+        (process.env.WECHAT_MINIPROGRAM_AUTH_ENABLED === "true" && enabled
+          ? process.env.WECHAT_OPEN_PLATFORM_REALM_ID
+          : null) ||
       config.wechat.openPlatformRealmId !==
         (process.env.WECHAT_AUTH_ENABLED === "true" && enabled
           ? process.env.WECHAT_OPEN_PLATFORM_REALM_ID
@@ -629,7 +655,7 @@ ca_private_digest="$(openssl pkey -in "$secrets_dir/postgres/ca.key" -pubout -ou
 [[ "$server_public_digest" == "$server_private_digest" ]] || die 'PostgreSQL certificate and private key do not match'
 [[ "$ca_public_digest" == "$ca_private_digest" ]] || die 'PostgreSQL CA certificate and private key do not match'
 docker run --rm --entrypoint sh "$api_image" -eu -c \
-  'test -r /app/dist/main.js && test -r /app/dist/auth/auth-config.js && test -r /app/dist/database/migrate-cli.js && test -r /app/migrations/0001_initial_schema.sql && test -r /app/migrations/0012_wechat_union_aliases.sql && test -r /app/migrations/0013_admin_config_control.sql'
+  'test -r /app/dist/main.js && test -r /app/dist/auth/auth-config.js && test -r /app/dist/database/migrate-cli.js && test -r /app/migrations/0001_initial_schema.sql && test -r /app/migrations/0012_wechat_union_aliases.sql && test -r /app/migrations/0013_admin_config_control.sql && test -r /app/migrations/0014_wechat_miniprogram_login.sql'
 
 cd "$bundle_root"
 docker compose --env-file deployment.env config --quiet

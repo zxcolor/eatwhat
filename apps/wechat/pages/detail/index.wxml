@@ -1,0 +1,19 @@
+<view class="page {{themeClass}}">
+  <block wx:if="{{current}}">
+    <view class="card hero">
+      <view class="muted">{{result.mode}}</view><view class="title restaurant-name">{{result.name}}</view>
+      <view class="chips"><text class="chip">{{result.openLabel}}</text><text class="chip">{{result.price}}</text><text wx:if="{{result.sourceRating}}" class="chip">来源评分 {{result.sourceRating}}</text></view>
+      <view class="facts"><text>{{result.distance}}</text><text>到店约 {{result.travel}}</text><text>用餐约 {{result.meal}}</text></view>
+      <view class="address">{{result.address || '暂无地址'}}</view><view class="muted source">数据来源：{{result.sourceAttribution}}</view>
+    </view>
+    <view class="card"><view class="section-title">到店操作</view>
+      <view class="action-row"><button class="primary" bindtap="navigate" disabled="{{!canNavigate}}">查看地图</button><button class="secondary" bindtap="copyAddress" disabled="{{!canCopy}}">复制地址</button></view>
+      <button class="secondary" bindtap="call" disabled="{{!canCall}}">联系商户</button>
+      <view wx:if="{{actionNotice}}" class="muted action-notice">{{actionNotice}}</view>
+    </view>
+    <view wx:if="{{error}}" class="error">{{error}}</view>
+    <view class="card"><view class="section-title">为什么推荐</view><view wx:for="{{result.reasons}}" wx:key="code" class="reason">{{item.text}}</view><view wx:if="{{result.tags.length}}" class="chips"><text wx:for="{{result.tags}}" wx:key="*this" class="chip">{{item}}</text></view></view>
+    <view class="card"><view class="section-title">到店前确认</view><view wx:for="{{result.warnings}}" wx:key="*this" class="muted warning">{{item}}</view><view class="muted warning">营业状态、价格和到店时间可能变化，请以商户实际情况为准。</view></view>
+  </block>
+  <view wx:else class="card empty"><view class="section-title">需要重新获取结果</view><view class="muted">{{actionNotice}}</view><button class="primary" bindtap="back">返回推荐结果</button></view>
+</view>

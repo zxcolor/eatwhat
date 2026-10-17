@@ -19,6 +19,8 @@ import {
 	RefreshRequestSchema,
 	type SessionIdPath,
 	SessionIdPathSchema,
+	type WechatMiniProgramLoginRequest,
+	WechatMiniProgramLoginRequestSchema,
 } from "@chi-shen-me/contracts";
 import {
 	Body,
@@ -115,6 +117,17 @@ export class AuthController {
 		return this.service.login(input, clientIp);
 	}
 
+	@Post("wechat-miniprogram/login")
+	@HttpCode(HttpStatus.OK)
+	@RateLimit(10, 60_000)
+	loginWechatMiniProgram(
+		@Body(new ZodBodyPipe(WechatMiniProgramLoginRequestSchema))
+		input: WechatMiniProgramLoginRequest,
+		@Ip() clientIp: string,
+	) {
+		return this.service.loginWechatMiniProgram(input, clientIp);
+	}
+
 	@Post("refresh")
 	@HttpCode(HttpStatus.OK)
 	@RateLimit(30, 60_000)
@@ -176,7 +189,10 @@ export class AuthController {
 		@Headers("authorization") authorization: string | undefined,
 		@Query(new ZodBodyPipe(ListSessionsQuerySchema)) query: ListSessionsQuery,
 	) {
-		return this.service.listSessions(requireBearerAccessToken(authorization), query);
+		return this.service.listSessions(
+			requireBearerAccessToken(authorization),
+			query,
+		);
 	}
 
 	@Delete("sessions/:sessionId")

@@ -129,6 +129,10 @@ $script:RequiredMappings = @(
     [pscustomobject]@{
         SourceRelative = 'infra/postgres/verify-admin-config-control.sql'
         BundleRelative = 'sql/verify-admin-config-control.sql'
+    },
+    [pscustomobject]@{
+        SourceRelative = 'infra/postgres/verify-wechat-miniprogram-login.sql'
+        BundleRelative = 'sql/verify-wechat-miniprogram-login.sql'
     }
 )
 
@@ -534,6 +538,8 @@ function Assert-EcsOperationalGates {
         -not $compose.Contains('POSTGRES_VOLUME_NAME') -or
         -not $compose.Contains('external: true') -or
         -not $compose.Contains('SMTP_TIMEOUT_MS: "5000"') -or
+        -not $compose.Contains('WECHAT_MINIPROGRAM_AUTH_ENABLED: "${WECHAT_MINIPROGRAM_AUTH_ENABLED:-false}"') -or
+        -not $compose.Contains('WECHAT_MINIPROGRAM_AUTH_TIMEOUT_MS: "2000"') -or
         $compose.Contains('GROUP_RECOMMENDATIONS_ENABLED') -or
         -not $compose.Contains('WECHAT_OPEN_PLATFORM_REALM_ID: "${WECHAT_OPEN_PLATFORM_REALM_ID:?WECHAT_OPEN_PLATFORM_REALM_ID is required}"') -or
         -not $compose.Contains('QQ_OPEN_PLATFORM_REALM_ID: "${QQ_OPEN_PLATFORM_REALM_ID:?QQ_OPEN_PLATFORM_REALM_ID is required}"') -or
@@ -542,6 +548,9 @@ function Assert-EcsOperationalGates {
     }
     if ($deploymentExample.Contains('GROUP_RECOMMENDATIONS_ENABLED')) {
         throw 'Deployment example must not restore the retired group recommendation capability.'
+    }
+    if ([regex]::Matches($deploymentExample, '(?m)^WECHAT_MINIPROGRAM_AUTH_ENABLED=false\r?$').Count -ne 1) {
+        throw 'Deployment example must disable Mini Program authentication by default.'
     }
     $realmAssignments = [System.Text.RegularExpressions.Regex]::Matches(
         $deploymentExample,
@@ -837,6 +846,8 @@ function Assert-EcsOperationalGates {
         'assert_api_container_env "AUTH_SCHEMA_TRANSITION_MODE=$expected_schema_transition_mode"',
         'assert_api_container_env "WECHAT_OPEN_PLATFORM_REALM_ID=$expected_wechat_realm_id"',
         'assert_api_container_env "WECHAT_AUTH_ENABLED=$expected_wechat_enabled"',
+        'assert_api_container_env "WECHAT_MINIPROGRAM_AUTH_ENABLED=$expected_wechat_miniprogram_enabled"',
+        '"wechatMiniProgramEnabled"',
         'assert_api_container_env "QQ_OPEN_PLATFORM_REALM_ID=$expected_qq_realm_id"',
         'assert_api_container_env "QQ_AUTH_ENABLED=$expected_qq_enabled"',
         'assert_api_container_env "QQ_UNION_ID_ENABLED=$expected_qq_union_id_enabled"',
@@ -1120,7 +1131,7 @@ function Assert-EcsOperationalGates {
         'if [[ "$target_qq_auth_enabled" == ''true'' ]]; then',
         'input_names+=(QQ_APP_ID QQ_APP_KEY)',
         'activate the final schema 0013 release before updating authentication configuration',
-        'WeChat authentication requires the final non-transition schema 0013 release',
+        'WeChat authentication requires a final non-transition schema 0013 or 0014 release',
         'active_realm="$(read_env_value "$active_deploy/deployment.env" WECHAT_OPEN_PLATFORM_REALM_ID)"',
         'WeChat authentication requires a stable Open Platform realm',
         '-v expected_wechat_realm="$1"',
@@ -1143,7 +1154,7 @@ function Assert-EcsOperationalGates {
         "has_function_privilege('data_export_worker', routine.oid, 'EXECUTE')",
         'privilege.grantee = 0',
         "privilege.privilege_type = 'EXECUTE'",
-        'schema 0013 and WeChat Union alias least-privilege ACL smoke must pass before enabling WeChat',
+        'exact schema 0013 or 0014 and WeChat Union alias least-privilege ACL smoke must pass before enabling WeChat',
         'API_RECREATE_REQUIRED=true'
     )) {
         if (-not $auth.Contains($required)) {
@@ -1229,14 +1240,14 @@ function Assert-EcsOperationalGates {
     $authUnionPendingGate = 'if [[ "$mode" != ''--legacy-drain'' && "$current_schema_transition_mode" == ''wechat_union_aliases_pending'' ]]; then'
     $authUnionEnableGate = 'if [[ "$mode" == ''--apply'' && "$target_wechat_auth_enabled" == ''true'' ]]; then'
     $authUnionReadyCall = '  assert_wechat_union_aliases_ready'
-    if ([regex]::Matches($auth, [regex]::Escape('assert_wechat_union_aliases_ready')).Count -ne 2 -or
+    if ([regex]::Matches($auth, [regex]::Escape('assert_wechat_union_aliases_ready')).Count -ne 3 -or
         $auth.IndexOf($authUnionPendingGate, [System.StringComparison]::Ordinal) -lt 0 -or
         $auth.IndexOf($authUnionEnableGate, [System.StringComparison]::Ordinal) -lt 0 -or
-        $auth.IndexOf($authUnionReadyCall, [System.StringComparison]::Ordinal) -lt
+        $auth.LastIndexOf($authUnionReadyCall, [System.StringComparison]::Ordinal) -lt
             $auth.IndexOf($authUnionEnableGate, [System.StringComparison]::Ordinal) -or
         $auth.IndexOf($authUnionPendingGate, [System.StringComparison]::Ordinal) -gt
             $auth.IndexOf($authApiCandidate, [System.StringComparison]::Ordinal) -or
-        $auth.IndexOf($authUnionReadyCall, [System.StringComparison]::Ordinal) -gt
+        $auth.LastIndexOf($authUnionReadyCall, [System.StringComparison]::Ordinal) -gt
             $auth.IndexOf($authApiCandidate, [System.StringComparison]::Ordinal) -or
         $auth.IndexOf($authUnionEnableGate, [System.StringComparison]::Ordinal) -gt
             $auth.IndexOf($authApiCandidate, [System.StringComparison]::Ordinal)) {
@@ -1330,6 +1341,12 @@ function Assert-EcsOperationalGates {
         'SMTP_FROM_ADDRESS SMTP_REPLY_TO SMTP_FROM_NAME',
         'if [[ "$wechat_auth_enabled" == ''true'' ]]; then',
         'api_env_names+=(WECHAT_APP_ID WECHAT_APP_SECRET)',
+        'api_env_names+=(WECHAT_MINIPROGRAM_APP_ID WECHAT_MINIPROGRAM_APP_SECRET)',
+        '--env WECHAT_MINIPROGRAM_AUTH_ENABLED="$wechat_miniprogram_auth_enabled"',
+        'config.wechatMiniProgram.enabled !== (process.env.WECHAT_MINIPROGRAM_AUTH_ENABLED === "true" && enabled)',
+        'Mini Program authentication requires AUTH_SCHEMA_TRANSITION_MODE=none',
+        'api.env contains an incomplete Mini Program provider credential group',
+        'if [[ "$wechat_miniprogram_auth_enabled" == ''false'' && "$mini_provider_env_count" -eq 2 ]]; then',
         'if [[ "$qq_auth_enabled" == ''true'' ]]; then',
         'api_env_names+=(QQ_APP_ID QQ_APP_KEY)',
         'config.registrationEnabled !== registrationEnabled',
@@ -1343,6 +1360,7 @@ function Assert-EcsOperationalGates {
         '/app/dist/auth/auth-config.js',
         '/app/migrations/0012_wechat_union_aliases.sql',
         '/app/migrations/0013_admin_config_control.sql',
+        '/app/migrations/0014_wechat_miniprogram_login.sql',
         'API image rejected authentication configuration'
     )) {
         if (-not $preflight.Contains($required)) {
@@ -1493,6 +1511,8 @@ function Assert-EcsOperationalGates {
     foreach ($required in @(
         'BEGIN READ ONLY;',
         'count(*) = 13 AND min(version) = 1 AND max(version) = 13',
+        'count(*) = 14 AND min(version) = 1 AND max(version) = 14',
+        "bool_or(version = 14 AND name = 'wechat_miniprogram_login')",
         'has_any_column_privilege',
         'observed_function.proconfig IS DISTINCT FROM',
         'minimum_app_version_change_is_release_safe(jsonb,jsonb)',
@@ -1502,6 +1522,65 @@ function Assert-EcsOperationalGates {
         if (-not $adminConfigAudit.Contains($required)) {
             throw "Schema 0013 read-only deployment verification is missing a required gate: $required"
         }
+    }
+    foreach ($required in @(
+        '--wechat-miniprogram-cutover ROLLBACK_RELEASE',
+        'schema 0014 requires completed schema 0013',
+        'assert_wechat_miniprogram_cutover_ready',
+        '"$script_dir/verify-rollback-release.sh" "$wechat_miniprogram_rollback_release"',
+        '^13\|admin_config_control\|[0-9a-f]{64}$',
+        'Mini Program cutover backup does not match the active exact schema 0013 release',
+        'run_bootstrap_psql -qAt <"$bundle_root/sql/verify-wechat-miniprogram-login.sql"',
+        'WECHAT_MINIPROGRAM_ACTIVATION_REQUIRES_EXPLICIT_ROLLBACK=true'
+    )) {
+        if (-not $provision.Contains($required)) {
+            throw "Schema 0014 cutover is missing a required safety gate: $required"
+        }
+    }
+    $miniAudit = [System.IO.File]::ReadAllText(
+        (Join-Path -Path $BundleRoot -ChildPath 'sql/verify-wechat-miniprogram-login.sql')
+    )
+    foreach ($required in @(
+        'BEGIN READ ONLY;',
+        'count(*) = 14 AND min(version) = 1 AND max(version) = 14',
+        "bool_or(version = 14 AND name = 'wechat_miniprogram_login')",
+        'public.resolve_wechat_miniprogram_user_from_consumed_state(uuid)',
+        'resolver.proconfig IS DISTINCT FROM',
+        "'TABLE(result text, user_id uuid)'",
+        'has_any_column_privilege',
+        'privilege.grantee = 0',
+        "IS DISTINCT FROM (service_role = 'api_runtime')",
+        'WECHAT_MINIPROGRAM_SCHEMA_ACL=OK'
+    )) {
+        if (-not $miniAudit.Contains($required)) {
+            throw "Mini Program read-only schema/ACL verification is missing a gate: $required"
+        }
+    }
+    foreach ($required in @(
+        'input_names+=(WECHAT_MINIPROGRAM_APP_ID WECHAT_MINIPROGRAM_APP_SECRET)',
+        'exact schema 0014 and Mini Program resolver least-privilege ACL smoke must pass before enabling Mini Program login',
+        '<"$bundle_root/sql/verify-wechat-miniprogram-login.sql"',
+        'target_wechat_miniprogram_auth_enabled=',
+        '!/^WECHAT_MINIPROGRAM_APP_SECRET=/ &&'
+    )) {
+        if (-not $auth.Contains($required)) {
+            throw "Mini Program secret update is missing an enablement or cleanup gate: $required"
+        }
+    }
+    $miniEnableGate = 'if [[ "$mode" == ''--apply'' && "$target_wechat_miniprogram_auth_enabled" == ''true'' ]]; then'
+    $miniReadyCall = '  assert_wechat_miniprogram_ready'
+    if ([regex]::Matches($auth, [regex]::Escape('assert_wechat_miniprogram_ready')).Count -ne 2 -or
+        $auth.IndexOf($miniEnableGate, [System.StringComparison]::Ordinal) -lt 0 -or
+        $auth.IndexOf($miniReadyCall, [System.StringComparison]::Ordinal) -lt
+            $auth.IndexOf($miniEnableGate, [System.StringComparison]::Ordinal) -or
+        $auth.IndexOf($miniReadyCall, [System.StringComparison]::Ordinal) -gt
+            $auth.IndexOf($authApiCandidate, [System.StringComparison]::Ordinal)) {
+        throw 'Mini Program schema/ACL enablement proof must precede auth candidate creation.'
+    }
+    $miniSecretGate = '(?s)if \[\[ "\$target_wechat_miniprogram_auth_enabled" == ''true'' \]\]; then\s+input_names\+=\(WECHAT_MINIPROGRAM_APP_ID WECHAT_MINIPROGRAM_APP_SECRET\)\s+fi'
+    $miniPreflightSecretGate = '(?s)if \[\[ "\$wechat_miniprogram_auth_enabled" == ''true'' \]\]; then\s+api_env_names\+=\(WECHAT_MINIPROGRAM_APP_ID WECHAT_MINIPROGRAM_APP_SECRET\)\s+fi'
+    if ($auth -notmatch $miniSecretGate -or $preflight -notmatch $miniPreflightSecretGate) {
+        throw 'Mini Program credentials must be required only when the independent channel is enabled.'
     }
 }
 

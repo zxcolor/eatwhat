@@ -964,6 +964,172 @@ describe("PostgresAuthRepository transaction workflows", () => {
 		).toBe(false);
 	});
 
+	it("resolves a Mini Program UnionID owner within the consuming transaction before session issue", async () => {
+		const proof: OAuthProof = {
+			id: "13131313-1313-4313-8313-131313131313",
+			provider: "WECHAT",
+			purpose: "LOGIN",
+			flowReferenceHash: "f".repeat(64),
+			operationTargetHash: null,
+			targetUserId: null,
+			deviceHash: sessionDraft.deviceHash,
+			hashKeyVersion: "v1",
+		};
+		const database = new ScriptedDatabase((text, values) => {
+			if (text.includes("consume_oauth_state_with_wechat_union"))
+				return result({ changed: true });
+			if (
+				text.includes("resolve_wechat_miniprogram_user_from_consumed_state")
+			) {
+				expect(values).toEqual([proof.id]);
+				return result({
+					result: "SUCCESS",
+					user_id: authenticatedContext.userId,
+				});
+			}
+			if (text.includes("INSERT INTO public.auth_")) return empty(1);
+			throw new Error(
+				"Mini Program login must not query or create identity bindings directly",
+			);
+		});
+		const completion = {
+			proof,
+			verifiedIdentity: verifiedWechatIdentity,
+			session: {
+				...sessionDraft,
+				device: { ...sessionDraft.device, platform: "MINIPROGRAM" as const },
+			},
+		};
+		await expect(
+			new PostgresAuthRepository(
+				database as unknown as DatabasePool,
+			).completeWechatMiniProgramLogin(completion),
+		).resolves.toEqual({
+			kind: "SUCCESS",
+			userId: authenticatedContext.userId,
+			sessionId: sessionDraft.sessionId,
+		});
+		const consume = database.calls.findIndex((sql) =>
+			sql.includes("consume_oauth_state_with_wechat_union"),
+		);
+		const resolve = database.calls.findIndex((sql) =>
+			sql.includes("resolve_wechat_miniprogram_user_from_consumed_state"),
+		);
+		const session = database.calls.findIndex((sql) =>
+			sql.includes("INSERT INTO public.auth_session_families"),
+		);
+		expect(consume).toBeGreaterThan(-1);
+		expect(consume).toBeLessThan(resolve);
+		expect(resolve).toBeLessThan(session);
+	});
+
+	it.each([
+		"IDENTITY_NOT_BOUND",
+		"IDENTITY_CONFLICT",
+		"INVALID_CREDENTIALS",
+	] as const)(
+		"does not issue a Mini Program session for resolver %s",
+		async (outcome) => {
+			const proof: OAuthProof = {
+				id: "13131313-1313-4313-8313-131313131313",
+				provider: "WECHAT",
+				purpose: "LOGIN",
+				flowReferenceHash: "f".repeat(64),
+				operationTargetHash: null,
+				targetUserId: null,
+				deviceHash: sessionDraft.deviceHash,
+				hashKeyVersion: "v1",
+			};
+			const database = new ScriptedDatabase((text) => {
+				if (text.includes("consume_oauth_state_with_wechat_union"))
+					return result({ changed: true });
+				if (
+					text.includes("resolve_wechat_miniprogram_user_from_consumed_state")
+				)
+					return result({ result: outcome, user_id: null });
+				throw new Error("failed identity resolution must not issue a session");
+			});
+			await expect(
+				new PostgresAuthRepository(
+					database as unknown as DatabasePool,
+				).completeWechatMiniProgramLogin({
+					proof,
+					verifiedIdentity: verifiedWechatIdentity,
+					session: {
+						...sessionDraft,
+						device: { ...sessionDraft.device, platform: "MINIPROGRAM" },
+					},
+				}),
+			).resolves.toEqual({ kind: outcome });
+			expect(database.calls.some((sql) => sql.includes("INSERT INTO"))).toBe(
+				false,
+			);
+		},
+	);
+
+	it("rejects already consumed mini proof before resolving or issuing sessions", async () => {
+		const proof: OAuthProof = {
+			id: "13131313-1313-4313-8313-131313131313",
+			provider: "WECHAT",
+			purpose: "LOGIN",
+			flowReferenceHash: "f".repeat(64),
+			operationTargetHash: null,
+			targetUserId: null,
+			deviceHash: sessionDraft.deviceHash,
+			hashKeyVersion: "v1",
+		};
+		const database = new ScriptedDatabase((text) => {
+			if (text.includes("consume_oauth_state_with_wechat_union"))
+				return result({ changed: false });
+			throw new Error("replayed proof must stop immediately");
+		});
+		await expect(
+			new PostgresAuthRepository(
+				database as unknown as DatabasePool,
+			).completeWechatMiniProgramLogin({
+				proof,
+				verifiedIdentity: verifiedWechatIdentity,
+				session: {
+					...sessionDraft,
+					device: { ...sessionDraft.device, platform: "MINIPROGRAM" },
+				},
+			}),
+		).resolves.toEqual({ kind: "INVALID_CREDENTIALS" });
+		expect(database.calls).toHaveLength(1);
+	});
+
+	it("atomically claims mini code hashes without surfacing unique constraint errors", async () => {
+		const hashes = new Set<string>();
+		const database = new ScriptedDatabase((text, values) => {
+			if (text.includes("pg_advisory_xact_lock")) return empty();
+			if (text.includes("device_count"))
+				return result({ device_count: 0, flow_count: 0 });
+			if (text.includes("INSERT INTO public.oauth_states")) {
+				expect(text).toContain(
+					"ON CONFLICT (state_hash) DO NOTHING RETURNING id",
+				);
+				const hash = String(values[3]);
+				if (hashes.has(hash)) return empty(0);
+				hashes.add(hash);
+				return empty(1);
+			}
+			throw new Error("unexpected code claim SQL");
+		});
+		const repository = new PostgresAuthRepository(
+			database as unknown as DatabasePool,
+		);
+		const draft = oauthDraft(12, "LOGIN");
+		await expect(repository.claimWechatMiniProgramCode(draft)).resolves.toEqual(
+			{ kind: "CREATED" },
+		);
+		await expect(
+			repository.claimWechatMiniProgramCode({
+				...draft,
+				id: "13131313-1313-4313-8313-131313131313",
+			}),
+		).resolves.toEqual({ kind: "REPLAY" });
+	});
+
 	it("records a verified WeChat UnionID alias before issuing the owner session", async () => {
 		const proof: OAuthProof = {
 			id: "13131313-1313-4313-8313-131313131313",
@@ -1750,41 +1916,52 @@ describe("PostgresAuthRepository transaction workflows", () => {
 		).toBe(false);
 	});
 
-	it.each([false, true])("lists owner sessions with explicit all-platform opt-in %s", async (includeAllPlatforms) => {
-		const otherId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
-		const database = new ScriptedDatabase((text, values) => {
-			if (text.includes("SELECT family.id"))
-				return result({ id: authenticatedContext.sessionId });
-			expect(text).toContain("WHERE user_id = $1");
-			expect(text).toContain("platform IN ('ANDROID', 'MINIPROGRAM')");
-			expect(text.indexOf("($3::boolean OR platform = 'ANDROID')")).toBeLessThan(text.indexOf("LIMIT 50"));
-			expect(text).toContain("status = 'ACTIVE'");
-			expect(text).toContain("refresh_expires_at > clock_timestamp()");
-			expect(values).toEqual([
-				authenticatedContext.userId,
-				authenticatedContext.sessionId,
-				includeAllPlatforms,
-			]);
-			const rows = (includeAllPlatforms ? ["ANDROID", "MINIPROGRAM"] : ["ANDROID"]).map((platform, index) => ({
-				id: index === 0 ? authenticatedContext.sessionId : otherId,
-				device_label: platform,
-				platform,
-				created_at: new Date("2026-08-20T05:40:00.000Z"),
-				last_seen_at: new Date("2026-08-21T05:30:00.000Z"),
-				refresh_expires_at: new Date("2026-09-01T05:40:00.000Z"),
-				status: "ACTIVE",
-				revoked_at: null,
-			}));
-			return { rows, rowCount: rows.length };
-		});
-		const sessions = await new PostgresAuthRepository(
-			database as unknown as DatabasePool,
-		).listSessions(authenticatedContext, includeAllPlatforms);
-		expect(sessions).toMatchObject(includeAllPlatforms ? [
-			{ platform: "ANDROID", current: true },
-			{ platform: "MINIPROGRAM", current: false },
-		] : [{ platform: "ANDROID", current: true }]);
-	});
+	it.each([false, true])(
+		"lists owner sessions with explicit all-platform opt-in %s",
+		async (includeAllPlatforms) => {
+			const otherId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+			const database = new ScriptedDatabase((text, values) => {
+				if (text.includes("SELECT family.id"))
+					return result({ id: authenticatedContext.sessionId });
+				expect(text).toContain("WHERE user_id = $1");
+				expect(text).toContain("platform IN ('ANDROID', 'MINIPROGRAM')");
+				expect(
+					text.indexOf("($3::boolean OR platform = 'ANDROID')"),
+				).toBeLessThan(text.indexOf("LIMIT 50"));
+				expect(text).toContain("status = 'ACTIVE'");
+				expect(text).toContain("refresh_expires_at > clock_timestamp()");
+				expect(values).toEqual([
+					authenticatedContext.userId,
+					authenticatedContext.sessionId,
+					includeAllPlatforms,
+				]);
+				const rows = (
+					includeAllPlatforms ? ["ANDROID", "MINIPROGRAM"] : ["ANDROID"]
+				).map((platform, index) => ({
+					id: index === 0 ? authenticatedContext.sessionId : otherId,
+					device_label: platform,
+					platform,
+					created_at: new Date("2026-08-20T05:40:00.000Z"),
+					last_seen_at: new Date("2026-08-21T05:30:00.000Z"),
+					refresh_expires_at: new Date("2026-09-01T05:40:00.000Z"),
+					status: "ACTIVE",
+					revoked_at: null,
+				}));
+				return { rows, rowCount: rows.length };
+			});
+			const sessions = await new PostgresAuthRepository(
+				database as unknown as DatabasePool,
+			).listSessions(authenticatedContext, includeAllPlatforms);
+			expect(sessions).toMatchObject(
+				includeAllPlatforms
+					? [
+							{ platform: "ANDROID", current: true },
+							{ platform: "MINIPROGRAM", current: false },
+						]
+					: [{ platform: "ANDROID", current: true }],
+			);
+		},
+	);
 
 	it.each(["ANDROID", "MINIPROGRAM"])(
 		"revokes a same-account %s session and all its access tokens",

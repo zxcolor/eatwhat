@@ -126,6 +126,8 @@ importers:
 
   apps/miniprogram: {}
 
+  apps/wechat: {}
+
   packages/contracts:
     dependencies:
       zod:

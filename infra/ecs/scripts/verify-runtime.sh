@@ -53,6 +53,7 @@ expected_qq_realm_id="$(read_deployment_setting QQ_OPEN_PLATFORM_REALM_ID)"
 expected_accounts_enabled="$(read_boolean_setting ACCOUNTS_ENABLED)"
 expected_phone_enabled="$(read_boolean_setting PHONE_AUTH_ENABLED)"
 expected_wechat_enabled="$(read_boolean_setting WECHAT_AUTH_ENABLED)"
+expected_wechat_miniprogram_enabled="$(read_boolean_setting WECHAT_MINIPROGRAM_AUTH_ENABLED)"
 expected_email_enabled="$(read_boolean_setting EMAIL_AUTH_ENABLED)"
 expected_qq_enabled="$(read_boolean_setting QQ_AUTH_ENABLED)"
 expected_qq_union_id_enabled="$(read_boolean_setting QQ_UNION_ID_ENABLED)"
@@ -141,6 +142,11 @@ if [[ "$expected_schema_transition_mode" == 'wechat_union_aliases_pending' &&
   exit 2
 fi
 expected_registration_enabled='false'
+if [[ "$expected_wechat_miniprogram_enabled" == 'true' ]] &&
+  [[ "$expected_schema_transition_mode" != 'none' || "$expected_accounts_enabled" != 'true' ]]; then
+  printf 'Mini Program authentication requires final authentication mode and enabled accounts\n' >&2
+  exit 2
+fi
 if [[ "$expected_accounts_enabled" == 'true' && "$expected_phone_enabled" == 'true' ]]; then
   expected_registration_enabled='true'
 fi
@@ -170,6 +176,7 @@ assert_api_container_env() {
 assert_api_container_env "AUTH_SCHEMA_TRANSITION_MODE=$expected_schema_transition_mode"
 assert_api_container_env "WECHAT_OPEN_PLATFORM_REALM_ID=$expected_wechat_realm_id"
 assert_api_container_env "WECHAT_AUTH_ENABLED=$expected_wechat_enabled"
+assert_api_container_env "WECHAT_MINIPROGRAM_AUTH_ENABLED=$expected_wechat_miniprogram_enabled"
 assert_api_container_env "QQ_OPEN_PLATFORM_REALM_ID=$expected_qq_realm_id"
 assert_api_container_env "QQ_AUTH_ENABLED=$expected_qq_enabled"
 assert_api_container_env "QQ_UNION_ID_ENABLED=$expected_qq_union_id_enabled"
@@ -212,6 +219,7 @@ process.stdin.on("end", () => {
       "registrationEnabled",
       "phoneEnabled",
       "wechatEnabled",
+      "wechatMiniProgramEnabled",
       "emailEnabled",
       "qqEnabled",
     ];
@@ -229,7 +237,7 @@ process.stdin.on("end", () => {
   }
 });
 ' "$expected_accounts_enabled" "$expected_registration_enabled" "$expected_phone_enabled" \
-    "$expected_wechat_enabled" "$expected_email_enabled" "$expected_qq_enabled"; then
+    "$expected_wechat_enabled" "$expected_wechat_miniprogram_enabled" "$expected_email_enabled" "$expected_qq_enabled"; then
   printf 'public authentication capabilities do not match deployment.env\n' >&2
   exit 6
 fi

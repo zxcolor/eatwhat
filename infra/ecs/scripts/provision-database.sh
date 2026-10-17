@@ -14,6 +14,8 @@ phone_only_cutover='false'
 wechat_union_aliases_cutover='false'
 admin_config_rollback_release=''
 admin_config_cutover_started='false'
+wechat_miniprogram_rollback_release=''
+wechat_miniprogram_cutover_started='false'
 if [[ "$#" -eq 0 ]]; then
   :
 elif [[ "$#" -eq 1 && "$1" == '--phone-only-cutover' ]]; then
@@ -22,8 +24,10 @@ elif [[ "$#" -eq 1 && "$1" == '--wechat-union-aliases-cutover' ]]; then
   wechat_union_aliases_cutover='true'
 elif [[ "$#" -eq 2 && "$1" == '--admin-config-cutover' ]]; then
   admin_config_rollback_release="$2"
+elif [[ "$#" -eq 2 && "$1" == '--wechat-miniprogram-cutover' ]]; then
+  wechat_miniprogram_rollback_release="$2"
 else
-  die 'usage: provision-database.sh [--phone-only-cutover|--wechat-union-aliases-cutover|--admin-config-cutover ROLLBACK_RELEASE]'
+  die 'usage: provision-database.sh [--wechat-miniprogram-cutover ROLLBACK_RELEASE]; historical --admin-config-cutover ROLLBACK_RELEASE and authentication cutovers require the approved schema 0013 release'
 fi
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -142,6 +146,10 @@ cleanup() {
   unset admin_api_runtime_value data_export_worker_value
   if [[ "$status" -ne 0 && "$admin_config_cutover_started" == 'true' ]]; then
     printf 'ADMIN_CONFIG_RECOVERY_RELEASE=%s\n' "$admin_config_rollback_release" >&2
+    printf 'DATABASE_SCHEMA_READBACK_REQUIRED=true\nDATABASE_AUTOMATIC_DOWNGRADE=false\n' >&2
+  fi
+  if [[ "$status" -ne 0 && "$wechat_miniprogram_cutover_started" == 'true' ]]; then
+    printf 'WECHAT_MINIPROGRAM_RECOVERY_RELEASE=%s\n' "$wechat_miniprogram_rollback_release" >&2
     printf 'DATABASE_SCHEMA_READBACK_REQUIRED=true\nDATABASE_AUTOMATIC_DOWNGRADE=false\n' >&2
   fi
   return "$status"
@@ -321,16 +329,61 @@ assert_admin_config_cutover_ready() {
     die 'active release changed during admin configuration cutover preparation'
 }
 
+assert_wechat_miniprogram_cutover_ready() {
+  [[ -n "$wechat_miniprogram_rollback_release" ]] ||
+    die 'schema 0013 requires explicit --wechat-miniprogram-cutover with a schema 0014 compatible rollback release'
+  [[ "$(read_deployment_value AUTH_SCHEMA_TRANSITION_MODE)" == 'none' &&
+     "$(read_deployment_value WECHAT_MINIPROGRAM_AUTH_ENABLED)" == 'false' ]] ||
+    die 'Mini Program schema cutover requires final authentication mode and the Mini Program channel disabled'
+  local active_release candidate_image_id backup_output recorded_release recorded_database_facts
+  candidate_image_id="$(read_deployment_value API_IMAGE_ID)"
+  [[ "$wechat_miniprogram_rollback_release/deploy" != "$bundle_root" ]] ||
+    die 'candidate release cannot also be its rollback release'
+  "$script_dir/verify-rollback-release.sh" "$wechat_miniprogram_rollback_release" \
+    --target-image "$candidate_image_id" >/dev/null
+  [[ -L /opt/chi-shen-me/current &&
+     "$(stat -c '%u:%g' /opt/chi-shen-me/current)" == '0:0' ]] ||
+    die 'Mini Program cutover requires a root-owned active release link'
+  active_release="$(realpath -e -- /opt/chi-shen-me/current)"
+  "$script_dir/verify-rollback-release.sh" "$active_release" >/dev/null
+  "$active_release/deploy/scripts/verify-runtime.sh" >/dev/null
+
+  # The global mutation lock spans the active schema 0013 backup, exact ledger
+  # verification, additive migration, convergent ACLs and rollback compatibility.
+  backup_output="$("$active_release/deploy/scripts/backup-database.sh" --mutation-lock-held)"
+  wechat_miniprogram_cutover_backup="$(sed -n 's/^BACKUP_DIRECTORY=//p' <<<"$backup_output")"
+  [[ "$wechat_miniprogram_cutover_backup" == /opt/chi-shen-me/backups/postgres/* ]] ||
+    die 'Mini Program cutover backup did not complete'
+  "$script_dir/verify-database-backup.sh" "$wechat_miniprogram_cutover_backup" >/dev/null
+  recorded_release="$(sed -n 's/^release_path=//p' "$wechat_miniprogram_cutover_backup/METADATA.txt")"
+  recorded_database_facts="$(sed -n 's/^database_facts=//p' "$wechat_miniprogram_cutover_backup/METADATA.txt")"
+  [[ "$recorded_release" == "$active_release" &&
+     "$recorded_database_facts" =~ ^chi_shen_me\|[0-9]+\|13$ &&
+     "$(wc -l <"$wechat_miniprogram_cutover_backup/SCHEMA_MIGRATIONS.txt")" -eq 13 &&
+     "$(tail -n 1 "$wechat_miniprogram_cutover_backup/SCHEMA_MIGRATIONS.txt")" =~ ^13\|admin_config_control\|[0-9a-f]{64}$ ]] ||
+    die 'Mini Program cutover backup does not match the active exact schema 0013 release'
+  [[ "$(realpath -e -- /opt/chi-shen-me/current)" == "$active_release" ]] ||
+    die 'active release changed during Mini Program cutover preparation'
+}
+
 schema_table="$(run_bootstrap_psql -qAt -c "SELECT to_regclass('public.schema_migrations')::text;")"
 if [[ -z "$schema_table" ]]; then
   [[ "$phone_only_cutover" == 'false' && "$wechat_union_aliases_cutover" == 'false' &&
-     -z "$admin_config_rollback_release" ]] ||
+     -z "$admin_config_rollback_release" && -z "$wechat_miniprogram_rollback_release" ]] ||
     die 'cutover flags require an exact supported existing schema'
 else
   schema_head="$(run_bootstrap_psql -qAt -F '|' -c \
     "SELECT count(*), min(version), max(version), max(name) FILTER (WHERE version = max_version)
        FROM public.schema_migrations
        CROSS JOIN (SELECT max(version) AS max_version FROM public.schema_migrations) AS head;")"
+  # Historical bridge recipes are pinned to their approved schema 0013 image.
+  # Retain their existing safety gates below, but never let a newer migration
+  # plan execute them or combine that cutover with the schema 0014 migration.
+  if [[ "$schema_head" == '10|1|10|fusion_phone_auth' ||
+        "$schema_head" == '11|1|11|phone_only_auth' ||
+        "$schema_head" == '12|1|12|wechat_union_aliases' ]]; then
+    die 'schema 0014 requires completed schema 0013; run historical cutovers using the approved schema 0013 release first'
+  fi
   case "$schema_head" in
     '10|1|10|fusion_phone_auth') assert_phone_only_cutover_ready ;;
     '11|1|11|phone_only_auth')
@@ -347,6 +400,12 @@ else
       [[ "$phone_only_cutover" == 'false' && "$wechat_union_aliases_cutover" == 'false' &&
          -z "$admin_config_rollback_release" ]] ||
         die 'cutover flags cannot be reused after schema 0012 is active'
+      assert_wechat_miniprogram_cutover_ready
+      ;;
+    '14|1|14|wechat_miniprogram_login')
+      [[ "$phone_only_cutover" == 'false' && "$wechat_union_aliases_cutover" == 'false' &&
+         -z "$admin_config_rollback_release" && -z "$wechat_miniprogram_rollback_release" ]] ||
+        die 'cutover flags cannot be reused after schema 0014 is active'
       ;;
     *) die 'database schema is not an exact supported provisioning state' ;;
   esac
@@ -362,6 +421,9 @@ run_bootstrap_psql -c 'ALTER DATABASE chi_shen_me OWNER TO schema_migrator; ALTE
 
 if [[ -n "$admin_config_rollback_release" ]]; then
   admin_config_cutover_started='true'
+fi
+if [[ -n "$wechat_miniprogram_rollback_release" ]]; then
+  wechat_miniprogram_cutover_started='true'
 fi
 docker compose --env-file deployment.env --profile ops run --rm migrate
 
@@ -380,9 +442,13 @@ run_bootstrap_psql -qAt -c \
   "SELECT count(*) FROM schema_migrations; SELECT extname || '=' || extversion FROM pg_extension WHERE extname IN ('pgcrypto','postgis') ORDER BY extname;"
 
 run_bootstrap_psql -qAt <"$bundle_root/sql/verify-admin-config-control.sql"
+run_bootstrap_psql -qAt <"$bundle_root/sql/verify-wechat-miniprogram-login.sql"
 
 if [[ -n "$admin_config_rollback_release" ]]; then
   "$script_dir/verify-rollback-release.sh" "$admin_config_rollback_release" >/dev/null
+fi
+if [[ -n "$wechat_miniprogram_rollback_release" ]]; then
+  "$script_dir/verify-rollback-release.sh" "$wechat_miniprogram_rollback_release" >/dev/null
 fi
 
 if [[ "$wechat_union_aliases_cutover" == 'true' ]]; then
@@ -456,5 +522,10 @@ if [[ -n "${admin_config_cutover_backup:-}" ]]; then
   printf 'ADMIN_CONFIG_CUTOVER_BACKUP=%s\n' "$admin_config_cutover_backup"
   printf 'ADMIN_CONFIG_RECOVERY_RELEASE=%s\n' "$admin_config_rollback_release"
   printf 'ADMIN_CONFIG_ACTIVATION_REQUIRES_EXPLICIT_ROLLBACK=true\n'
+fi
+if [[ -n "${wechat_miniprogram_cutover_backup:-}" ]]; then
+  printf 'WECHAT_MINIPROGRAM_CUTOVER_BACKUP=%s\n' "$wechat_miniprogram_cutover_backup"
+  printf 'WECHAT_MINIPROGRAM_RECOVERY_RELEASE=%s\n' "$wechat_miniprogram_rollback_release"
+  printf 'WECHAT_MINIPROGRAM_ACTIVATION_REQUIRES_EXPLICIT_ROLLBACK=true\n'
 fi
 docker image inspect --format 'API_IMAGE_ID={{.Id}}' "$api_image"

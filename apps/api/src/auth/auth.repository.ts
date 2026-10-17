@@ -354,6 +354,12 @@ export abstract class AuthRepository {
 	abstract completeOAuthLogin(
 		completion: OAuthLoginCompletion,
 	): Promise<CompleteOAuthCredentialResult>;
+	abstract claimWechatMiniProgramCode(
+		draft: OAuthStateDraft,
+	): Promise<CreateOAuthStateResult | { readonly kind: "REPLAY" }>;
+	abstract completeWechatMiniProgramLogin(
+		completion: OAuthLoginCompletion,
+	): Promise<CompleteOAuthCredentialResult>;
 	abstract refreshSession(
 		refreshHashCandidates: readonly VersionedHash[],
 		deviceHashCandidates: readonly string[],
@@ -615,6 +621,15 @@ export class PostgresAuthRepository extends AuthRepository {
 	async createOAuthState(
 		draft: OAuthStateDraft,
 	): Promise<CreateOAuthStateResult> {
+		const result = await this.createOAuthStateRecord(draft, false);
+		if (result.kind === "REPLAY") throw new Error("OAuth state 创建失败");
+		return result;
+	}
+
+	private async createOAuthStateRecord(
+		draft: OAuthStateDraft,
+		rejectReplay: boolean,
+	): Promise<CreateOAuthStateResult | { readonly kind: "REPLAY" }> {
 		return this.database.withTransaction(async (transaction) => {
 			for (const lockKey of [
 				`oauth-device:${draft.deviceHash}`,
@@ -649,12 +664,12 @@ export class PostgresAuthRepository extends AuthRepository {
 					retryAfterSeconds: 60,
 				});
 			}
-			await transaction.query(
+			const inserted = await transaction.query(
 				`INSERT INTO public.oauth_states (
 				   id, provider, purpose, state_hash, state_hash_algorithm,
 				   flow_reference_hash, operation_target_hash, target_user_id,
 				   device_hash, hash_key_version, created_at, expires_at, retain_until
-				 ) VALUES ($1, $2, $3, $4, 'HMAC-SHA256', $5, $6, $7, $8, $9, $10, $11, $12)`,
+				 ) VALUES ($1, $2, $3, $4, 'HMAC-SHA256', $5, $6, $7, $8, $9, $10, $11, $12)${rejectReplay ? " ON CONFLICT (state_hash) DO NOTHING RETURNING id" : ""}`,
 				[
 					draft.id,
 					draft.provider,
@@ -670,6 +685,8 @@ export class PostgresAuthRepository extends AuthRepository {
 					draft.retainUntil,
 				],
 			);
+			if (rejectReplay && inserted.rowCount !== 1)
+				return Object.freeze({ kind: "REPLAY" as const });
 			return Object.freeze({ kind: "CREATED" as const });
 		});
 	}
@@ -836,6 +853,64 @@ export class PostgresAuthRepository extends AuthRepository {
 				[proof.id, claimHash],
 			);
 			return result.rows[0]?.changed === true;
+		});
+	}
+
+	async claimWechatMiniProgramCode(
+		draft: OAuthStateDraft,
+	): Promise<CreateOAuthStateResult | { readonly kind: "REPLAY" }> {
+		// The existing UNIQUE state_hash index atomically claims a code across
+		// processes. ON CONFLICT preserves the transaction and hides driver details.
+		return this.createOAuthStateRecord(draft, true);
+	}
+
+	async completeWechatMiniProgramLogin(
+		completion: OAuthLoginCompletion,
+	): Promise<CompleteOAuthCredentialResult> {
+		if (
+			completion.proof.provider !== "WECHAT" ||
+			completion.proof.purpose !== "LOGIN" ||
+			completion.proof.targetUserId !== null ||
+			completion.proof.operationTargetHash !== null ||
+			completion.session.device.platform !== "MINIPROGRAM" ||
+			completion.verifiedIdentity.wechatUnionAlias === null
+		) {
+			return Object.freeze({ kind: "INVALID_CREDENTIALS" as const });
+		}
+		return this.database.withTransaction(async (transaction) => {
+			if (
+				!(await consumeOAuth(
+					transaction,
+					completion.proof,
+					completion.verifiedIdentity,
+				))
+			) {
+				return Object.freeze({ kind: "INVALID_CREDENTIALS" as const });
+			}
+			const resolved = await transaction.query<{
+				result: string;
+				user_id: string | null;
+			}>(
+				"SELECT result, user_id FROM public.resolve_wechat_miniprogram_user_from_consumed_state($1)",
+				[completion.proof.id],
+			);
+			const owner = resolved.rows[0];
+			if (owner?.result === "IDENTITY_NOT_BOUND")
+				return Object.freeze({ kind: "IDENTITY_NOT_BOUND" as const });
+			if (owner?.result === "IDENTITY_CONFLICT")
+				return Object.freeze({ kind: "IDENTITY_CONFLICT" as const });
+			if (
+				owner?.result !== "SUCCESS" ||
+				owner.user_id === null ||
+				resolved.rows.length !== 1
+			)
+				return Object.freeze({ kind: "INVALID_CREDENTIALS" as const });
+			await insertSession(transaction, owner.user_id, completion.session);
+			return Object.freeze({
+				kind: "SUCCESS" as const,
+				userId: owner.user_id,
+				sessionId: completion.session.sessionId,
+			});
 		});
 	}
 

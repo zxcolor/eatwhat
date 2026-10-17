@@ -140,9 +140,11 @@ $localApiEnvironmentTemplate = Join-Path $workspaceRoot '.env.local.example'
 Write-Host '== Local API launcher: child environment isolation =='
 $previousDecoySecret = $env:CHISHENME_PARENT_SECRET_DECOY
 $previousExternalAmapKey = $env:AMAP_WEB_SERVICE_KEY
+$previousMiniProgramSecret = $env:WECHAT_MINIPROGRAM_APP_SECRET
 try {
     $env:CHISHENME_PARENT_SECRET_DECOY = 'must-not-reach-any-child'
     $env:AMAP_WEB_SERVICE_KEY = 'approved-external-secret'
+    $env:WECHAT_MINIPROGRAM_APP_SECRET = 'synthetic-miniprogram-secret'
     . (Join-Path $PSScriptRoot 'start-api-local.ps1') `
         -EnvFile $localApiEnvironmentTemplate `
         -ValidateOnly
@@ -168,9 +170,23 @@ try {
         $buildFixture.Contains('FAVORITES_ENABLED')) {
         throw '本机启动器没有把个人收藏能力开关只注入运行进程。'
     }
+    $miniProgramFixture = [ordered]@{
+        ACCOUNTS_ENABLED = 'true'
+        WECHAT_MINIPROGRAM_AUTH_ENABLED = 'false'
+        WECHAT_MINIPROGRAM_APP_SECRET = ''
+    }
+    $miniProgramDisabled = New-RuntimeChildEnvironment -Entries $miniProgramFixture
+    $miniProgramFixture['WECHAT_MINIPROGRAM_AUTH_ENABLED'] = 'true'
+    $miniProgramEnabled = New-RuntimeChildEnvironment -Entries $miniProgramFixture
+    if ($miniProgramDisabled.Contains('WECHAT_MINIPROGRAM_APP_SECRET') -or
+        $buildFixture.Contains('WECHAT_MINIPROGRAM_APP_SECRET') -or
+        $miniProgramEnabled['WECHAT_MINIPROGRAM_APP_SECRET'] -cne 'synthetic-miniprogram-secret') {
+        throw '小程序服务端密钥必须仅在独立通道启用时传入运行进程，不能进入构建进程。'
+    }
 } finally {
     $env:CHISHENME_PARENT_SECRET_DECOY = $previousDecoySecret
     $env:AMAP_WEB_SERVICE_KEY = $previousExternalAmapKey
+    $env:WECHAT_MINIPROGRAM_APP_SECRET = $previousMiniProgramSecret
 }
 
 Write-Host '== Local API launcher: PNVS PHONE_ONLY without unrelated provider secrets =='

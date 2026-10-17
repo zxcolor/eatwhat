@@ -147,8 +147,8 @@ SELECT NOT EXISTS (
 \endif
 
 -- The isolated restore path can intentionally recreate the last legacy schema
--- (0010), PHONE_ONLY (0011), the UnionID alias schema (0012), or the current
--- administrator configuration schema (0013). Select exactly one
+-- (0010), PHONE_ONLY (0011), the UnionID alias schema (0012), administrator
+-- configuration (0013), or Mini Program account resolution (0014). Select one
 -- least-privilege whitelist; never apply a mixed authentication grant set.
 SELECT (
   count(*) = 11
@@ -169,6 +169,13 @@ SELECT (
   AND bool_or(version = 13 AND name = 'admin_config_control')
 ) AS admin_config_schema_0013,
 (
+  count(*) = 14
+  AND min(version) = 1
+  AND max(version) = 14
+  AND bool_or(version = 13 AND name = 'admin_config_control')
+  AND bool_or(version = 14 AND name = 'wechat_miniprogram_login')
+) AS wechat_miniprogram_schema_0014,
+(
   count(*) = 10
   AND min(version) = 1
   AND max(version) = 10
@@ -180,15 +187,22 @@ SELECT (
   :'phone_only_schema_0011'::boolean
   OR :'wechat_union_alias_schema_0012'::boolean
   OR :'admin_config_schema_0013'::boolean
+  OR :'wechat_miniprogram_schema_0014'::boolean
 ) AS phone_only_schema,
 (
   :'wechat_union_alias_schema_0012'::boolean
   OR :'admin_config_schema_0013'::boolean
+  OR :'wechat_miniprogram_schema_0014'::boolean
 ) AS wechat_union_alias_schema,
+(
+  :'admin_config_schema_0013'::boolean
+  OR :'wechat_miniprogram_schema_0014'::boolean
+) AS admin_config_schema,
 (
   :'phone_only_schema_0011'::boolean
   OR :'wechat_union_alias_schema_0012'::boolean
   OR :'admin_config_schema_0013'::boolean
+  OR :'wechat_miniprogram_schema_0014'::boolean
   OR :'legacy_fusion_schema'::boolean
 ) AS supported_auth_schema \gset
 \if :supported_auth_schema
@@ -197,7 +211,7 @@ SELECT (
   BEGIN
     RAISE EXCEPTION USING
       ERRCODE = '55000',
-      MESSAGE = 'role grants require the exact 0010, 0011, 0012 or 0013 schema';
+      MESSAGE = 'role grants require the exact 0010, 0011, 0012, 0013 or 0014 schema';
   END
   $psql_fail$;
 \endif
@@ -310,7 +324,7 @@ GRANT UPDATE (status, last_seen_at, last_ip_hash, compromised_at, revoked_at)
 GRANT UPDATE (revoked_at) ON public.auth_access_tokens TO :"runtime_role";
 GRANT SELECT ON public.account_deletion_jobs TO :"runtime_role";
 GRANT SELECT ON public.coverage_areas TO :"runtime_role";
-\if :admin_config_schema_0013
+\if :admin_config_schema
 GRANT EXECUTE ON FUNCTION public.runtime_list_active_app_config()
   TO :"runtime_role";
 \endif
@@ -378,6 +392,11 @@ GRANT EXECUTE ON FUNCTION public.consume_oauth_state_with_wechat_union(
 ) TO :"runtime_role";
 GRANT EXECUTE ON FUNCTION public.record_wechat_union_alias_from_consumed_state(
   uuid, uuid
+) TO :"runtime_role";
+\endif
+\if :wechat_miniprogram_schema_0014
+GRANT EXECUTE ON FUNCTION public.resolve_wechat_miniprogram_user_from_consumed_state(
+  uuid
 ) TO :"runtime_role";
 \endif
 GRANT EXECUTE ON FUNCTION public.finalize_otp_delivery(
@@ -538,7 +557,7 @@ GRANT EXECUTE ON FUNCTION public.admin_revoke_self_credential(
 GRANT EXECUTE ON FUNCTION public.admin_list_sanitized_audit_events(
   varchar, varchar, varchar, varchar, varchar, timestamptz, uuid, integer
 ) TO :"admin_runtime_role";
-\if :admin_config_schema_0013
+\if :admin_config_schema
 GRANT EXECUTE ON FUNCTION public.admin_list_sanitized_audit_events_v2(
   varchar, varchar, varchar, varchar, varchar, timestamptz, uuid, integer
 ) TO :"admin_runtime_role";

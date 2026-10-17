@@ -16,11 +16,13 @@ import {
 	createPhoneOtpProvider,
 	createQqIdentityProvider,
 	createWechatIdentityProvider,
+	createWechatMiniProgramIdentityProvider,
 	EMAIL_OTP_PROVIDER,
 	PHONE_OTP_PROVIDER,
 	QQ_IDENTITY_PROVIDER,
 	SMTP_CLIENT,
 	WECHAT_IDENTITY_PROVIDER,
+	WECHAT_MINIPROGRAM_IDENTITY_PROVIDER,
 } from "./auth-provider.factories.js";
 import { AuthRateLimitInterceptor } from "./auth-rate-limit.interceptor.js";
 import {
@@ -101,6 +103,11 @@ import { createVerifiedSmtpTransportClient } from "./providers/smtp-email-otp.pr
 			provide: QQ_IDENTITY_PROVIDER,
 			inject: [APP_CONFIG],
 			useFactory: (config: AppConfig) => createQqIdentityProvider(config),
+		},
+		{
+			provide: WECHAT_MINIPROGRAM_IDENTITY_PROVIDER,
+			inject: [APP_CONFIG],
+			useFactory: createWechatMiniProgramIdentityProvider,
 		},
 	],
 	exports: [AUTHENTICATED_USER_RESOLVER],

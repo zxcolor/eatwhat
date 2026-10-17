@@ -1,0 +1,30 @@
+<view class="page {{themeClass}}">
+  <view class="title">这一餐，怎么选</view><view class="subtitle">只为你一个人，选出最多 3 个用餐候选。</view>
+  <view class="card" bindtap="location"><view class="label">出发地点</view><view class="row location-row"><text>{{locationLabel}}</text><text class="muted">更换 ›</text></view></view>
+  <view class="card">
+    <view class="section-title">决定方式</view>
+    <view class="chips"><button wx:for="{{options.decisionMode}}" wx:key="value" class="chip {{item.selected ? 'selected' : ''}}" data-key="decisionMode" data-index="{{item.index}}" bindtap="select">{{item.label}}</button></view>
+    <view class="section-title">哪一餐</view>
+    <view class="chips"><button wx:for="{{options.mealPeriod}}" wx:key="value" class="chip {{item.selected ? 'selected' : ''}}" data-key="mealPeriod" data-index="{{item.index}}" bindtap="select">{{item.label}}</button></view>
+    <view wx:if="{{options.target.length > 1 || filters.target !== 'MEAL'}}">
+      <view class="section-title">想决定什么</view>
+      <view class="chips"><button wx:for="{{options.target}}" wx:key="value" class="chip {{item.selected ? 'selected' : ''}}" data-key="target" data-index="{{item.index}}" bindtap="select">{{item.label}}</button></view>
+    </view>
+    <view wx:if="{{showWeather}}">
+      <view class="section-title">手动体感</view><view class="muted">只使用你本次主动选择的体感。</view>
+      <view class="chips"><button wx:for="{{options.weather}}" wx:key="value" class="chip {{item.selected ? 'selected' : ''}}" data-key="weather" data-index="{{item.index}}" bindtap="select">{{item.label}}</button></view>
+    </view>
+  </view>
+  <view wx:if="{{filters.decisionMode === 'QUICK'}}" class="card"><view class="section-title">当前条件</view><view class="summary">{{summary}}</view><view class="muted">想改预算或出行方式，可以切换「按条件选」。</view></view>
+  <view wx:else class="card">
+    <view class="section-title">人均预算</view><view class="chips"><button wx:for="{{options.budgetMaxYuan}}" wx:key="index" class="chip {{item.selected ? 'selected' : ''}}" data-key="budgetMaxYuan" data-index="{{item.index}}" bindtap="select">{{item.label}}</button></view>
+    <view class="section-title">一共可用多久</view><view class="chips"><button wx:for="{{options.availableMinutes}}" wx:key="value" class="chip {{item.selected ? 'selected' : ''}}" data-key="availableMinutes" data-index="{{item.index}}" bindtap="select">{{item.label}}</button></view>
+    <view class="section-title">交通方式</view><view class="chips"><button wx:for="{{options.travelMode}}" wx:key="value" class="chip {{item.selected ? 'selected' : ''}}" data-key="travelMode" data-index="{{item.index}}" bindtap="select">{{item.label}}</button></view>
+    <view class="section-title">最远距离</view><view class="chips"><button wx:for="{{options.radiusMeters}}" wx:key="value" class="chip {{item.selected ? 'selected' : ''}}" data-key="radiusMeters" data-index="{{item.index}}" bindtap="select">{{item.label}}</button></view>
+    <block wx:if="{{softPreferences}}"><view class="section-title">探索偏好</view><view class="chips"><button wx:for="{{options.explorationMode}}" wx:key="value" class="chip {{item.selected ? 'selected' : ''}}" data-key="explorationMode" data-index="{{item.index}}" bindtap="select">{{item.label}}</button></view><view class="section-title">更想吃</view><view class="chips"><button wx:for="{{preferredCuisines}}" wx:key="name" class="chip {{item.selected ? 'selected' : ''}}" data-name="{{item.name}}" data-preferred="yes" bindtap="toggleCuisine">{{item.name}}</button></view></block>
+    <view class="section-title">这次不吃</view><view class="chips"><button wx:for="{{cuisines}}" wx:key="name" class="chip {{item.selected ? 'selected' : ''}}" data-name="{{item.name}}" bindtap="toggleCuisine">{{item.name}}</button></view>
+  </view>
+  <view wx:if="{{error || selectionError}}" class="error">{{error || selectionError}}</view>
+  <view wx:if="{{!canRecommend}}" class="card"><view class="muted">云端服务尚未连接或当前未开放推荐。</view><button class="secondary" bindtap="refresh" loading="{{connecting}}" disabled="{{connecting}}">重新连接</button></view>
+  <button class="primary" bindtap="submit">{{hasLocation ? '帮我决定' : '先选择地点'}}</button>
+</view>

@@ -1,0 +1,10 @@
+.account-heading { display: flex; align-items: center; gap: 24rpx; }
+.avatar { display: flex; align-items: center; justify-content: center; width: 92rpx; height: 92rpx; border-radius: 30rpx; color: var(--accent); background: var(--accent-soft); font-size: 40rpx; font-weight: 600; }
+.auth-tabs { margin: 24rpx 0; }
+.form-tip, .session-note { margin: 24rpx 0; line-height: 1.7; }
+.detail-heading { margin-top: 36rpx; }
+.detail-row { padding: 22rpx 0; border-bottom: 1rpx solid var(--line); overflow-wrap: anywhere; }
+.badge { color: var(--accent); font-size: 22rpx; margin-left: 18rpx; }
+.notice { padding: 24rpx; color: var(--accent); line-height: 1.65; }
+.footer-links { display: flex; gap: 20rpx; }
+.footer-links button { flex: 1; margin: 0; }

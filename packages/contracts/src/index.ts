@@ -916,6 +916,18 @@ export const LoginRequestSchema = z.discriminatedUnion("method", [
 ]);
 export type LoginRequest = z.infer<typeof LoginRequestSchema>;
 
+// A wx.login code is exchanged only by the server-owned mini-program channel.
+// Callers cannot select an AppID, realm, UnionID or a target account.
+export const WechatMiniProgramLoginRequestSchema = z
+	.object({
+		code: ThirdPartyAuthorizationCodeSchema,
+		device: AuthDeviceContextSchema.extend({ platform: z.literal("MINIPROGRAM") }),
+	})
+	.strict();
+export type WechatMiniProgramLoginRequest = z.infer<
+	typeof WechatMiniProgramLoginRequestSchema
+>;
+
 export const AuthTokenResponseSchema = z
 	.object({
 		userId: z.uuid(),
@@ -1181,6 +1193,7 @@ export const AuthCapabilitiesSchema = z
 		registrationEnabled: z.boolean(),
 		phoneEnabled: z.boolean(),
 		wechatEnabled: z.boolean(),
+		wechatMiniProgramEnabled: z.boolean().optional(),
 		emailEnabled: z.boolean(),
 		qqEnabled: z.boolean(),
 		dataExportEnabled: z.boolean().default(false),

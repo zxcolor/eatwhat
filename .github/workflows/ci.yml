@@ -131,6 +131,7 @@ jobs:
           PHONE_AUTH_ENABLED=false
           EMAIL_AUTH_ENABLED=false
           WECHAT_AUTH_ENABLED=false
+          WECHAT_MINIPROGRAM_AUTH_ENABLED=false
           QQ_AUTH_ENABLED=false
           QQ_UNION_ID_ENABLED=false
           QQ_OPEN_PLATFORM_REALM_ID=eatwhat-qq-primary
@@ -149,6 +150,7 @@ jobs:
           PHONE_AUTH_ENABLED=true
           EMAIL_AUTH_ENABLED=false
           WECHAT_AUTH_ENABLED=false
+          WECHAT_MINIPROGRAM_AUTH_ENABLED=false
           QQ_AUTH_ENABLED=false
           QQ_UNION_ID_ENABLED=false
           ALIBABA_CLOUD_ECS_METADATA=ci-role
@@ -307,6 +309,7 @@ jobs:
           PHONE_AUTH_ENABLED=true
           EMAIL_AUTH_ENABLED=true
           WECHAT_AUTH_ENABLED=false
+          WECHAT_MINIPROGRAM_AUTH_ENABLED=false
           QQ_AUTH_ENABLED=false
           QQ_UNION_ID_ENABLED=false
           QQ_OPEN_PLATFORM_REALM_ID=eatwhat-qq-primary
@@ -338,6 +341,7 @@ jobs:
           PHONE_AUTH_ENABLED=true
           EMAIL_AUTH_ENABLED=false
           WECHAT_AUTH_ENABLED=false
+          WECHAT_MINIPROGRAM_AUTH_ENABLED=false
           QQ_AUTH_ENABLED=false
           QQ_UNION_ID_ENABLED=false
           ALIBABA_CLOUD_ECS_METADATA=ci-role
@@ -352,6 +356,7 @@ jobs:
           PHONE_AUTH_ENABLED=true
           EMAIL_AUTH_ENABLED=false
           WECHAT_AUTH_ENABLED=false
+          WECHAT_MINIPROGRAM_AUTH_ENABLED=false
           QQ_AUTH_ENABLED=false
           QQ_UNION_ID_ENABLED=false
           ALIBABA_CLOUD_ECS_METADATA=ci-role
@@ -366,6 +371,7 @@ jobs:
           PHONE_AUTH_ENABLED=true
           EMAIL_AUTH_ENABLED=true
           WECHAT_AUTH_ENABLED=false
+          WECHAT_MINIPROGRAM_AUTH_ENABLED=false
           QQ_AUTH_ENABLED=false
           QQ_UNION_ID_ENABLED=false
           ALIBABA_CLOUD_ECS_METADATA=ci-role
@@ -391,6 +397,7 @@ jobs:
           PHONE_AUTH_ENABLED=true
           EMAIL_AUTH_ENABLED=false
           WECHAT_AUTH_ENABLED=false
+          WECHAT_MINIPROGRAM_AUTH_ENABLED=false
           QQ_AUTH_ENABLED=true
           QQ_UNION_ID_ENABLED=false
           ALIBABA_CLOUD_ECS_METADATA=ci-role
@@ -734,6 +741,26 @@ jobs:
           pnpm install --frozen-lockfile
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends postgresql-client
+      - name: Verify Mini Program schema 0013 to 0014 migration and identity resolution
+        run: |
+          fixture_id="$(cat /proc/sys/kernel/random/uuid | tr -d '-')"
+          container_name="eatwhat-schema14-$fixture_id"
+          trap 'docker stop "$container_name" >/dev/null' EXIT
+          docker run --detach --rm --name "$container_name" \
+            --publish 127.0.0.1:55414:5432 \
+            --env POSTGRES_HOST_AUTH_METHOD=trust \
+            --env "PGDATA=/tmp/eatwhat-schema14-$fixture_id/data" \
+            postgis/postgis:17-3.5-alpine >/dev/null
+          for attempt in $(seq 1 60); do
+            if pg_isready -h 127.0.0.1 -p 55414 -U postgres >/dev/null; then break; fi
+            sleep 1
+          done
+          pg_isready -h 127.0.0.1 -p 55414 -U postgres >/dev/null
+          WECHAT_MINIPROGRAM_POSTGRES_E2E=1 \
+          WECHAT_MINIPROGRAM_POSTGRES_PORT=55414 \
+          WECHAT_MINIPROGRAM_PSQL="$(command -v psql)" \
+            pnpm --filter @chi-shen-me/api exec vitest run \
+              src/database/wechat-miniprogram-login.postgres.e2e.test.ts
       - name: Bootstrap extensions and isolated least-privilege roles
         env:
           PGHOST: 127.0.0.1
@@ -809,7 +836,9 @@ jobs:
           test "$(psql -X -At -c "SELECT has_table_privilege('retention_worker','public.users','SELECT')")" = "f"
           test "$(psql -X -At -c "SELECT has_column_privilege('retention_worker','public.otp_challenges','destination_hash','UPDATE')")" = "f"
           test "$(psql -X -At -c "SELECT has_table_privilege('api_runtime','public.users','SELECT')")" = "t"
-          test "$(psql -X -At -c "SELECT count(*) || '|' || max(version) || '|' || max(name) FILTER (WHERE version=13) FROM public.schema_migrations")" = "13|13|admin_config_control"
+          test "$(psql -X -At -c "SELECT count(*) || '|' || max(version) || '|' || max(name) FILTER (WHERE version=14) FROM public.schema_migrations")" = "14|14|wechat_miniprogram_login"
+          psql -X -v ON_ERROR_STOP=1 -f infra/postgres/verify-admin-config-control.sql
+          psql -X -v ON_ERROR_STOP=1 -f infra/postgres/verify-wechat-miniprogram-login.sql
           for role in api_runtime retention_worker admin_api_runtime data_export_worker; do
             test "$(psql -X -At -c "SELECT count(*) FROM unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) AS checked(privilege_name) WHERE has_table_privilege('$role','public.wechat_union_aliases',privilege_name)")" = "0"
             test "$(psql -X -At -c "SELECT count(*) FROM unnest(ARRAY['SELECT','INSERT','UPDATE','REFERENCES']) AS checked(privilege_name) WHERE has_any_column_privilege('$role','public.wechat_union_aliases',privilege_name)")" = "0"
@@ -1124,7 +1153,7 @@ jobs:
           await client.connect();
           try {
             const result = await runMigrationsWithClient(client, await loadMigrationPlan());
-            if (result.currentVersion !== 13) throw new Error("UnionID cutover did not reach current schema 0013");
+            if (result.currentVersion !== 14) throw new Error("complete migration plan did not reach current schema 0014");
           } finally {
             await client.end();
           }
@@ -1140,7 +1169,7 @@ jobs:
             -v admin_runtime_role=admin_api_runtime -v export_worker_role=data_export_worker \
             -f infra/postgres/role-grants.sql
           export PGUSER=postgres PGPASSWORD=ci-bootstrap-password
-          test "$(psql -X -At -c "SELECT count(*) || '|' || max(version) || '|' || max(name) FILTER (WHERE version=13) FROM public.schema_migrations")" = "13|13|admin_config_control"
+          test "$(psql -X -At -c "SELECT count(*) || '|' || max(version) || '|' || max(name) FILTER (WHERE version=14) FROM public.schema_migrations")" = "14|14|wechat_miniprogram_login"
           test "$(psql -X -At -c "SELECT count(*) FROM public.schema_migrations WHERE version=12 AND name='wechat_union_aliases'")" = "1"
           test "$(psql -X -At -c "SELECT to_regclass('public.wechat_union_aliases') IS NOT NULL")" = "t"
           test "$(psql -X -At -c "SELECT has_table_privilege('api_runtime','public.wechat_union_aliases','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')")" = "f"

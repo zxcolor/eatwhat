@@ -1,0 +1,9 @@
+{
+  "desc": "个人推荐页面不参与搜索收录",
+  "rules": [
+    {
+      "action": "disallow",
+      "page": "*"
+    }
+  ]
+}

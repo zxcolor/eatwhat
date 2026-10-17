@@ -65,9 +65,9 @@ describe("Nest database pool lifecycle", () => {
 		expect(client.release).toHaveBeenCalledTimes(1);
 	});
 
-	it("starts the WeChat Union alias bridge when 0012 and later migrations are pending", async () => {
+	it("rejects historical auth bridges when the image advances beyond their approved 0013 plan", async () => {
 		const plan = await loadMigrationPlan();
-		expect(plan.at(-1)?.fileName).toBe("0013_admin_config_control.sql");
+		expect(plan.at(-1)?.fileName).toBe("0014_wechat_miniprogram_login.sql");
 		const applied = plan.slice(0, 11).map(({ version, name, checksum }) => ({
 			version,
 			name,
@@ -113,7 +113,10 @@ describe("Nest database pool lifecycle", () => {
 			}),
 			() => bridgeState.pool as unknown as Pool,
 		);
-		await expect(bridge.onApplicationBootstrap()).resolves.toBeUndefined();
+		await expect(bridge.onApplicationBootstrap()).rejects.toThrow(
+			"数据库启动检查失败",
+		);
+		expect(bridgeState.client.release).toHaveBeenCalledWith(true);
 		await bridge.onApplicationShutdown();
 
 		const strictState = createPool();

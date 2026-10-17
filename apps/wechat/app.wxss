@@ -1,0 +1,27 @@
+page { background:#f3f3f8; color:#16171b; font-family:-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif; font-size:16px; }
+view, button, input, text, scroll-view { box-sizing:border-box; }
+button { font-size:16px; line-height:1.5; border-radius:16px; margin:0; }
+button::after { border:0; }
+.page, .shell { --bg:#f3f3f8; --card:#fff; --text:#16171b; --muted:#737783; --accent:#087af0; --soft:#ebedf3; --line:#dddfe7; --accent-soft:#e8f1fd; min-height:100vh; background:var(--bg); color:var(--text); }
+.theme-dark { --bg:#181a20; --card:#242730; --text:#f2f3f7; --muted:#bac2cf; --accent:#8bc1ff; --soft:#303541; --line:#454a56; --accent-soft:#24364f; }
+.page { padding:24px 18px calc(28px + env(safe-area-inset-bottom)); }
+.title { font-size:28px; font-weight:700; line-height:1.35; margin-bottom:12px; }
+.subtitle, .muted { color:var(--muted); font-size:14px; line-height:1.65; }
+.card { background:var(--card); border-radius:20px; padding:20px; margin-bottom:14px; }
+.row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.label { font-size:16px; font-weight:600; line-height:1.5; }
+.primary, .secondary { min-height:52px; padding:14px 18px; margin-top:14px; font-weight:600; text-align:center; }
+button.primary, button.secondary { width:100%; }
+.primary { background:var(--accent); color:#fff; }
+.theme-dark .primary { color:#092d53; }
+.secondary { background:var(--soft); color:var(--text); }
+button[disabled], button.primary[disabled], button.secondary[disabled], button.chip[disabled] { opacity:.6; color:var(--muted); background:var(--soft); }
+.error { padding:14px 16px; border-radius:14px; background:var(--accent-soft); color:var(--text); margin:12px 0; font-size:14px; line-height:1.6; }
+.chips { display:flex; gap:8px; flex-wrap:wrap; margin:12px 0; }
+.chip { padding:9px 14px; border-radius:12px; background:var(--soft); color:var(--text); font-size:14px; }
+button.chip { width:auto; flex:0 0 auto; margin:0; }
+.chip.selected { background:var(--accent-soft); color:var(--accent); }
+.field { background:var(--soft); padding:13px 15px; height:50px; border-radius:12px; color:var(--text); margin:10px 0; }
+.section-title { font-size:17px; font-weight:600; margin:22px 0 12px; }
+.empty { text-align:center; padding:35px 15px; color:var(--muted); line-height:1.75; }
+.link { color:var(--accent); }

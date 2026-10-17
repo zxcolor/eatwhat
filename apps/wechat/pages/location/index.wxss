@@ -1,0 +1,1 @@
+.current-location{font-size:34rpx;font-weight:600;margin:14rpx 0 28rpx}.privacy-note,.notice{margin-top:22rpx;line-height:1.7}.place-name{font-size:30rpx;font-weight:600;flex:1;padding-right:20rpx}.address{margin-top:14rpx;line-height:1.6}.source{margin-top:16rpx;font-size:22rpx}.place-pressed{opacity:.75}
