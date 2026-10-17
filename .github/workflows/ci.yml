@@ -3244,7 +3244,7 @@ jobs:
       - name: Verify Release manifest
         run: >-
           ./gradlew processReleaseMainManifest
-          -PCHISHENME_API_BASE_URL=https://api.unfinished-era.com/
+          -PCHISHENME_API_BASE_URL=https://api.eatwhat.pro/
           --stacktrace
       - name: Assemble isolated Fixture test artifacts
         run: >-
@@ -3286,7 +3286,7 @@ jobs:
           trap 'rm -f "$log_file"' EXIT
           set +e
           ./gradlew assembleAlpha \
-            -PCHISHENME_ALPHA_API_BASE_URL=https://api.unfinished-era.com/ \
+            -PCHISHENME_ALPHA_API_BASE_URL=https://api.eatwhat.pro/ \
             --no-daemon --no-build-cache --no-configuration-cache >"$log_file" 2>&1
           status=$?
           set -e
@@ -3308,7 +3308,7 @@ jobs:
             log_file="$(mktemp)"
             set +e
             ./gradlew "$@" \
-              -PCHISHENME_API_BASE_URL=https://api.unfinished-era.com/ \
+              -PCHISHENME_API_BASE_URL=https://api.eatwhat.pro/ \
               --no-daemon --no-build-cache --no-configuration-cache >"$log_file" 2>&1
             local status=$?
             set -e

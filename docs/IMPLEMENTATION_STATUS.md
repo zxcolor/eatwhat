@@ -60,12 +60,12 @@
 - Android Studio API 36 模拟器已通过 8 条核心 Activity 用例和 2 条分享封藏负例：兼容态 3 条、配置不可用 1 条、同进程最低版本提高 1 条、启动即强制更新 1 条；账号设备内合成 API 夹具 1 条覆盖手机号登录→邮箱绑定→退出→邮箱登录→退出及 15 个请求严格顺序；高德合成 `LIVE_DISPLAY_ONLY` 展示夹具 1 条覆盖实时来源标注、无自有评分、保持供应商顺序、出站动作关闭及 WGS84/25 元/1500 米/AI 关闭请求边界；分享负例 2 条继续证明 Android 1.0 无入口、Intent 或临时文件。账号与高德夹具均不调用真实外部供应商，不得作为真实凭据或真实数据验收。最终同签名 APK 先通过冷启动强制更新 1 条和恢复兼容 3 条，再通过运行中提高、配置不可用、账号、高德各 1 条及分享封藏 2 条；`scripts/run-android-instrumentation.ps1` 对设备内夹具执行类/参数精确白名单、按设备端口互斥、映射前后复核和外部变更拒绝覆盖。
 - 历史设备证据：2026-09-04 的支持反馈与群组测试记录保留在 [验证报告](VERIFICATION_REPORT.md)。支持反馈继续维护；群组专属类已随功能退休，历史通过数和截图不计入本轮或未来验收。
 - ECS 的真实高德技术 smoke 是独立证据：隔离容器、活动容器和工作站公网均得到 5 条地点结果与 3 条推荐结果；这不改变 Android 模拟器夹具仍为合成数据，也不能替代关闭 Wi-Fi 真机与商业授权验收。
-- 普通 Android Debug 已改为默认直连 `https://api.unfinished-era.com/`，并与 Alpha 复用当前单实例 API/PostgreSQL；不新增 Debug 服务容器、端口、域名或数据库。Debug 地址门禁只接受公网 HTTPS，主 Debug APK 使用全局禁止明文的 network security config。确定性 AndroidTest 已迁移到独立 `fixture` build type：它固定使用 `127.0.0.1:3001`、输出到独立路径、不可分发，也不会成为日常 Debug 的隐式回退。当前云端 `accountsEnabled=false`；Debug 的微信/QQ AppID 继续为空，单实例服务端支持受批准的多 AppID 绑定前不得开放。
+- 普通 Android Debug 已改为默认直连 `https://api.eatwhat.pro/`，并与 Alpha 复用当前单实例 API/PostgreSQL；不新增 Debug 服务容器、端口、域名或数据库。Debug 地址门禁只接受公网 HTTPS，主 Debug APK 使用全局禁止明文的 network security config。确定性 AndroidTest 已迁移到独立 `fixture` build type：它固定使用 `127.0.0.1:3001`、输出到独立路径、不可分发，也不会成为日常 Debug 的隐式回退。当前云端 `accountsEnabled=false`；Debug 的微信/QQ AppID 继续为空，单实例服务端支持受批准的多 AppID 绑定前不得开放。
 - Android `0.1.2-alpha01-internal` 已完整移除直接餐厅关键词搜索的入口、路由、页面、ViewModel、repository 和 client；手动地点搜索只用于选择推荐起点。此前在 API 36 模拟器全新安装后，选中“北京电子科技学院”取得 3 条真实高德推荐；2026-08-24 完整门禁构建的 Alpha APK SHA-256 `DD7257BCE3098DD658D30A8E7D6EAFECB980D627CCCB9C3B516BF7B32DCCEC07` 属于迁移前 Debug signer 历史基线，不能再作为当前固定签名 Alpha 工件或平台登记依据。
 - Android 内部 Alpha 已固定为 `com.chishenme.app.alpha` 和长期证书：MD5 `7c64a4f134a3ebe121c1fb055c09a70c`、SHA-256 `31f21374f2f5d40697efb3c50e14d4e8d228991f6acbcde262e37c72ae4c0289`。私钥与密码位于仓库外；Gradle 支持默认 `%LOCALAPPDATA%\ChiShenMe\signing\alpha-signing.properties` 或四项 `CHISHENME_ALPHA_*` 环境变量，缺失、部分配置、错误 alias、过期或摘要不匹配都会拒绝构建，不再回退到 Debug signer。Debug/Fixture/FixtureTest 保持测试证书一致，Alpha 必须与其不同。当前完整门禁必须显式执行：
 
   ```powershell
-  .\scripts\verify.ps1 -AlphaApiBaseUrl 'https://api.unfinished-era.com/'
+  .\scripts\verify.ps1 -AlphaApiBaseUrl 'https://api.eatwhat.pro/'
   ```
 
   门禁会复核地址策略并检查同一地址已进入 Debug/Alpha `BuildConfig` 与 APK DEX，同时证明 Fixture 只含固定回环地址且 AndroidTest 只指向 Fixture；还会核对 Alpha 固定证书摘要、唯一 signer、v2 签名以及与 Debug 测试证书隔离。它不会发起公网探测。DNS、TLS、独立 API vhost 与 `/health/ready` 已由独立公网 smoke 验收，关闭 Wi-Fi 真机与最终 Release 的独立签名仍不能由构建门禁替代。

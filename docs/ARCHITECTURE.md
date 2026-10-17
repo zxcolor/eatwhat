@@ -24,7 +24,7 @@ docs              产品、架构、OpenAPI 3.1、数据、测试和发布门禁
 Android 只负责隐私同意、用户主动定位或手动选择推荐起点、决策表单与会话内 UI、客户端契约校验和系统
 Intent 门禁；餐厅供应商适配、推荐过滤/排序、账号事务、数据权利判断、数据库和所有
 服务端 Secret 均留在 API/ECS。普通 Debug 和内部 Alpha 固定访问同一个
-`https://api.unfinished-era.com/` API/PostgreSQL 实例；两者只是包名、可调试性、压缩和分发
+`https://api.eatwhat.pro/` API/PostgreSQL 实例；两者只是包名、可调试性、压缩和分发
 用途不同的客户端，不创建第二套 Debug 服务、Compose project、端口、域名、Secret 或数据库。
 因此两者共享服务能力、最低版本、IP 限流、高德配额、内存事件缓冲及未来启用后的账号数据。
 客户端自报的 build channel 不得用于拆分限流、鉴权、数据授权或选择 provider Secret。
@@ -172,7 +172,7 @@ API Schema 校验 -> 全国坐标、半径和用户约束校验
 - Android 完整工件门禁统一为：
 
   ```powershell
-  .\scripts\verify.ps1 -AlphaApiBaseUrl 'https://api.unfinished-era.com/'
+  .\scripts\verify.ps1 -AlphaApiBaseUrl 'https://api.eatwhat.pro/'
   ```
 
   该命令验证公网 HTTPS 地址策略，并确认指定地址进入 Alpha `BuildConfig` 和 APK
