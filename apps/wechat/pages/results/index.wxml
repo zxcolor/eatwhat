@@ -1,0 +1,31 @@
+<view class="page {{themeClass}}">
+  <view class="title">{{headline}}</view><view class="subtitle">{{summary}}</view>
+  <view wx:if="{{loading}}" class="card empty"><view class="loading-dot"></view><view class="section-title">正在看看附近有什么</view><view class="muted">根据你本次选择的条件查找，最多展示 3 个候选。</view></view>
+  <block wx:else>
+    <view wx:if="{{error}}" class="error">{{error}}</view>
+    <view wx:if="{{unavailableNotice}}" class="card muted">{{unavailableNotice}}</view>
+    <view wx:if="{{hasResponse && !totalCount}}" class="card empty"><view class="section-title">这次没有找到合适的结果</view><view class="muted">可以增加距离、放宽预算，或换一个出发地点。</view></view>
+    <view wx:if="{{totalCount}}" class="card"><view class="row"><view class="section-title">本次结果筛选</view><text class="muted">{{items.length}} / {{totalCount}} 条</text></view><view class="chips"><button class="chip {{filter.openNowOnly ? 'selected' : ''}}" data-key="openNowOnly" bindtap="toggleFilter">仅营业中</button><button class="chip {{filter.knownPriceOnly ? 'selected' : ''}}" data-key="knownPriceOnly" bindtap="toggleFilter">价格已知且不超预算</button></view><input class="filter-input" value="{{filter.query}}" maxlength="40" placeholder="按菜系标签筛选" bindinput="queryFilter" /><view class="muted">筛选保留来源顺序；未知信息仍显示为未知。</view><button class="secondary" bindtap="clearFilters">清除筛选</button></view>
+    <view wx:if="{{totalCount && !items.length}}" class="card empty"><view class="section-title">没有符合当前筛选的候选</view><view class="muted">清除筛选即可恢复本次结果。</view></view>
+    <view wx:if="{{notice}}" class="card muted">{{notice}}</view>
+    <view wx:if="{{hasResponse && liveOnly}}" class="muted policy-note">保持来源返回顺序，不计算适合度评分。</view>
+    <view wx:if="{{hasResponse && !canOpen}}" class="error">本次结果已失效或数据授权尚未确认。请重新获取后查看详情。</view>
+    <view wx:for="{{items}}" wx:key="index" class="card result-card">
+      <view class="row"><text class="candidate-number">候选 {{item.rank}}</text><text class="muted">{{item.mode}}</text></view>
+      <view class="restaurant-name">{{item.name}}</view>
+      <view class="facts"><text>{{item.price}}</text><text>{{item.distance}}</text><text>约 {{item.travel}}</text></view>
+      <view class="chips"><text class="chip">{{item.openLabel}}</text><text wx:if="{{item.sourceRating}}" class="chip">来源评分 {{item.sourceRating}}</text><text wx:if="{{item.fitLabel}}" class="chip">{{item.fitLabel}}</text></view>
+      <view wx:if="{{item.address}}" class="muted address">{{item.address}}</view>
+      <view class="reasons"><view wx:for="{{item.reasons}}" wx:for-item="reason" wx:key="code" class="reason">{{reason.text}}</view></view>
+      <view wx:for="{{item.warnings}}" wx:for-item="warning" wx:key="*this" class="muted warning">{{warning}}</view>
+      <view class="muted source">数据来源：{{item.sourceAttribution}}</view>
+      <button class="secondary" data-index="{{item.index}}" bindtap="detail" disabled="{{!canOpen}}">查看详情</button>
+    </view>
+    <view wx:if="{{hasResponse}}" class="card">
+      <view class="row" bindtap="toggleWhy"><view class="section-title">为什么是这些候选</view><text class="muted">{{showWhy ? '收起 −' : '展开 +'}}</text></view>
+      <view wx:if="{{showWhy}}" class="why muted"><view>服务依据本次地点、餐次、预算、可用时间、交通方式和排除条件获取候选。</view><view wx:if="{{liveOnly}}">实时展示模式保留数据来源顺序，不在客户端重新排序；相同条件再次请求可能得到相同结果。</view><view>价格、营业状态和到店时间可能变化，请以商户实际情况为准。</view><view wx:if="{{profileLabel}}">推荐规则：{{profileLabel}}</view></view>
+    </view>
+    <button class="primary" bindtap="retry" disabled="{{!canRetry}}">按相同条件重新请求</button><view class="muted retry-note">结果可能相同。</view>
+    <button class="secondary" bindtap="adjust">返回调整条件</button>
+  </block>
+</view>

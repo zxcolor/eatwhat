@@ -1,0 +1,25 @@
+<view class="page {{themeClass}}">
+  <view class="title">从哪里出发</view>
+  <view class="subtitle">选择一个地点，为你寻找附近的用餐选择。</view>
+  <view class="card">
+    <view class="label">当前地点</view>
+    <view class="current-location">{{locationLabel || '尚未选择地点'}}</view>
+    <button class="primary" bindtap="locate" loading="{{locating}}" disabled="{{locating || busy}}">使用当前位置</button>
+    <view class="muted privacy-note">仅在你主动点击后获取本次位置，用于寻找附近餐厅。</view>
+  </view>
+  <view class="section-title">手动选择</view>
+  <view class="card">
+    <input class="field" value="{{query}}" bindinput="inputQuery" bindconfirm="search" confirm-type="search" maxlength="80" placeholder="输入城市、地标或地址" disabled="{{busy || locating}}" />
+    <button class="secondary" bindtap="search" loading="{{busy}}" disabled="{{busy || locating || !canSearch}}">搜索地点</button>
+    <view wx:if="{{!canSearch}}" class="muted privacy-note">地点搜索服务尚未连接或未开放。</view>
+    <button wx:if="{{!canSearch}}" class="secondary" bindtap="refresh">重新连接</button>
+  </view>
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+  <view wx:if="{{notice}}" class="muted notice">{{notice}}</view>
+  <view wx:for="{{places}}" wx:key="index" class="card place" data-index="{{item.index}}" bindtap="choose" hover-class="place-pressed">
+    <view class="row"><view class="place-name">{{item.name}}</view><text class="muted">选择 ›</text></view>
+    <view wx:if="{{item.address}}" class="muted address">{{item.address}}</view>
+    <view class="muted source">{{item.mode}} · {{item.sourceLabel}}</view>
+  </view>
+  <view class="card"><view class="section-title">公共地标示例</view><view class="muted">以下是预设的近似位置，不是你的当前位置。只在你主动选择后作为推荐起点。</view><view class="chips"><button wx:for="{{landmarks}}" wx:key="index" class="chip" data-index="{{item.index}}" bindtap="landmark" disabled="{{busy || locating}}">{{item.name}}</button></view></view>
+</view>

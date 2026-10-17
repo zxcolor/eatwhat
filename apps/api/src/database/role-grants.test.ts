@@ -63,6 +63,8 @@ describe("database role grant deployment gate", () => {
 		expect(sql).toContain("AS phone_only_schema_0011");
 		expect(sql).toContain("AS wechat_union_alias_schema_0012");
 		expect(sql).toContain("AS admin_config_schema_0013");
+		expect(sql).toContain("AS wechat_miniprogram_schema_0014");
+		expect(sql).toContain("AS admin_config_schema");
 		expect(sql).toContain("AS wechat_union_alias_schema");
 		expect(sql).toContain("AS legacy_fusion_schema");
 		expect(sql).toContain(
@@ -72,10 +74,10 @@ describe("database role grant deployment gate", () => {
 			"SELECT (:phone_only_schema OR :legacy_fusion_schema)",
 		);
 		expect(sql).toContain(
-			"role grants require the exact 0010, 0011, 0012 or 0013 schema",
+			"role grants require the exact 0010, 0011, 0012, 0013 or 0014 schema",
 		);
 		expect(sql).toMatch(
-			/\\if :admin_config_schema_0013[\s\S]*runtime_list_active_app_config\(\)[\s\S]*\\endif/u,
+			/\\if :admin_config_schema[\s\S]*runtime_list_active_app_config\(\)[\s\S]*\\endif/u,
 		);
 	});
 

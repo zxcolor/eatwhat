@@ -1,0 +1,25 @@
+<view class="page {{themeClass}}">
+  <view class="title">收藏与账号记录</view>
+  <view class="card"><view class="muted">{{notice}}</view><button wx:if="{{sections.length > 0 && !signedIn}}" class="primary" bindtap="login">前往登录</button></view>
+  <view wx:if="{{sections.length}}" class="chips"><button wx:for="{{sections}}" wx:key="id" class="chip {{section === item.id ? 'selected' : ''}}" data-section="{{item.id}}" bindtap="select" disabled="{{busy}}">{{item.label}}</button></view>
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+  <block wx:if="{{enabled && signedIn}}">
+    <view class="toolbar"><button class="chip" bindtap="reload" disabled="{{busy}}">{{busy ? '正在处理…' : '刷新'}}</button><button wx:if="{{section !== 'FAVORITES'}}" class="chip danger" bindtap="clearAll" disabled="{{busy}}">清空{{sectionLabel}}</button></view>
+    <view wx:if="{{section === 'HISTORY'}}" class="muted retention">账号历史保留 90 天。打开导航或拨号器仅表示操作，不代表到店或就餐。</view>
+    <view wx:for="{{rows}}" wx:key="id" class="card record" data-id="{{item.id}}" bindtap="showDetail">
+      <view class="row"><view class="label">{{item.title}}</view><text class="badge">{{item.kind}}</text></view>
+      <view class="muted">{{item.date}}<text wx:if="{{item.meal}}"> · {{item.meal}}</text></view>
+      <view wx:if="{{item.available}}" class="muted address">{{item.address}}</view>
+      <view class="record-actions"><button class="chip" data-id="{{item.id}}" catchtap="showDetail">查看记录详情</button><button wx:if="{{section === 'FAVORITES'}}" class="chip" data-id="{{item.id}}" catchtap="move" disabled="{{busy}}">移到{{item.group === 'WANT_TO_GO' ? '常吃' : '想去'}}</button><button wx:if="{{section !== 'HISTORY'}}" class="chip danger" data-id="{{item.id}}" catchtap="remove" disabled="{{busy}}">删除</button></view>
+    </view>
+    <view wx:if="{{loaded && rows.length === 0 && !busy}}" class="card empty">暂无{{sectionLabel}}</view>
+    <button wx:if="{{hasMore}}" class="secondary" bindtap="loadMore" disabled="{{busy}}">加载更多</button>
+  </block>
+  <view wx:if="{{detail}}" class="detail-backdrop" bindtap="closeDetail"><view class="card detail-sheet" catchtap="noop">
+    <view class="row"><view class="section-title">记录详情</view><button class="chip" bindtap="closeDetail">关闭</button></view>
+    <view class="label">{{detail.title}}</view><view class="muted">{{detail.kind}} · {{detail.date}}</view>
+    <block wx:if="{{detail.available}}"><view class="chips"><text class="chip">{{detail.openLabel}}</text><text class="chip">{{detail.price}}</text></view><view class="address">{{detail.address}}</view><view class="chips"><text wx:for="{{detail.tags}}" wx:key="*this" class="chip">{{item}}</text></view><view class="muted">数据来源：{{detail.sourceLabel}}</view><view class="muted">本次解析：{{detail.resolved}}</view></block>
+    <view wx:if="{{detail.expires}}" class="muted">到期时间：{{detail.expires}}</view>
+    <view wx:if="{{section === 'PRIVATE_FEEDBACK'}}" class="muted">仅自己可见，不形成公开评分。</view>
+  </view></view>
+</view>

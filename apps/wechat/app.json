@@ -1,0 +1,38 @@
+{
+  "pages": [
+    "pages/index/index",
+    "pages/location/index",
+    "pages/conditions/index",
+    "pages/results/index",
+    "pages/detail/index",
+    "pages/account/index",
+    "pages/settings/index",
+    "pages/privacy/index",
+    "pages/support/index",
+    "pages/saved/index",
+    "pages/local-records/index",
+    "pages/nearby/index"
+  ],
+  "window": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "吃什么",
+    "navigationBarBackgroundColor": "#f3f3f8",
+    "backgroundColor": "#f3f3f8"
+  },
+  "darkmode": true,
+  "themeLocation": "theme.json",
+  "permission": {
+    "scope.userLocation": {
+      "desc": "在你主动选择当前位置时，用于查找附近餐厅和显示所在城市。"
+    }
+  },
+  "requiredPrivateInfos": [
+    "getLocation"
+  ],
+  "networkTimeout": {
+    "request": 15000
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json",
+  "lazyCodeLoading": "requiredComponents"
+}

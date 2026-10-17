@@ -48,7 +48,12 @@ PostGIS/pgcrypto 通常需要托管库特权，必须由一次性 bootstrap 身�
 6. 用 runtime role 做 schema verify、权限正反例和 API 启动 smoke，失败不启动新实例。
 7. 启动 API；仅在私有 OSS、独立 RAM 角色、locator/反馈解密密钥和 export worker 均就绪后开放数据导出能力。导出专用 RAM 角色只需读取桶版本与生命周期配置，不得修改它们；专用桶必须从未启用版本控制，且 `GetBucketLifecycle` 必须精确返回 `404 NoSuchLifecycle`，任何已配置规则都会拒绝 worker 就绪。maintenance job 独立运行，默认 `--dry-run`；只有明确 `--execute` 才删除到期数据，并在同一受控事务中不可逆销毁已超过 24 小时配额窗口的游客反馈 IP HMAC。
 
-账号 schema 0010→0011 是上述通用顺序的受控特例：先激活 `ACCOUNTS_ENABLED=false` 的
+以下 schema 0010→0013 认证 bridge 操作仅适用于已批准的历史 schema 0013 发布包。
+当前完整迁移 head 为 **0014**；新发布包要求旧库先完成 0013，再按
+[微信小程序登录切换说明](../docs/wechat-miniprogram-cutover.md) 备份并执行独立的 0013→0014
+cutover，且准备兼容 schema 0014 的回滚发布。不得用 0014 镜像执行历史 bridge 或跳过其门禁。
+
+账号 schema 0010→0011 是上述历史流程的受控特例：先激活 `ACCOUNTS_ENABLED=false` 的
 `legacy_phone_drain` bridge，再从活动 bridge 运行
 `scripts/provision-database.sh --phone-only-cutover`。该入口在同一 mutation lock 内核对实际
 运行容器、排空所有未过期及 15 分钟内已消费未领取的证明，自动生成并验证带完整 ledger 和
@@ -65,7 +70,7 @@ schema 0011 常态下的 `--disable` 仅做可逆紧急关停：清除供应商�
 身份/会话 HMAC、dedup version 与已有 OTP pepper pair；后续 `--apply` 必须沿用相同连续性
 材料，错误值会在共享 env 写入前拒绝。
 
-微信 UnionID 使用独立的 schema 0011→0012 受控过渡；当前完整迁移 head 为 0013。先激活
+微信 UnionID 的历史 schema 0011→0012 受控过渡使用 approved plan head 0013。先激活
 `AUTH_SCHEMA_TRANSITION_MODE=wechat_union_aliases_pending` 且
 `WECHAT_AUTH_ENABLED=false`、允许 0012 及其后迁移保持 pending 的 bridge，再从活动 bridge 执行
 `scripts/provision-database.sh --wechat-union-aliases-cutover`。脚本在同一 mutation lock 内创建并
@@ -75,7 +80,7 @@ schema11/12/13 的角色授权，并验证 0012 ledger、alias 表无直接 runt
 随后必须先激活 `transition=none`、微信仍关闭的 final release，最后才由认证配置更新器启用微信。
 `WECHAT_OPEN_PLATFORM_REALM_ID` 是稳定身份命名空间；常规 release 不允许相对活动 release
 更改。保留的专用 schema12→11 回滚只适用于仍精确停在 0012 的旧过渡部署，并要求 alias 表为空；
-当前已到 0013 的部署不得借该入口跨越 0013 降级。写入任一真实 alias 后只允许向前修复。
+已到 0013 或 0014 的部署不得借该入口跨越 0013 降级。写入任一真实 alias 后只允许向前修复。
 
 迁移锁键为 `(1129310029, 1296645202)`，`pg_try_advisory_lock` 最多 20 次、间隔 250 ms；保留期锁键为 `(1129310029, 1382374734)`，占用时立即失败。成功和失败路径都尝试释放。`schema_migrations` 固定为 `version integer`、`name varchar(120)`、`checksum varchar(64)`、`applied_at timestamptz`；未知版本、缺号、名称或 checksum 漂移会拒绝迁移/启动。
 

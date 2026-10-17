@@ -1,0 +1,28 @@
+<view class="page {{themeClass}}">
+  <view class="title">设置</view>
+  <view class="subtitle">让吃什么，保持你喜欢的样子。</view>
+  <view class="card">
+    <view class="section-title">外观</view>
+    <view class="chips theme-options">
+      <button class="chip {{theme === 'system' ? 'selected' : ''}}" data-theme="system" bindtap="changeTheme">跟随系统</button>
+      <button class="chip {{theme === 'light' ? 'selected' : ''}}" data-theme="light" bindtap="changeTheme">浅色</button>
+      <button class="chip {{theme === 'dark' ? 'selected' : ''}}" data-theme="dark" bindtap="changeTheme">深色</button>
+    </view>
+  </view>
+  <view class="card">
+    <view class="section-title">服务状态</view>
+    <view class="muted setting-description">{{statusLabel}}</view>
+    <button class="secondary" loading="{{busy}}" disabled="{{busy || !consent}}" bindtap="refreshService">重新检查服务</button>
+    <view wx:if="{{!consent}}" class="muted">请先在首页阅读并同意隐私说明。</view>
+    <view wx:if="{{error}}" class="error">{{error}}</view>
+  </view>
+  <view class="card">
+    <view class="section-title">隐私</view>
+    <button class="secondary" bindtap="openPrivacy">查看隐私说明</button>
+    <button wx:if="{{consent}}" class="secondary" bindtap="withdrawConsent">撤回隐私同意</button>
+    <view class="muted">撤回同意将停止服务请求，并清除本次状态与本机决策、附近缓存。</view>
+  </view>
+  <view class="card"><view class="section-title">本机数据</view><button class="secondary" data-page="local-records" bindtap="open">最近决策与清理</button><button class="secondary" data-page="nearby" bindtap="open">附近餐厅缓存</button><view wx:if="{{localDataError}}" class="error">{{localDataError}}<button class="secondary" bindtap="retryCleanup">撤回同意并重试清理</button></view></view>
+  <view class="card"><view class="section-title">帮助</view><button class="secondary" data-page="support" bindtap="open">问题反馈</button></view>
+  <view class="card"><view class="row"><text class="label">吃什么 · 微信小程序</text><text class="muted">{{version}}</text></view><view class="muted setting-description">从零构建中的开发版本。</view></view>
+</view>

@@ -42,6 +42,13 @@ export interface AuthRuntimeConfig {
 		readonly openPlatformRealmId: string | null;
 		readonly timeoutMs: number;
 	};
+	readonly wechatMiniProgram: {
+		readonly enabled: boolean;
+		readonly appId: string | null;
+		readonly appSecret: string | null;
+		readonly openPlatformRealmId: string | null;
+		readonly timeoutMs: number;
+	};
 	readonly qq: {
 		readonly enabled: boolean;
 		readonly unionIdEnabled: boolean;
@@ -108,10 +115,11 @@ function containsAsciiControl(value: string): boolean {
 function readWechatAppId(
 	enabled: boolean,
 	value: string | undefined,
+	name = "WECHAT_APP_ID",
 ): string | null {
-	const normalized = optionalWhenDisabled(enabled, value, "WECHAT_APP_ID", 18);
+	const normalized = optionalWhenDisabled(enabled, value, name, 18);
 	if (normalized !== null && !/^wx[0-9a-fA-F]{16}$/u.test(normalized)) {
-		throw new Error("WECHAT_APP_ID 必须符合 wx + 16 位十六进制字符格式");
+		throw new Error(`${name} 必须符合 wx + 16 位十六进制字符格式`);
 	}
 	return normalized;
 }
@@ -435,6 +443,12 @@ export function loadAuthRuntimeConfig(
 		enabled && readBoolean(env.EMAIL_AUTH_ENABLED, "EMAIL_AUTH_ENABLED");
 	const wechatEnabled =
 		enabled && readBoolean(env.WECHAT_AUTH_ENABLED, "WECHAT_AUTH_ENABLED");
+	const wechatMiniProgramEnabled =
+		enabled &&
+		readBoolean(
+			env.WECHAT_MINIPROGRAM_AUTH_ENABLED,
+			"WECHAT_MINIPROGRAM_AUTH_ENABLED",
+		);
 	const qqEnabled =
 		enabled && readBoolean(env.QQ_AUTH_ENABLED, "QQ_AUTH_ENABLED");
 	const qqUnionIdEnabled = readBooleanWithFallback(
@@ -621,6 +635,31 @@ export function loadAuthRuntimeConfig(
 				env.WECHAT_AUTH_TIMEOUT_MS,
 				2_000,
 				"WECHAT_AUTH_TIMEOUT_MS",
+				500,
+				5_000,
+			),
+		}),
+		wechatMiniProgram: Object.freeze({
+			enabled: wechatMiniProgramEnabled,
+			appId: readWechatAppId(
+				wechatMiniProgramEnabled,
+				env.WECHAT_MINIPROGRAM_APP_ID,
+				"WECHAT_MINIPROGRAM_APP_ID",
+			),
+			appSecret: optionalWhenDisabled(
+				wechatMiniProgramEnabled,
+				env.WECHAT_MINIPROGRAM_APP_SECRET,
+				"WECHAT_MINIPROGRAM_APP_SECRET",
+				256,
+			),
+			openPlatformRealmId: readWechatOpenPlatformRealmId(
+				wechatMiniProgramEnabled,
+				env.WECHAT_OPEN_PLATFORM_REALM_ID,
+			),
+			timeoutMs: readInteger(
+				env.WECHAT_MINIPROGRAM_AUTH_TIMEOUT_MS,
+				2_000,
+				"WECHAT_MINIPROGRAM_AUTH_TIMEOUT_MS",
 				500,
 				5_000,
 			),

@@ -80,6 +80,7 @@ $allowedKeys = [System.Collections.Generic.HashSet[string]]::new(
     'PHONE_AUTH_ENABLED',
     'EMAIL_AUTH_ENABLED',
     'WECHAT_AUTH_ENABLED',
+    'WECHAT_MINIPROGRAM_AUTH_ENABLED',
     'QQ_AUTH_ENABLED',
     'QQ_UNION_ID_ENABLED',
     'AUTH_HASH_ACTIVE_VERSION',
@@ -114,6 +115,9 @@ $allowedKeys = [System.Collections.Generic.HashSet[string]]::new(
     'WECHAT_APP_SECRET',
     'WECHAT_OPEN_PLATFORM_REALM_ID',
     'WECHAT_AUTH_TIMEOUT_MS',
+    'WECHAT_MINIPROGRAM_APP_ID',
+    'WECHAT_MINIPROGRAM_APP_SECRET',
+    'WECHAT_MINIPROGRAM_AUTH_TIMEOUT_MS',
     'QQ_APP_ID',
     'QQ_APP_KEY',
     'QQ_OPEN_PLATFORM_REALM_ID',
@@ -134,6 +138,7 @@ $secretKeys = [System.Collections.Generic.HashSet[string]]::new(
     'SUPPORT_FEEDBACK_ENCRYPTION_KEYS_JSON',
     'SUPPORT_FEEDBACK_HMAC_KEYS_JSON',
     'WECHAT_APP_SECRET',
+    'WECHAT_MINIPROGRAM_APP_SECRET',
     'QQ_APP_KEY',
     'SMTP_PASSWORD'
 ) |
@@ -234,6 +239,10 @@ function Test-SecretEnabledForRuntime {
         'WECHAT_APP_SECRET' {
             return $Entries.Contains('WECHAT_AUTH_ENABLED') -and
                 $Entries['WECHAT_AUTH_ENABLED'] -ceq 'true'
+        }
+        'WECHAT_MINIPROGRAM_APP_SECRET' {
+            return $Entries.Contains('WECHAT_MINIPROGRAM_AUTH_ENABLED') -and
+                $Entries['WECHAT_MINIPROGRAM_AUTH_ENABLED'] -ceq 'true'
         }
         'QQ_APP_KEY' {
             return $Entries.Contains('QQ_AUTH_ENABLED') -and
@@ -418,12 +427,18 @@ try {
         $entries['WECHAT_AUTH_ENABLED'] -cne 'false') {
         throw 'wechat_union_aliases_pending 要求 WECHAT_AUTH_ENABLED=false。'
     }
+    if ($schemaTransitionMode -cne 'none' -and
+        $entries.Contains('WECHAT_MINIPROGRAM_AUTH_ENABLED') -and
+        $entries['WECHAT_MINIPROGRAM_AUTH_ENABLED'] -cne 'false') {
+        throw '认证迁移过渡模式要求 WECHAT_MINIPROGRAM_AUTH_ENABLED=false。'
+    }
     if ($schemaTransitionMode -ceq 'legacy_phone_drain') {
         foreach ($disabledSwitch in @(
             'ACCOUNTS_ENABLED',
             'PHONE_AUTH_ENABLED',
             'EMAIL_AUTH_ENABLED',
             'WECHAT_AUTH_ENABLED',
+            'WECHAT_MINIPROGRAM_AUTH_ENABLED',
             'QQ_AUTH_ENABLED',
             'QQ_UNION_ID_ENABLED'
         )) {
@@ -462,6 +477,15 @@ try {
             )) {
                 if (-not (Test-ConfiguredValue -Entries $entries -Key $requiredWechatValue)) {
                     throw "WECHAT_AUTH_ENABLED=true 时必须在私有文件或受控进程环境中填写 $requiredWechatValue。"
+                }
+            }
+        }
+        $wechatMiniProgramEnabled = $entries.Contains('WECHAT_MINIPROGRAM_AUTH_ENABLED') -and
+            $entries['WECHAT_MINIPROGRAM_AUTH_ENABLED'] -ceq 'true'
+        if ($wechatMiniProgramEnabled) {
+            foreach ($miniProgramKey in @('WECHAT_MINIPROGRAM_APP_ID', 'WECHAT_MINIPROGRAM_APP_SECRET', 'WECHAT_OPEN_PLATFORM_REALM_ID')) {
+                if (-not (Test-ConfiguredValue -Entries $entries -Key $miniProgramKey)) {
+                    throw "小程序微信登录启用时必须在私有文件或受控进程环境中填写 $miniProgramKey。"
                 }
             }
         }

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { type AppConfig, loadAppConfig } from "../config/app-config.js";
 import type { DataRightsPolicy } from "../config/data-rights-policy.js";
+import type { DatabasePool } from "../database/database-pool.js";
 import type { LocationSearchProvider } from "../location-search/location-search.provider.js";
 import type { OperationalConfigService } from "../operational-config/operational-config.service.js";
 import {
@@ -103,6 +104,78 @@ function supportFeedback(
 }
 
 describe("FeatureConfigService persistence capabilities", () => {
+	it("advertises Mini Program login only when dedicated config and live database readiness are complete", async () => {
+		const base = loadAppConfig({
+			NODE_ENV: "test",
+			DATABASE_ENABLED: "true",
+			DATABASE_URL: "postgresql://synthetic:synthetic@127.0.0.1/synthetic",
+			ACCOUNTS_ENABLED: "true",
+			PHONE_AUTH_ENABLED: "true",
+			ALIYUN_PNVS_SIGN_NAME: "synthetic",
+			ALIYUN_PNVS_TEMPLATE_CODE: "100001",
+			AUTH_HASH_KEYS_JSON: JSON.stringify({
+				v1: Buffer.alloc(32, 3).toString("base64"),
+			}),
+			AUTH_HASH_ACTIVE_VERSION: "v1",
+			AUTH_IDENTITY_DEDUP_KEY_VERSION: "v1",
+			WECHAT_MINIPROGRAM_AUTH_ENABLED: "true",
+			WECHAT_MINIPROGRAM_APP_ID: "wx1111111111111111",
+			WECHAT_MINIPROGRAM_APP_SECRET: "synthetic-secret",
+			WECHAT_OPEN_PLATFORM_REALM_ID: "eatwhat-primary",
+		});
+		for (const ready of [true, false]) {
+			const database = {
+				isReady: vi.fn(async () => ready),
+			} as unknown as DatabasePool;
+			const service = new FeatureConfigService(
+				base,
+				placeProvider,
+				locationSearchProvider,
+				placeSearchProvider,
+				policy(),
+				supportFeedback(),
+				undefined,
+				undefined,
+				database,
+			);
+			const result = await service.getPublicConfig();
+			expect(result.authCapabilities?.wechatMiniProgramEnabled).toBe(ready);
+			expect(result.authCapabilities?.wechatEnabled).toBe(false);
+			expect(JSON.stringify(result)).not.toContain("synthetic-secret");
+		}
+		const missing = new FeatureConfigService(
+			base,
+			placeProvider,
+			locationSearchProvider,
+			placeSearchProvider,
+			policy(),
+			supportFeedback(),
+		);
+		expect(
+			(await missing.getPublicConfig()).authCapabilities
+				?.wechatMiniProgramEnabled,
+		).toBe(false);
+		const throwingDatabase = {
+			isReady: vi.fn(async () => {
+				throw new Error("private-database-detail");
+			}),
+		} as unknown as DatabasePool;
+		const failed = new FeatureConfigService(
+			base,
+			placeProvider,
+			locationSearchProvider,
+			placeSearchProvider,
+			policy(),
+			supportFeedback(),
+			undefined,
+			undefined,
+			throwingDatabase,
+		);
+		expect(
+			(await failed.getPublicConfig()).authCapabilities
+				?.wechatMiniProgramEnabled,
+		).toBe(false);
+	});
 	it("publishes only the validated operational snapshot fields", async () => {
 		const baseConfig = config();
 		const baseOperational = startupOperationalConfig(baseConfig);

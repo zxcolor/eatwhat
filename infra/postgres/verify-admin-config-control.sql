@@ -11,11 +11,15 @@ DECLARE
   observed_function record;
   expected_execute boolean;
 BEGIN
-  IF NOT (SELECT count(*) = 13 AND min(version) = 1 AND max(version) = 13
+  IF NOT (SELECT (
+      (count(*) = 13 AND min(version) = 1 AND max(version) = 13)
+      OR (count(*) = 14 AND min(version) = 1 AND max(version) = 14
+        AND bool_or(version = 14 AND name = 'wechat_miniprogram_login'))
+      )
       AND bool_and(checksum ~ '^[0-9a-f]{64}$')
       AND bool_or(version = 13 AND name = 'admin_config_control')
     FROM public.schema_migrations) THEN
-    RAISE EXCEPTION 'admin configuration requires the exact schema 0013 ledger';
+    RAISE EXCEPTION 'admin configuration requires the exact schema 0013 or 0014 ledger';
   END IF;
 
   IF EXISTS (SELECT 1 FROM public.app_config_versions AS config

@@ -1,0 +1,111 @@
+<view class="page {{themeClass}}">
+  <view class="title">我的账号</view>
+  <view class="subtitle">一个人的用餐决定，也值得被认真对待。</view>
+  <view wx:if="{{signedIn}}" class="card">
+    <view class="account-heading"><view class="avatar">食</view><view><view class="section-title">已登录</view><view class="muted">本次小程序运行期间有效</view></view></view>
+    <view class="muted session-note">登录状态只保存在内存；离开小程序或登录过期后，需要重新登录。</view>
+    <view class="section-title detail-heading">账号身份</view>
+    <view wx:for="{{identities}}" wx:key="id" class="detail-row">
+      <view class="row"><text class="label">{{item.label}}</text><text wx:if="{{item.primary}}" class="badge">主账号</text></view>
+      <view class="muted">{{item.maskedValue}}</view>
+      <button wx:if="{{item.canUnbind && detailsReady}}" class="text-action" data-id="{{item.id}}" disabled="{{busy}}" bindtap="unbindIdentity">解绑{{item.label}}</button>
+    </view>
+    <view wx:if="{{!identities.length}}" class="muted">点击下方按钮读取账号身份。</view>
+    <view wx:if="{{canBindEmail}}" class="account-section">
+      <view class="section-title">添加邮箱登录</view>
+      <view class="muted form-tip">邮箱仅绑定到当前手机号账号。身份冲突时会拒绝，不会自动合并账号。</view>
+      <input class="field" type="text" maxlength="254" value="{{bindingTarget}}" placeholder="要绑定的邮箱地址" disabled="{{busy}}" bindinput="inputBindingTarget" />
+      <button class="secondary" disabled="{{busy || bindingResendSeconds > 0}}" bindtap="sendBindingCode">{{bindingResendSeconds > 0 ? bindingResendSeconds + ' 秒后可重发' : '发送绑定验证码'}}</button>
+      <view wx:if="{{hasBindingChallenge}}" class="muted form-tip">已发送至 {{bindingMaskedTarget}}</view>
+      <input class="field" type="number" maxlength="6" value="{{bindingCode}}" placeholder="6 位绑定验证码" disabled="{{busy || !hasBindingChallenge}}" bindinput="inputBindingCode" />
+      <button class="primary" disabled="{{busy || !hasBindingChallenge}}" bindtap="bindEmail">验证并绑定邮箱</button>
+    </view>
+    <view class="section-title detail-heading">登录设备</view>
+    <view wx:for="{{sessions}}" wx:key="id" class="detail-row">
+      <view class="row"><text class="label">{{item.label}}</text><text wx:if="{{item.current}}" class="badge">当前设备</text></view>
+      <view class="muted">{{item.platform}} · {{item.lastActive}}</view>
+      <button wx:if="{{detailsReady}}" class="text-action" data-id="{{item.id}}" disabled="{{busy}}" bindtap="revokeSession">{{item.current ? '撤销当前设备' : '撤销设备登录'}}</button>
+    </view>
+    <view wx:if="{{!sessions.length}}" class="muted">点击下方按钮读取登录设备。</view>
+    <button class="secondary" loading="{{busy}}" disabled="{{busy}}" bindtap="refreshDetails">刷新账号信息</button>
+  </view>
+  <view wx:if="{{signedIn}}" class="card">
+    <view class="section-title">账号数据导出</view>
+    <block wx:if="{{capabilities.dataExportEnabled}}">
+      <view class="muted form-tip">主动申请 JSON 数据，文件最长保留 7 天，大小上限 10 MiB。内容经过校验后在本页读取，不写入本机文件。</view>
+      <view class="scope-row"><text class="label">包含行为历史</text><switch checked="{{includeBehaviorHistory}}" disabled="{{busy}}" bindchange="changeExportScope" color="#7258e8" /></view>
+      <view wx:if="{{exportStatus}}" class="export-status">
+        <view class="row"><view class="label">最近导出</view><view class="badge">{{exportStatus.label}}</view></view>
+        <view class="muted">{{exportStatus.includeBehaviorHistory ? '包含行为历史' : '不包含行为历史'}}</view>
+        <view class="muted">申请于 {{exportStatus.requestedAt}}</view>
+        <view class="muted">有效至 {{exportStatus.expiresAt}}</view>
+        <view wx:if="{{exportStatus.sizeLabel}}" class="muted">{{exportStatus.sizeLabel}}</view>
+        <view wx:if="{{exportStatus.status === 'FAILED'}}" class="muted form-tip">生成失败，可稍后重新申请。</view>
+        <view wx:if="{{exportStatus.status === 'EXPIRED'}}" class="muted form-tip">导出已过期，请重新申请。</view>
+      </view>
+      <view wx:else class="muted form-tip">读取最近导出状态，或按当前范围申请。</view>
+      <button class="secondary" disabled="{{busy}}" bindtap="refreshExport">刷新导出状态</button>
+      <button class="primary" disabled="{{busy || exportStatus.status === 'QUEUED' || exportStatus.status === 'PROCESSING'}}" bindtap="requestExport">申请 JSON 导出</button>
+      <button wx:if="{{exportStatus.downloadAvailable}}" class="secondary" disabled="{{busy}}" bindtap="readExport">下载并校验读取</button>
+      <view wx:if="{{exportPage}}" class="export-reader">
+        <view class="row"><view class="label">已验证内容 · {{exportPage.number}} / {{exportPage.total}}</view><button class="text-action" bindtap="closeExport">清除正文</button></view>
+        <scroll-view scroll-y class="export-body"><text user-select="{{false}}">{{exportPage.text}}</text></scroll-view>
+        <view class="reader-actions"><button class="secondary" data-offset="-1" disabled="{{busy || exportPage.number <= 1}}" bindtap="changeExportPage">上一页</button><button class="secondary" data-offset="1" disabled="{{busy || exportPage.number >= exportPage.total}}" bindtap="changeExportPage">下一页</button></view>
+        <view class="muted form-tip">内容只驻留内存，离开账号页、退出或切换账号后清除。</view>
+      </view>
+    </block>
+    <view wx:else class="muted form-tip">数据导出当前未开放。其他账号管理功能仍可使用。</view>
+  </view>
+  <view wx:if="{{signedIn}}" class="card">
+    <view class="section-title">账号管理</view>
+    <view class="muted form-tip">退出只结束当前登录；注销会停用账号并开始清理个人信息。</view>
+    <button class="secondary" disabled="{{busy}}" bindtap="logout">退出登录</button>
+    <button wx:if="{{!showDelete}}" class="danger-action" disabled="{{busy}}" bindtap="openDelete">注销账号</button>
+    <view wx:else class="delete-panel">
+      <view class="label">确认注销当前账号</view>
+      <view class="muted form-tip">此操作不能撤销。所有登录令牌立即失效，滚动备份最迟 30 天清除。</view>
+      <input class="field" value="{{deleteConfirmation}}" maxlength="4" placeholder="请输入“注销账号”" disabled="{{busy}}" bindinput="inputDeleteConfirmation" />
+      <button class="danger-action" disabled="{{busy || deleteConfirmation !== '注销账号'}}" bindtap="deleteAccount">继续确认注销</button>
+      <button class="secondary" disabled="{{busy}}" bindtap="cancelDelete">取消</button>
+    </view>
+  </view>
+  <view wx:elif="{{capabilities.accountsEnabled}}" class="card">
+    <view class="section-title">{{purpose === 'REGISTER' ? '注册手机号主账号' : '登录账号'}}</view>
+    <view wx:if="{{capabilities.wechatMiniProgramEnabled}}" class="wechat-login">
+      <button class="primary" loading="{{busy}}" disabled="{{busy}}" bindtap="loginWithWechat">微信快捷登录</button>
+      <view class="muted session-note">登录与当前微信身份已关联的吃什么账号。新用户请先用手机号注册；小程序中的微信账号关联功能尚未接入。</view>
+    </view>
+    <view class="chips auth-tabs">
+      <button wx:if="{{capabilities.phoneEnabled}}" class="chip {{method === 'PHONE' ? 'selected' : ''}}" data-method="PHONE" disabled="{{busy}}" bindtap="changeMethod">手机号</button>
+      <button wx:if="{{capabilities.emailEnabled}}" class="chip {{method === 'EMAIL' ? 'selected' : ''}}" data-method="EMAIL" disabled="{{busy}}" bindtap="changeMethod">邮箱</button>
+    </view>
+    <view wx:if="{{method === 'PHONE' && capabilities.phoneEnabled}}">
+      <view wx:if="{{capabilities.registrationEnabled}}" class="chips auth-tabs">
+        <button class="chip {{purpose === 'LOGIN' ? 'selected' : ''}}" data-purpose="LOGIN" disabled="{{busy}}" bindtap="changePurpose">已有账号</button>
+        <button class="chip {{purpose === 'REGISTER' ? 'selected' : ''}}" data-purpose="REGISTER" disabled="{{busy}}" bindtap="changePurpose">注册新账号</button>
+      </view>
+      <view class="label">中国大陆手机号</view>
+      <input class="field" type="text" maxlength="14" value="{{target}}" placeholder="请输入手机号（支持 +86）" disabled="{{busy}}" bindinput="inputTarget" />
+    </view>
+    <view wx:if="{{method === 'EMAIL' && capabilities.emailEnabled}}">
+      <view class="muted form-tip">邮箱只能登录已绑定的账号。新用户请使用手机号注册。</view>
+      <view class="label">已绑定的邮箱</view>
+      <input class="field" type="text" maxlength="254" value="{{target}}" placeholder="请输入邮箱地址" disabled="{{busy}}" bindinput="inputTarget" />
+    </view>
+    <block wx:if="{{(method === 'PHONE' && capabilities.phoneEnabled) || (method === 'EMAIL' && capabilities.emailEnabled)}}">
+      <button class="secondary" loading="{{busy}}" disabled="{{busy || resendSeconds > 0}}" bindtap="sendCode">{{resendSeconds > 0 ? resendSeconds + ' 秒后可重发' : '发送验证码'}}</button>
+      <view wx:if="{{hasChallenge}}" class="muted form-tip">验证码已发送至 {{maskedTarget}}</view>
+      <view class="label">验证码</view>
+      <input class="field" type="number" maxlength="6" value="{{otpCode}}" placeholder="6 位验证码" disabled="{{busy || !hasChallenge}}" bindinput="inputCode" />
+      <button class="primary" loading="{{busy}}" disabled="{{busy || !hasChallenge}}" bindtap="login">{{purpose === 'REGISTER' ? '验证并注册' : '验证并登录'}}</button>
+      <view class="muted session-note">仅在点击后发送验证码。登录状态不写入本地存储，退出小程序后需重新登录。</view>
+    </block>
+    <view wx:if="{{!capabilities.phoneEnabled && !capabilities.emailEnabled}}" class="empty">当前没有可用的验证码登录方式。</view>
+  </view>
+  <view wx:else class="card"><view class="section-title">账号服务暂未开放</view><view class="muted">你仍可使用已开放的推荐功能。可在设置中重新检查服务状态。</view></view>
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+  <view wx:if="{{notice}}" class="notice">{{notice}}</view>
+  <view wx:if="{{deletionReceipt}}" class="card"><view class="section-title">账号已停用</view><view class="muted">停用于 {{deletionReceipt.invalidatedAt}}</view><view class="muted">备份清理期限：{{deletionReceipt.backupDeletionDeadline}}</view></view>
+  <view wx:if="{{!signedIn && !capabilities.wechatMiniProgramEnabled}}" class="card"><view class="label">微信快捷登录</view><view class="muted">当前服务尚未开放微信小程序登录。可在设置中重新检查服务状态。</view></view>
+  <view class="card footer-links"><button class="secondary" bindtap="openPrivacy">隐私说明</button><button class="secondary" bindtap="openSettings">设置</button></view>
+</view>

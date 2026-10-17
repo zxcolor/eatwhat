@@ -25,8 +25,9 @@ import type {
 	RevokeSessionResponse,
 	SessionsResponse,
 	UnbindIdentityResponse,
+	WechatMiniProgramLoginRequest,
 } from "@chi-shen-me/contracts";
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import { APP_CONFIG, type AppConfig } from "../config/app-config.js";
 import {
 	AuthRepository,
@@ -65,6 +66,7 @@ import {
 	PHONE_OTP_PROVIDER,
 	QQ_IDENTITY_PROVIDER,
 	WECHAT_IDENTITY_PROVIDER,
+	WECHAT_MINIPROGRAM_IDENTITY_PROVIDER,
 } from "./auth-provider.factories.js";
 import type {
 	CompleteOAuthCredentialResult,
@@ -133,6 +135,9 @@ export class AuthService {
 		private readonly authenticatedUserResolver: AuthenticatedUserResolver,
 		@Inject(EXPORT_ARTIFACT_READER)
 		private readonly exportArtifactReader: ExportArtifactReader,
+		@Optional()
+		@Inject(WECHAT_MINIPROGRAM_IDENTITY_PROVIDER)
+		private readonly wechatMiniProgramIdentityProvider?: WechatIdentityProvider,
 	) {}
 
 	async requestPhoneCode(
@@ -278,6 +283,104 @@ export class AuthService {
 			return this.loginWithOtp(input, clientIp, secrets);
 		}
 		return this.loginWithOAuth(input, clientIp, secrets);
+	}
+
+	async loginWechatMiniProgram(
+		input: WechatMiniProgramLoginRequest,
+		clientIp: string,
+	): Promise<AuthTokenResponse> {
+		const channel = this.config.auth.wechatMiniProgram;
+		if (
+			!channel.enabled ||
+			channel.appId === null ||
+			channel.appSecret === null ||
+			channel.openPlatformRealmId === null ||
+			this.wechatMiniProgramIdentityProvider === undefined
+		)
+			throw new AuthUnavailableException();
+		const secrets = this.readySecrets();
+		if (input.device.platform !== "MINIPROGRAM")
+			throw new AuthUnauthorizedException("INVALID_CREDENTIALS");
+		assertDeviceLabel(input.device.label);
+		// Stable key version makes a code claim survive ordinary HMAC key rotation.
+		// Domain separation prevents collision with client-issued OAuth states.
+		const hashKeyVersion = secrets.identityDedupKeyVersion;
+		const stateHash = hashSensitiveRateLimitValue(
+			"oauth-state",
+			`miniprogram-code:${channel.appId}:${input.code}`,
+			secrets.hashKeyRing,
+			hashKeyVersion,
+		);
+		const deviceHash = hashSensitiveRateLimitValue(
+			"device",
+			input.device.installationId,
+			secrets.hashKeyRing,
+			hashKeyVersion,
+		).value;
+		const flowReferenceHash = hashSensitiveRateLimitValue(
+			"ip",
+			clientIp,
+			secrets.hashKeyRing,
+			hashKeyVersion,
+		).value;
+		const createdAt = new Date();
+		const proof: OAuthProof = {
+			id: randomUUID(),
+			provider: "WECHAT",
+			purpose: "LOGIN",
+			flowReferenceHash,
+			operationTargetHash: null,
+			targetUserId: null,
+			deviceHash,
+			hashKeyVersion,
+		};
+		const claim = await this.repositoryCall(() =>
+			this.repository.claimWechatMiniProgramCode({
+				...proof,
+				stateHash,
+				createdAt,
+				expiresAt: new Date(
+					createdAt.getTime() +
+						Math.min(this.config.auth.oauthStateTtlMs, 5 * 60_000),
+				),
+				retainUntil: new Date(createdAt.getTime() + 24 * 60 * 60_000),
+			}),
+		);
+		if (claim.kind === "RATE_LIMITED")
+			throw new AuthRateLimitedException(claim.retryAfterSeconds);
+		if (claim.kind === "REPLAY")
+			throw new AuthUnauthorizedException("INVALID_CREDENTIALS");
+		let identity: VerifiedExternalIdentity;
+		try {
+			identity = await this.wechatMiniProgramIdentityProvider.verify({
+				authorizationCode: input.code,
+			});
+		} catch (error) {
+			this.mapIdentityFailure(error);
+		}
+		if (
+			identity.provider !== "WECHAT" ||
+			identity.providerScope !== channel.appId
+		)
+			throw new AuthUnavailableException();
+		if (identity.unionSubject === null)
+			throw new AuthUnauthorizedException("IDENTITY_NOT_BOUND");
+		const realmId = channel.openPlatformRealmId;
+		const issued = this.issueSession(
+			input.device,
+			clientIp,
+			hashKeyVersion,
+			secrets.hashKeyRing,
+			deviceHash,
+		);
+		const result = await this.repositoryCall(() =>
+			this.repository.completeWechatMiniProgramLogin({
+				proof,
+				verifiedIdentity: this.identityHashes(identity, secrets, realmId),
+				session: issued.draft,
+			}),
+		);
+		return this.tokenResponse(result, issued);
 	}
 
 	async refresh(
@@ -452,7 +555,10 @@ export class AuthService {
 			unboundAt: result.unboundAt.toISOString(),
 		});
 	}
-	async listSessions(bearer: string, query: ListSessionsQuery = {}): Promise<SessionsResponse> {
+	async listSessions(
+		bearer: string,
+		query: ListSessionsQuery = {},
+	): Promise<SessionsResponse> {
 		const session =
 			await this.authenticatedUserResolver.resolveAccessToken(bearer);
 		const sessions = await this.repositoryCall(() =>
@@ -1240,6 +1346,7 @@ export class AuthService {
 	private identityHashes(
 		identity: VerifiedExternalIdentity,
 		secrets: ReadyAuthSecrets,
+		wechatRealmOverride?: string,
 	): VerifiedOAuthHashes {
 		// Keep each durable lookup AppID-scoped. QQ may use a separately realm-
 		// scoped UnionID only for deduplication; WeChat keeps its existing alias
@@ -1271,10 +1378,11 @@ export class AuthService {
 			wechatUnionAlias:
 				identity.provider === "WECHAT" && identity.unionSubject !== null
 					? Object.freeze({
-							realmId: this.requireWechatOpenPlatformRealmId(),
+							realmId:
+								wechatRealmOverride ?? this.requireWechatOpenPlatformRealmId(),
 							hash: hashIdentityLookup(
 								"WECHAT",
-								`open-platform:${this.requireWechatOpenPlatformRealmId()}`,
+								`open-platform:${wechatRealmOverride ?? this.requireWechatOpenPlatformRealmId()}`,
 								identity.unionSubject,
 								secrets.hashKeyRing,
 								secrets.identityDedupKeyVersion,

@@ -72,6 +72,7 @@ describe("disabled account HTTP boundary", () => {
 		["POST", "/v1/auth/email/request-code"],
 		["POST", "/v1/auth/oauth/state"],
 		["POST", "/v1/auth/login"],
+		["POST", "/v1/auth/wechat-miniprogram/login"],
 		["POST", "/v1/auth/refresh"],
 		["POST", "/v1/auth/logout"],
 		["GET", "/v1/auth/identities"],

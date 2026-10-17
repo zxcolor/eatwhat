@@ -21,6 +21,7 @@ import {
 	UnavailablePhoneOtpProvider,
 } from "./providers/unavailable-otp.provider.js";
 import { OfficialWechatIdentityProvider } from "./providers/wechat-identity.provider.js";
+import { OfficialWechatMiniProgramIdentityProvider } from "./providers/wechat-miniprogram-identity.provider.js";
 
 export const ALIYUN_PNVS_CLIENT = Symbol("ALIYUN_PNVS_CLIENT");
 export const ALIYUN_CREDENTIAL = Symbol("ALIYUN_CREDENTIAL");
@@ -28,6 +29,9 @@ export const SMTP_CLIENT = Symbol("SMTP_CLIENT");
 export const PHONE_OTP_PROVIDER = Symbol("PHONE_OTP_PROVIDER");
 export const EMAIL_OTP_PROVIDER = Symbol("EMAIL_OTP_PROVIDER");
 export const WECHAT_IDENTITY_PROVIDER = Symbol("WECHAT_IDENTITY_PROVIDER");
+export const WECHAT_MINIPROGRAM_IDENTITY_PROVIDER = Symbol(
+	"WECHAT_MINIPROGRAM_IDENTITY_PROVIDER",
+);
 export const QQ_IDENTITY_PROVIDER = Symbol("QQ_IDENTITY_PROVIDER");
 
 export function createPhoneOtpProvider(
@@ -72,4 +76,12 @@ export function createQqIdentityProvider(
 	config: AppConfig,
 ): QqIdentityProvider {
 	return new OfficialQqIdentityProvider(config.auth.qq);
+}
+
+export function createWechatMiniProgramIdentityProvider(
+	config: AppConfig,
+): WechatIdentityProvider {
+	return new OfficialWechatMiniProgramIdentityProvider(
+		config.auth.wechatMiniProgram,
+	);
 }

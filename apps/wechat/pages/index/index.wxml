@@ -1,0 +1,54 @@
+<view class="shell {{themeClass}}">
+  <view class="home-content" wx:if="{{tab === 0}}">
+    <view class="home-title">今天中午吃什么</view>
+    <button class="location" bindtap="open" data-page="location" aria-label="选择位置">
+      <image src="/assets/location.svg" class="location-icon"/><text>{{city}}</text><text class="chevron">⌄</text>
+    </button>
+    <view class="consent-card" wx:if="{{!consent}}">
+      <view class="label">先了解我们如何使用数据</view>
+      <view class="muted consent-copy">定位由你主动选择。最近决策仅保存条件摘要；附近餐厅与位置缓存需要你单独开启。</view>
+      <text class="link policy-link" bindtap="privacy">阅读隐私说明</text>
+      <button class="primary" bindtap="accept">同意并开始</button>
+    </view>
+    <view class="error" wx:elif="{{status === 'loading'}}">正在检查服务…</view>
+    <view class="error" wx:elif="{{status === 'error' || status === 'update-required'}}">
+      <view>{{error || '暂时无法连接服务，请稍后重试。'}}</view>
+      <button class="secondary" bindtap="retry">重新检查</button>
+    </view>
+    <button class="decision-card" bindtap="decide" disabled="{{!consent || status !== 'ready'}}">
+      <image class="dice" src="/assets/dice.svg"/>
+      <text class="decision-title">帮我选</text><text class="decision-subtitle">What to eat？</text>
+    </button>
+  </view>
+  <view class="tab-content" wx:elif="{{tab === 1}}">
+    <view class="home-title">历史</view>
+    <view class="card records-card">
+      <image class="empty-icon" src="/assets/history.svg"/>
+      <view class="section-title">{{historyEnabled ? '账号记录' : '暂无可查看的历史'}}</view>
+      <view class="muted">{{historyMessage}}</view>
+      <button class="secondary" data-page="local-records" bindtap="open">本机最近决策</button>
+      <button class="secondary" data-page="saved" bindtap="open">收藏与账号记录</button>
+    </view>
+  </view>
+  <view class="tab-content" wx:else>
+    <view class="home-title personal-title">个人</view>
+    <button class="personal-card" data-page="account" bindtap="open">
+      <image class="personal-icon" src="/assets/account.svg"/><view class="personal-text"><view class="label">账号与安全</view><view class="muted">登录、账号资料与数据管理</view></view><text class="arrow">›</text>
+    </button>
+    <button class="personal-card" data-page="conditions" bindtap="open">
+      <image class="personal-icon" src="/assets/conditions.svg"/><view class="personal-text"><view class="label">本次推荐条件</view><view class="muted">预算、时间、距离与用餐偏好</view></view><text class="arrow">›</text>
+    </button>
+    <button class="personal-card" data-page="settings" bindtap="open">
+      <image class="personal-icon" src="/assets/settings.svg"/><view class="personal-text"><view class="label">设置</view><view class="muted">主题、隐私与偏好设置</view></view><text class="arrow">›</text>
+    </button>
+    <button class="personal-card" data-page="saved" bindtap="open"><image class="personal-icon" src="/assets/history.svg"/><view class="personal-text"><view class="label">收藏与账号记录</view><view class="muted">想去、常吃与私有反馈</view></view><text class="arrow">›</text></button>
+  </view>
+  <view class="dock-wrap">
+    <view class="dock">
+      <view class="dock-highlight" style="transform:translateX({{tab * 100}}%);"/>
+      <button wx:for="{{tabs}}" wx:key="icon" class="dock-item {{tab === index ? 'active' : ''}}" data-tab="{{index}}" bindtap="switchTab" aria-label="{{item.label}}">
+        <image class="dock-icon" src="/assets/{{item.icon}}{{tab === index ? '-active' : ''}}.svg"/><text>{{item.label}}</text>
+      </button>
+    </view>
+  </view>
+</view>

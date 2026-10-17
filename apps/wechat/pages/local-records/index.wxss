@@ -1,0 +1,4 @@
+.subtitle { margin-bottom:20px; }
+.record { padding:18px; }
+.summary { margin-top:8px; }
+.count { color:var(--accent); font-size:13px; flex-shrink:0; }

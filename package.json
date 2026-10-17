@@ -12,7 +12,7 @@
     "dev:admin": "pnpm --filter @chi-shen-me/admin dev",
     "db:migrate": "pnpm --filter @chi-shen-me/api db:migrate",
     "db:cleanup": "pnpm --filter @chi-shen-me/api db:cleanup",
-    "lint": "biome lint apps/api/src apps/api/scripts packages/contracts/src apps/admin/app apps/admin/components apps/admin/lib apps/miniprogram/src apps/miniprogram/scripts",
+    "lint": "biome lint apps/api/src apps/api/scripts packages/contracts/src apps/admin/app apps/admin/components apps/admin/lib apps/miniprogram/src apps/miniprogram/scripts apps/wechat/lib apps/wechat/pages apps/wechat/app.js apps/wechat/tests apps/wechat/scripts",
     "test": "pnpm -r --if-present test",
     "test:openapi": "pnpm --filter @chi-shen-me/contracts test:openapi",
     "typecheck": "pnpm -r --if-present typecheck"

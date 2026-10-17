@@ -14,7 +14,7 @@ describe("fixed migration plan", () => {
 	it("loads the repository migration with a deterministic checksum", async () => {
 		const first = await loadMigrationPlan();
 		const second = await loadMigrationPlan();
-		expect(first).toHaveLength(13);
+		expect(first).toHaveLength(14);
 		expect(first[0]).toMatchObject({
 			version: 1,
 			name: "initial_schema",
@@ -96,6 +96,12 @@ describe("fixed migration plan", () => {
 			fileName: "0013_admin_config_control.sql",
 		});
 		expect(first[12]?.checksum).toMatch(/^[0-9a-f]{64}$/u);
+		expect(first[13]).toMatchObject({
+			version: 14,
+			name: "wechat_miniprogram_login",
+			fileName: "0014_wechat_miniprogram_login.sql",
+		});
+		expect(first[13]?.checksum).toMatch(/^[0-9a-f]{64}$/u);
 		expect(second[0]?.checksum).toBe(first[0]?.checksum);
 		expect(second[1]?.checksum).toBe(first[1]?.checksum);
 		expect(second[2]?.checksum).toBe(first[2]?.checksum);
@@ -109,6 +115,7 @@ describe("fixed migration plan", () => {
 		expect(second[10]?.checksum).toBe(first[10]?.checksum);
 		expect(second[11]?.checksum).toBe(first[11]?.checksum);
 		expect(second[12]?.checksum).toBe(first[12]?.checksum);
+		expect(second[13]?.checksum).toBe(first[13]?.checksum);
 	});
 
 	it("requires versions to start at 0001 and remain contiguous", () => {

@@ -1,0 +1,37 @@
+<view class="page {{themeClass}}">
+  <view class="title">附近餐厅缓存</view>
+  <view class="subtitle">每次打开单独保存，3.5 km 内最多两页。餐厅、本次位置与精度在 90 天到期时一并清理。</view>
+  <view class="card">
+    <view class="label">{{enabled ? '已开启本机缓存' : '尚未开启本机缓存'}}</view>
+    <view class="muted spacing">仅前台获取位置。清理在下次打开或读取缓存时执行，小程序退出期间不后台定位。</view>
+    <view wx:if="{{!consent}}" class="muted">请先在首页阅读并同意隐私说明。</view>
+    <view wx:elif="{{!available}}" class="muted">当前服务未开放附近餐厅缓存，请稍后重新检查服务。</view>
+    <button wx:if="{{!enabled}}" class="primary" disabled="{{!consent}}" bindtap="enableCollection">开启附近餐厅缓存</button>
+    <button wx:else class="secondary" bindtap="disableCollection">关闭自动收集</button>
+    <view wx:if="{{enabled}}" class="muted spacing">关闭后已有记录仍按保留期保存，可在下方清除。</view>
+  </view>
+  <view wx:if="{{enabled}}" class="card">
+    <view class="label">{{statusLabel}}</view>
+    <view wx:if="{{message}}" class="muted spacing">{{message}}</view>
+    <button wx:if="{{canRetry}}" class="primary" bindtap="retry">{{phase === 'PERMISSION' ? '允许定位并收集' : '重新收集'}}</button>
+    <button wx:if="{{phase === 'PERMISSION'}}" class="secondary" bindtap="openPermissionSettings">前往微信权限设置</button>
+    <button wx:if="{{busy || phase === 'PERMISSION' || phase === 'FAILED'}}" class="secondary" bindtap="dismiss">本次暂不收集</button>
+  </view>
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+  <view class="row section-title"><text>本机缓存 · {{total}} 次</text></view>
+  <view wx:if="{{!snapshots.length}}" class="empty">暂无本机餐厅缓存</view>
+  <view wx:for="{{snapshots}}" wx:key="id" class="card snapshot">
+    <view class="label">{{item.time}}</view><view class="muted spacing">{{item.status}} · {{item.count}} 家 · {{item.pages}} 页</view>
+    <view class="muted">{{item.accuracy}} · 到期 {{item.expires}}</view>
+    <button wx:if="{{item.count}}" class="secondary" data-id="{{item.id}}" bindtap="toggleSnapshot">{{item.expanded ? '收起餐厅' : '查看本次餐厅'}}</button>
+    <view wx:if="{{item.expanded}}" class="places">
+      <view wx:for="{{item.places}}" wx:for-item="place" wx:key="id" class="place">
+        <view class="label">{{place.name}}</view><view class="muted">{{place.address}}</view>
+        <view class="muted">{{place.cost}} · {{place.rating}} · {{place.open}}</view>
+        <view class="source">{{place.source}} · {{place.mode}}</view>
+      </view>
+    </view>
+  </view>
+  <button wx:if="{{hasMore}}" class="secondary" bindtap="loadMore">查看更多记录</button>
+  <button wx:if="{{consent}}" class="secondary" bindtap="clearCache">清除餐厅缓存与定位记录</button>
+</view>

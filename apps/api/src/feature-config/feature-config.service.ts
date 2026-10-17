@@ -12,12 +12,19 @@ import { Inject, Injectable, Optional } from "@nestjs/common";
 import { NearbyRestaurantsService } from "../nearby-restaurants/nearby-restaurants.service.js";
 import { APP_CONFIG, type AppConfig } from "../config/app-config.js";
 import { DataRightsPolicy } from "../config/data-rights-policy.js";
+import { DatabasePool } from "../database/database-pool.js";
 import {
 	LOCATION_SEARCH_PROVIDER,
 	type LocationSearchProvider,
 } from "../location-search/location-search.provider.js";
-import { OperationalConfigService, OPERATIONAL_CONFIG_CACHE_TTL_MS } from "../operational-config/operational-config.service.js";
-import { isOperationalConfigAvailable, startupOperationalConfig } from "../operational-config/operational-config.types.js";
+import {
+	OperationalConfigService,
+	OPERATIONAL_CONFIG_CACHE_TTL_MS,
+} from "../operational-config/operational-config.service.js";
+import {
+	isOperationalConfigAvailable,
+	startupOperationalConfig,
+} from "../operational-config/operational-config.types.js";
 import {
 	PLACE_KEYWORD_SEARCH_PROVIDER,
 	type PlaceKeywordSearchProvider,
@@ -101,6 +108,7 @@ export class FeatureConfigService {
 		@Optional()
 		private readonly operationalConfig?: OperationalConfigService,
 		@Optional() private readonly nearbyRestaurants?: NearbyRestaurantsService,
+		@Optional() private readonly database?: DatabasePool,
 	) {}
 
 	private supportsProfile(
@@ -200,13 +208,32 @@ export class FeatureConfigService {
 						? "PROMPT_DISABLED"
 						: "ENABLED";
 		const aiEnabled = aiStatus === "ENABLED";
+		let wechatMiniProgramEnabled = false;
+		const mini = this.config.auth.wechatMiniProgram;
+		if (
+			this.config.auth.enabled &&
+			this.config.database.enabled &&
+			mini.enabled &&
+			mini.appId !== null &&
+			mini.appSecret !== null &&
+			mini.openPlatformRealmId !== null &&
+			this.config.auth.hashKeyRing !== null &&
+			this.config.auth.identityDedupKeyVersion !== null
+		) {
+			try {
+				wechatMiniProgramEnabled = (await this.database?.isReady()) === true;
+			} catch {
+				wechatMiniProgramEnabled = false;
+			}
+		}
 		return FeatureConfigSchema.parse({
 			coverageName:
 				operational.coverage.areaCode === "NATIONWIDE"
 					? "全国范围"
 					: operational.coverage.areaCode,
 			dataRightsMode: effectiveDataRightsMode,
-			nearbyRestaurantCollectionEnabled: this.nearbyRestaurants?.enabled ?? false,
+			nearbyRestaurantCollectionEnabled:
+				this.nearbyRestaurants?.enabled ?? false,
 			aiEnabled,
 			accountsEnabled: this.config.features.accountsEnabled,
 			favoritesEnabled,
@@ -222,10 +249,9 @@ export class FeatureConfigService {
 			ruleVersion: this.config.versions.rule,
 			rulesConfigVersion: operational.versions["recommendations.rules"],
 			promptVersion: operational.prompt.promptVersion,
-			modelVersion:
-				aiEnabled
-					? operational.prompt.modelVersion
-					: this.config.versions.ruleFallbackModel,
+			modelVersion: aiEnabled
+				? operational.prompt.modelVersion
+				: this.config.versions.ruleFallbackModel,
 			serviceCapabilities: {
 				recommendationsEnabled,
 				groupRecommendationsEnabled: false,
@@ -247,6 +273,7 @@ export class FeatureConfigService {
 					this.config.auth.enabled && this.config.auth.phone.enabled,
 				wechatEnabled:
 					this.config.auth.enabled && this.config.auth.wechat.enabled,
+				wechatMiniProgramEnabled,
 				emailEnabled:
 					this.config.auth.enabled && this.config.auth.email.enabled,
 				qqEnabled: this.config.auth.enabled && this.config.auth.qq.enabled,

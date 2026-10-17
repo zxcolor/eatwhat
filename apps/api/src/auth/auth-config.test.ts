@@ -35,6 +35,65 @@ function emailEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
 }
 
 describe("account startup configuration", () => {
+	it("keeps Mini Program disabled by default and isolates its credentials from native WeChat", () => {
+		const disabled = loadAuthRuntimeConfig(
+			phoneEnv({ WECHAT_MINIPROGRAM_APP_SECRET: "staged-synthetic-secret" }),
+			options,
+		);
+		expect(disabled.wechatMiniProgram).toEqual({
+			enabled: false,
+			appId: null,
+			appSecret: null,
+			openPlatformRealmId: null,
+			timeoutMs: 2000,
+		});
+		const enabled = loadAuthRuntimeConfig(
+			phoneEnv({
+				WECHAT_MINIPROGRAM_AUTH_ENABLED: "true",
+				WECHAT_MINIPROGRAM_APP_ID: "wx1111111111111111",
+				WECHAT_MINIPROGRAM_APP_SECRET: "synthetic-mini-secret",
+				WECHAT_OPEN_PLATFORM_REALM_ID: "eatwhat-primary",
+			}),
+			options,
+		);
+		expect(enabled.wechat.enabled).toBe(false);
+		expect(enabled.wechat.appSecret).toBeNull();
+		expect(enabled.wechatMiniProgram).toMatchObject({
+			enabled: true,
+			appId: "wx1111111111111111",
+			appSecret: "synthetic-mini-secret",
+			openPlatformRealmId: "eatwhat-primary",
+		});
+	});
+	it("requires complete Mini Program credentials and the shared stable realm", () => {
+		const base = phoneEnv({
+			WECHAT_MINIPROGRAM_AUTH_ENABLED: "true",
+			WECHAT_MINIPROGRAM_APP_ID: "wx1111111111111111",
+			WECHAT_MINIPROGRAM_APP_SECRET: "synthetic-mini-secret",
+			WECHAT_OPEN_PLATFORM_REALM_ID: "eatwhat-primary",
+		});
+		for (const key of [
+			"WECHAT_MINIPROGRAM_APP_ID",
+			"WECHAT_MINIPROGRAM_APP_SECRET",
+			"WECHAT_OPEN_PLATFORM_REALM_ID",
+		]) {
+			expect(() =>
+				loadAuthRuntimeConfig({ ...base, [key]: undefined }, options),
+			).toThrow(key);
+		}
+		expect(() =>
+			loadAuthRuntimeConfig(
+				{ ...base, WECHAT_MINIPROGRAM_APP_ID: "bad-app" },
+				options,
+			),
+		).toThrow("WECHAT_MINIPROGRAM_APP_ID");
+		expect(() =>
+			loadAuthRuntimeConfig(
+				{ ...base, WECHAT_MINIPROGRAM_AUTH_TIMEOUT_MS: "100000" },
+				options,
+			),
+		).toThrow("WECHAT_MINIPROGRAM_AUTH_TIMEOUT_MS");
+	});
 	it("keeps provider secrets absent while accounts are disabled", () => {
 		const config = loadAuthRuntimeConfig(
 			{},

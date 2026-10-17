@@ -82,6 +82,7 @@ import {
 	UpdateFavoriteGroupRequestSchema,
 	WeatherApplicationSchema,
 	WeatherContextRequestSchema,
+	WechatMiniProgramLoginRequestSchema,
 } from "./index.js";
 
 type JsonObject = Record<string, unknown>;
@@ -667,6 +668,11 @@ describe("OpenAPI v1", () => {
 				],
 			},
 			{
+				path: "/v1/auth/wechat-miniprogram/login",
+				method: "post",
+				statuses: ["200", "400", "401", "403", "409", "413", "415", "429", "500", "503"],
+			},
+			{
 				path: "/v1/auth/login",
 				method: "post",
 				statuses: [
@@ -1166,6 +1172,7 @@ describe("OpenAPI v1", () => {
 			["OAuthStateRequest", OAuthStateRequestSchema, "input"],
 			["OAuthStateResponse", OAuthStateResponseSchema, "output"],
 			["LoginRequest", LoginRequestSchema, "input"],
+			["WechatMiniProgramLoginRequest", WechatMiniProgramLoginRequestSchema, "input"],
 			["AuthTokenResponse", AuthTokenResponseSchema, "output"],
 			["RefreshRequest", RefreshRequestSchema, "input"],
 			["LogoutRequest", LogoutRequestSchema, "input"],
@@ -1474,6 +1481,7 @@ describe("OpenAPI v1", () => {
 			["/v1/auth/email/request-code", "post", "202"],
 			["/v1/auth/oauth/state", "post", "201"],
 			["/v1/auth/login", "post", "200"],
+			["/v1/auth/wechat-miniprogram/login", "post", "200"],
 			["/v1/auth/refresh", "post", "200"],
 			["/v1/auth/logout", "post", "200"],
 			["/v1/auth/identities", "get", "200"],
