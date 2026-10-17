@@ -20,7 +20,7 @@
 - 配置百炼北京地域工作空间地址、API Key 与 `QWEN_ENABLED=true` 后可启用千问；失败时自动回退确定性规则。
 - Android 工程已用 JDK 17、SDK 36、Gradle 8.13 完成 buildSrc/App JVM 测试、Lint、Debug、AndroidTest 与内部 Alpha 构建；模拟器验收结果和当前 APK SHA-256 以验证报告为准。仓库内 `.tools` 仅为本机忽略目录，不会提交到版本库。
 - 登录已在不使用真实供应商凭据的设备内合成 API 夹具中验证手机号登录、邮箱绑定、退出、邮箱登录和再次退出；微信/QQ AppID 缺失时保持 fail closed。高德的 Android 合成展示边界与 ECS 真实 Web Service 技术链路均已验证：云端地点搜索和推荐明确返回 `AMAP/LIVE`、`fitScore=null`、GCJ-02 结果且分享关闭；这不等于商业授权、App 备案或公开发布已经获批。
-- 前后端已按独立部署边界拆分：Android 只持有一个环境对应的 API 基址和公开 v1 契约，不包含数据库或供应商 Secret。普通 Debug 与内部 Alpha 均连接 `https://api.unfinished-era.com/` 的同一 API/PostgreSQL 实例，不复制第二套 Debug 服务、端口、域名或数据库；Debug 仍是独立、可调试且不可公开发布的客户端包。只有不可分发的 `fixture` 自动化测试构建固定使用设备/ADB 可达的 `127.0.0.1:3001` 隔离接口。API 的 `serviceCapabilities` 分别声明推荐、地点搜索和服务端独立餐厅关键词搜索是否可用；Android 1.0 只消费推荐与地点搜索能力；已退休的群组兼容字段固定为 `false`，Android 继续忽略 `placeSearchEnabled`。2026-08-23 的历史部署记录对应 release `20260823T071142Z-nationwide`（不代表本轮已核实的生产版本），API 只监听 `127.0.0.1:13001`，数据库只在内部 Docker 网络开放；公网子域已使用独立 DNS、Let's Encrypt 证书和 API vhost 对外提供 v1 API。全国版候选的隔离验收、数据库备份、动态激活和失败自动回退门禁均已通过。
+- 前后端已按独立部署边界拆分：Android 只持有一个环境对应的 API 基址和公开 v1 契约，不包含数据库或供应商 Secret。普通 Debug 与内部 Alpha 均连接 `https://api.eatwhat.pro/` 的同一 API/PostgreSQL 实例，不复制第二套 Debug 服务、端口、域名或数据库；Debug 仍是独立、可调试且不可公开发布的客户端包。只有不可分发的 `fixture` 自动化测试构建固定使用设备/ADB 可达的 `127.0.0.1:3001` 隔离接口。API 的 `serviceCapabilities` 分别声明推荐、地点搜索和服务端独立餐厅关键词搜索是否可用；Android 1.0 只消费推荐与地点搜索能力；已退休的群组兼容字段固定为 `false`，Android 继续忽略 `placeSearchEnabled`。2026-08-23 的历史部署记录对应 release `20260823T071142Z-nationwide`（不代表本轮已核实的生产版本），API 只监听 `127.0.0.1:13001`，数据库只在内部 Docker 网络开放；公网子域已使用独立 DNS、Let's Encrypt 证书和 API vhost 对外提供 v1 API。全国版候选的隔离验收、数据库备份、动态激活和失败自动回退门禁均已通过。
 
 ## 本地启动
 
@@ -60,7 +60,7 @@ API 运行进程；管理员、迁移、维护、导出 worker 和其他父终�
 使用微信 AppSecret、QQ AppKey 或其他服务端 Secret。
 
 ```powershell
-.\scripts\verify.ps1 -AlphaApiBaseUrl 'https://api.unfinished-era.com/'
+.\scripts\verify.ps1 -AlphaApiBaseUrl 'https://api.eatwhat.pro/'
 ```
 
 完整验证要求显式给出 Debug 与 Alpha 将共同嵌入的公网 HTTPS 地址。该脚本会验证 URL 策略、两者生成的 `BuildConfig` 与 DEX 确实包含同一地址，并单独构建固定回环地址的 `fixture` App/AndroidTest APK；fixture 只用于确定性自动化，不得分发或作为日常 Debug。脚本也会验证 ECS bundle，但不会把“地址成功嵌入”误当成 DNS、证书或公网可达。当前公网连通已另行通过 ECS `scripts/smoke-test.sh` 及工作站 TLS、跳转、readiness、真实高德搜索/推荐和管理端点 404 验收；关闭 Wi-Fi 的外部真机仍需单独复验。Windows 中文工作区下的临时 ASCII 盘符会在结束后撤销。

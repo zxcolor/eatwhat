@@ -13,7 +13,7 @@
 ## 验证
 
 - [ ] 已运行与改动直接相关的测试
-- [ ] 已运行 `./scripts/verify.ps1 -AlphaApiBaseUrl 'https://api.unfinished-era.com/'`
+- [ ] 已运行 `./scripts/verify.ps1 -AlphaApiBaseUrl 'https://api.eatwhat.pro/'`
 - [ ] Android 变更已在模拟器或真机验证
 - [ ] 已确认没有提交密钥、令牌、私钥、真实用户数据或构建产物
 

@@ -34,7 +34,7 @@
 
 ## Android 环境边界
 
-- 普通 `debug` 构建默认且只允许访问公网 HTTPS API；当前与内部 Alpha 复用 `https://api.unfinished-era.com/`，不得改回本机、回环或私网服务端。
+- 普通 `debug` 构建默认且只允许访问公网 HTTPS API；当前与内部 Alpha 复用 `https://api.eatwhat.pro/`，不得改回本机、回环或私网服务端。
 - `http://127.0.0.1:3001/` 只属于不可分发的 `fixture` 自动化测试构建。不得把该地址写入 `gradle.properties`、用户级 Gradle 配置或普通 Debug APK。
 - Debug 与 Alpha 共用同一服务端配置、限流、高德配额和数据状态；需要隔离迁移、账号数据或第三方 OAuth AppID 时必须另建 staging，不得依赖客户端自报环境选择服务端 Secret。
 
@@ -44,6 +44,6 @@
   `CHISHENME_ALPHA_WECHAT_APP_ID`、`CHISHENME_ALPHA_QQ_APP_ID` 注入受控的 Alpha
   微信与 QQ 公开 AppID（不得使用微信 AppSecret 或 QQ AppKey），
   再运行完整验证：
-  `./scripts/verify.ps1 -AlphaApiBaseUrl 'https://api.unfinished-era.com/'`。
+  `./scripts/verify.ps1 -AlphaApiBaseUrl 'https://api.eatwhat.pro/'`。
 - 不为了让测试通过而降低既有门禁。失败时记录真实错误和未完成项。
 - 交付说明必须列出已运行的命令、结果、未运行的检查及原因。

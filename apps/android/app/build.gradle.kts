@@ -66,7 +66,7 @@ listOf(
     }
 }
 val debugApiUrl = providers.gradleProperty("CHISHENME_DEBUG_API_BASE_URL")
-    .orElse("https://api.unfinished-era.com/")
+    .orElse("https://api.eatwhat.pro/")
     .get()
     .trim()
 if (!ReleaseApiUrlPolicy.isAllowed(debugApiUrl)) {

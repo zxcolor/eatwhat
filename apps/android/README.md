@@ -44,14 +44,14 @@ gradle wrapper --gradle-version 8.13
 从仓库根目录执行完整可复现门禁（包含 buildSrc、云端 Debug、隔离 Fixture AndroidTest、Alpha 混淆和工件检查）。执行前必须仅在当前进程把受控的 Alpha 微信、QQ 公开 AppID 设置为 `CHISHENME_ALPHA_WECHAT_APP_ID`、`CHISHENME_ALPHA_QQ_APP_ID`，不得使用微信 AppSecret 或 QQ AppKey：
 
 ```powershell
-.\scripts\verify.ps1 -AlphaApiBaseUrl 'https://api.unfinished-era.com/'
+.\scripts\verify.ps1 -AlphaApiBaseUrl 'https://api.eatwhat.pro/'
 ```
 
 只在 Android 工程内做快速开发检查时可运行 `testDebugUnitTest lintDebug assembleDebug`；普通 Debug 默认连接云端公网 API，该命令不替代上面的完整门禁。
 
 | 构建 | 包名 | API | 用途 |
 | --- | --- | --- | --- |
-| Debug | `com.chishenme.app.debug` | 默认 `https://api.unfinished-era.com/`；只允许受控公网 HTTPS | 日常开发诊断，可与 Alpha 并存；可调试，不得公开发布 |
+| Debug | `com.chishenme.app.debug` | 默认 `https://api.eatwhat.pro/`；只允许受控公网 HTTPS | 日常开发诊断，可与 Alpha 并存；可调试，不得公开发布 |
 | Fixture | `com.chishenme.app.debug` | 固定 `http://127.0.0.1:3001/` | 只供确定性 instrumentation；会替换设备上的 Debug，禁止分发 |
 | Alpha | `com.chishenme.app.alpha` | 与 Debug 复用当前云端 API | 邀请制、R8/资源压缩、不可调试；使用固定的长期 Alpha signer，仍不能当 Release |
 
@@ -61,7 +61,7 @@ gradle wrapper --gradle-version 8.13
 
 ### 云端 Debug 与隔离测试 Fixture
 
-普通 Debug 默认访问 `https://api.unfinished-era.com/`，无需本机 API 或 `adb reverse`。从仓库根目录执行：
+普通 Debug 默认访问 `https://api.eatwhat.pro/`，无需本机 API 或 `adb reverse`。从仓库根目录执行：
 
 ```powershell
 .\apps\android\gradlew.bat -p .\apps\android `
@@ -206,8 +206,8 @@ ADB 直跑是 UTP 宿主故障时的等价执行兜底，不会生成标准 Grad
 地址。Fixture 的固定回环地址没有 Gradle 开关，不能被误带入可分发构建：
 
 ```properties
-CHISHENME_DEBUG_API_BASE_URL=https://api.unfinished-era.com/
-CHISHENME_ALPHA_API_BASE_URL=https://api.unfinished-era.com/
+CHISHENME_DEBUG_API_BASE_URL=https://api.eatwhat.pro/
+CHISHENME_ALPHA_API_BASE_URL=https://api.eatwhat.pro/
 CHISHENME_API_BASE_URL=https://api.your-company.example/
 ```
 
