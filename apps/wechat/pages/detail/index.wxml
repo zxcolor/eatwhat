@@ -1,24 +1,27 @@
-<view class="page {{themeClass}}">
+<view wx:if="{{preferenceReady}}" class="page decision-page {{themeClass}}">
   <block wx:if="{{current}}">
-    <view class="card hero">
-      <view class="muted">{{result.mode}}</view><view class="title restaurant-name">{{result.name}}</view>
-      <view class="chips"><text class="chip">{{result.openLabel}}</text><text class="chip">{{result.price}}</text><text wx:if="{{result.sourceRating}}" class="chip">来源评分 {{result.sourceRating}}</text></view>
-      <view class="facts"><text>{{result.distance}}</text><text>到店约 {{result.travel}}</text><text>用餐约 {{result.meal}}</text></view>
-      <view class="address">{{result.address || '暂无地址'}}</view><view class="muted source">数据来源：{{result.sourceAttribution}}</view>
+    <view class="detail-hero" aria-label="虚拟餐点示意，具体配料和分量未知"><view class="art-ring"/><view class="art-plate"><view class="art-rice"/><view class="art-main"/><view class="art-greens"/></view><view class="art-caption">餐点示意 · 非实物照片</view></view>
+    <view class="choice-summary">
+      <view class="summary-topline"><view class="virtual-badge">本次虚拟选择</view><view wx:if="{{confirmed}}" class="chosen-label">✓ 已选定</view></view>
+      <view class="result-name">{{result.name}}</view>
+      <view wx:if="{{result.restaurantName !== result.name}}" class="restaurant">{{result.restaurantName}}</view>
+      <view wx:if="{{result.mealName !== result.name}}" class="restaurant">{{result.mealName}}</view>
+      <view class="facts-row"><view class="fact"><view class="fact-label">{{result.factsSummary[0] || '虚拟场景价格'}}</view><view class="price">{{result.priceText}}</view></view><view class="fact distance-fact"><view class="fact-label">从所选虚拟地点出发</view><view class="distance">{{result.distanceText}}</view></view></view>
     </view>
-    <view class="card"><view class="section-title">到店操作</view>
-      <view class="action-row"><button class="primary" bindtap="navigate" disabled="{{!canNavigate}}">查看地图</button><button class="secondary" bindtap="copyAddress" disabled="{{!canCopy}}">复制地址</button></view>
-      <button class="secondary" bindtap="call" disabled="{{!canCall}}">联系商户</button>
-      <view wx:if="{{actionNotice}}" class="muted action-notice">{{actionNotice}}</view>
+    <view wx:if="{{confirmed}}" class="confirmation" aria-live="polite"><view class="confirmation-title">这次选择已记下</view><view>仅记录本次虚拟决定，不是已吃记录，也不会产生真实订单。</view></view>
+    <view class="information-section">
+      <view class="section-heading"><view class="section-title">已知信息</view><view class="section-caption">本次虚拟样例</view></view>
+      <view wx:if="{{result.roleText}}" class="role">{{result.roleText}}</view>
+      <view class="facts-copy"><view wx:for="{{result.factsSummary}}" wx:key="*this" class="fact-line">{{item}}</view></view>
     </view>
-    <view wx:if="{{error}}" class="error">{{error}}</view>
-    <view class="card"><view class="section-title">收藏与私有反馈</view><view class="muted">{{saveNotice}}</view>
-      <button wx:if="{{canFavorite}}" class="secondary" bindtap="saveFavorite" disabled="{{saveBusy || favoriteSaved}}">{{favoriteSaved ? '已收藏' : '加入收藏'}}</button>
-      <view wx:if="{{canFeedback}}" class="chips"><button wx:for="{{feedbackTypes}}" wx:key="type" class="chip" data-type="{{item.type}}" bindtap="feedback" disabled="{{saveBusy || item.submitted}}">{{item.label}}{{item.submitted ? ' · 已记录' : ''}}</button></view>
-      <button class="secondary" bindtap="openSaved" disabled="{{saveBusy}}">查看收藏与账号记录</button>
+    <view class="information-section">
+      <view class="section-title">为什么选它</view>
+      <view class="reason-list"><view wx:for="{{result.reasons}}" wx:key="*this" class="reason"><text class="reason-mark">✓</text><text>{{item}}</text></view><view wx:if="{{!result.reasons.length}}" class="reason">依据本次明确选择的条件。</view></view>
     </view>
-    <view class="card"><view class="section-title">为什么推荐</view><view wx:for="{{result.reasons}}" wx:key="code" class="reason">{{item.text}}</view><view wx:if="{{result.tags.length}}" class="chips"><text wx:for="{{result.tags}}" wx:key="*this" class="chip">{{item}}</text></view></view>
-    <view class="card"><view class="section-title">到店前确认</view><view wx:for="{{result.warnings}}" wx:key="*this" class="muted warning">{{item}}</view><view class="muted warning">营业状态、价格和到店时间可能变化，请以商户实际情况为准。</view></view>
+    <view class="unknown-section"><view class="section-title">还不确定</view><view class="unknown">营业状态未知</view><view wx:for="{{result.uncertainties}}" wx:key="*this" class="unknown">{{item}}</view><view wx:if="{{!result.uncertainties.length}}" class="unknown">具体配料、分量和营养未知</view></view>
+    <view wx:if="{{error}}" class="error" aria-live="polite">{{error}}</view>
+    <view class="virtual-note">虚拟场景基于历史原型，含模拟属性。价格不代表当前售价或可购买承诺，距离不对应现实路线。本次体验不会导航、拨号、上传反馈或自动收集个人偏好。</view>
+    <view class="detail-actions"><block wx:if="{{!confirmed}}"><button class="secondary" bindtap="back" hover-class="secondary-pressed">返回</button><button class="primary" bindtap="confirm" hover-class="primary-pressed">就选这个</button></block><button wx:else class="primary" bindtap="back" hover-class="primary-pressed">返回这次决定</button></view>
   </block>
-  <view wx:else class="card empty"><view class="section-title">需要重新获取结果</view><view class="muted">{{actionNotice}}</view><button class="primary" bindtap="back">返回推荐结果</button></view>
+  <view wx:else class="detail-empty"><view class="empty-mark">↻</view><view class="empty-eyebrow">这份选择已不可用</view><view class="empty-title">需要重新决定</view><view class="empty-copy">{{notice}}</view><button class="primary" bindtap="back" hover-class="primary-pressed">返回这次决定</button></view>
 </view>

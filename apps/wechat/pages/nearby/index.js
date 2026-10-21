@@ -8,7 +8,7 @@ function timeLabel(value) {
 }
 Page({
   data: { themeClass: '', enabled: false, available: false, consent: false, busy: false, phase: 'IDLE', statusLabel: '', message: '', error: '', snapshots: [], total: 0, hasMore: false, canRetry: false },
-  onShow() {
+  async onShow() {
     this._active = true;
     this._generation = (this._generation || 0) + 1;
     this._limit = 20;
@@ -18,6 +18,14 @@ Page({
     if (this._unsubscribe) this._unsubscribe();
     this._unsubscribe = nearby.subscribe(() => this.syncState());
     this.syncState();
+    if (!service.state.consent) return;
+    const generation = this._generation;
+    const opening = nearby.open();
+    try {
+      if (!['ready', 'loading'].includes(service.state.status)) await getApp().checkService();
+      await opening;
+    } catch (_) { /* Service and collection state keep failures closed. */ }
+    if (this._active && generation === this._generation && service.state.consent) this.syncState();
   },
   onHide() { this.leave(); },
   onUnload() { this.leave(); },
@@ -26,6 +34,7 @@ Page({
     this._generation += 1;
     if (this._unsubscribe) this._unsubscribe();
     this._unsubscribe = null;
+    nearby.stop();
     this._expanded = null;
     this.setData({ snapshots: [], error: '' });
   },
@@ -63,7 +72,7 @@ Page({
     const generation = this._generation;
     wx.showModal({
       title: '开启附近餐厅缓存',
-      content: '开启后，在服务允许且定位已授权时，每次打开小程序会获取当前位置，保存 3.5 km 内最多两页（50 家）餐厅、本次位置和精度。按本次打开时间在本机保留 90 天；空间不足时停止保存。可随时关闭或清除。',
+      content: '开启后，在服务允许且定位已授权时，每次打开此页会获取当前位置，保存 3.5 km 内最多两页（50 家）餐厅、本次位置和精度。按本次打开时间在本机保留 90 天；空间不足时停止保存。可随时关闭或清除。',
       confirmText: '同意开启',
       success: async result => {
         if (!result.confirm || !this._active || generation !== this._generation || !service.state.consent) return;
@@ -75,9 +84,10 @@ Page({
   },
   async disableCollection() {
     if (!this._active) return;
-    try { await nearby.setEnabled(false); this.setData({ error: '' }); }
-    catch (_) { this.setData({ error: '关闭失败，请重试。' }); }
-    if (this._active) this.syncState();
+    const generation = this._generation;
+    try { await nearby.setEnabled(false); if (this._active && generation === this._generation) this.setData({ error: '' }); }
+    catch (_) { if (this._active && generation === this._generation) this.setData({ error: '关闭失败，请重试。' }); }
+    if (this._active && generation === this._generation) this.syncState();
   },
   async retry() {
     if (!this._active || !this.data.canRetry) return;
@@ -87,6 +97,7 @@ Page({
     if (this._active && generation === this._generation) this.syncState();
   },
   openPermissionSettings() { if (this._active && service.state.consent) wx.openSetting({ success: () => { if (this._active) nearby.syncCapabilities(); } }); },
+  openServiceSettings() { if (this._active) wx.navigateTo({ url: '/pages/settings/index' }); },
   dismiss() { if (this._active) nearby.dismissReminder(); },
   toggleSnapshot(event) { this._expanded = this._expanded === event.currentTarget.dataset.id ? null : event.currentTarget.dataset.id; this.syncState(); },
   loadMore() { this._limit += 20; this.syncState(); },

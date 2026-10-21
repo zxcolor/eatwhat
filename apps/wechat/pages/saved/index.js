@@ -2,7 +2,7 @@ const service = require('../../lib/service');
 const saved = require('../../lib/saved');
 
 Page({
-  data: { themeClass: '', section: 'FAVORITES', sectionLabel: '收藏', sections: [], rows: [], busy: false, enabled: false, signedIn: false, hasMore: false, loaded: false, notice: '', error: '', detail: null },
+  data: { themeClass: '', section: 'FAVORITES', sectionLabel: '收藏', sections: [], rows: [], busy: false, enabled: false, signedIn: false, hasMore: false, loaded: false, notice: '', error: '', detail: null, detailContent: null },
   onLoad(options) { this._generation = 0; this._detailId = null; if (Object.hasOwn(saved.SECTIONS, options.section)) this.setData({ section: options.section, sectionLabel: saved.SECTIONS[options.section] }); },
   onShow() {
     this._visible = true; this._generation += 1;
@@ -13,7 +13,7 @@ Page({
   },
   onHide() { this.leave(); },
   onUnload() { this.leave(); },
-  leave() { this._visible = false; this._generation += 1; this._detailId = null; saved.invalidate(); this.setData({ rows: [], detail: null, busy: false, error: '' }); },
+  leave() { this._visible = false; this._generation += 1; this._detailId = null; saved.invalidate(); this.setData({ rows: [], detail: null, detailContent: null, busy: false, error: '' }); },
   syncState() { this._generation += 1; saved.syncCapabilities(); this.sync(); },
   sync() {
     let state = saved.view(this.data.section);
@@ -24,7 +24,7 @@ Page({
     }
     const detail = this._detailId ? state.rows.find(item => item.id === this._detailId) || null : null;
     if (!detail) this._detailId = null;
-    this.setData({ ...state, detail });
+    this.setData({ ...state, detail, detailContent: detail });
   },
   async run(operation, success) {
     this.sync();
@@ -55,6 +55,8 @@ Page({
     if (!this.data.rows.some(item => item.id === id)) return;
     this._detailId = id; this.sync();
   },
+  // Keep only the existing safe display projection while CSS finishes the exit.
+  // Leaving the page or changing account capabilities clears both projections.
   closeDetail() { this._detailId = null; this.setData({ detail: null }); },
   noop() {},
   move(event) { const id = event.currentTarget.dataset.id; return this.run(() => saved.moveFavorite(id), '已移动收藏'); },

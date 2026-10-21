@@ -1,0 +1,8 @@
+<view class="page canteen-history {{themeClass}} {{reducedMotion ? 'reduce-motion' : ''}}">
+  <view class="history-eyebrow">留在本机的历史选择</view><view class="title">食堂选择记录</view><view class="subtitle">只保存在这台设备，最多 30 条、90 天。</view>
+  <view class="card remember-card"><view class="row"><view class="label">保留本机历史记录</view><switch checked="{{enabled}}" color="#b94a29" bindchange="changeRemember" aria-label="保留本机历史记录，关闭即清除记录"/></view><view class="muted remember-copy">保留旧版已确认的菜品、档口、规格、标价与时间；当前食堂结果不新增记录。关闭即清除，不上传、不关联账号。</view></view>
+  <view wx:if="{{error}}" class="error" role="alert">{{error}}<button wx:if="{{cleanupNeeded}}" class="secondary" bindtap="retryCleanup">关闭记录并重试清理</button><button wx:else class="secondary" bindtap="syncState">重新读取</button></view>
+  <view wx:if="{{!entries.length}}" class="card empty-records"><view class="empty-symbol">食</view><view class="label">{{enabled ? '暂无保留的历史记录' : '食堂历史记录已关闭'}}</view><view class="muted">当前食堂结果不新增记录，仍可直接决定吃什么。</view><button class="primary" bindtap="openCanteen">去食堂吃什么</button></view>
+  <view wx:for="{{entries}}" wx:key="id" class="card history-entry"><view class="record-time">{{item.time}}</view><view class="record-name">{{item.name}}</view><view class="record-stall">{{item.stallName}}</view><view class="record-price">{{item.priceText}}</view><view wx:if="{{item.weighted}}" class="muted weight-note">称重计价 · 未记录实付总额</view><view wx:else class="muted weight-note">{{item.variantName ? '已选' + item.variantName + ' · ' : ''}}清单标价，非付款记录</view></view>
+  <button wx:if="{{entries.length}}" class="secondary" bindtap="clearRecords">清空食堂选择记录</button>
+</view>

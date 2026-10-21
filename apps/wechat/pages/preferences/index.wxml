@@ -1,0 +1,9 @@
+<view class="page preference-page {{themeClass}} {{reducedMotion ? 'reduce-motion' : ''}}">
+  <view class="preference-title">请选择你的口味</view>
+  <view class="preference-sliders">
+    <taste-slider field="spicyLevel" label="" value="{{spicyValue}}" revision="{{revision}}" min="0" max="6" step="1" labels="{{spicyLevels}}" default-value="{{defaultSpicy}}" disabled="{{busy}}" reduced-motion="{{reducedMotion}}" theme-class="{{themeClass}}" bind:input="onSliderInput" bind:commit="onSliderCommit" bind:reset="onSliderReset" bind:dragstate="onSliderDragState"/>
+    <taste-slider field="flavorIntensity" label="口味轻重 · 0轻—100重" value="{{intensityValue}}" revision="{{revision}}" min="0" max="100" step="1" default-value="{{defaultIntensity}}" disabled="{{busy}}" reduced-motion="{{reducedMotion}}" theme-class="{{themeClass}}" bind:input="onSliderInput" bind:commit="onSliderCommit" bind:reset="onSliderReset" bind:dragstate="onSliderDragState"/>
+  </view>
+  <view wx:if="{{error}}" class="preference-error" role="alert">{{error}}</view>
+  <button wx:if="{{showEnter}}" class="enter-button" bindtap="finish" data-revision="{{revision}}" disabled="{{busy || dragging}}" loading="{{busy}}" hover-class="enter-button-pressed">进入首页</button>
+</view>

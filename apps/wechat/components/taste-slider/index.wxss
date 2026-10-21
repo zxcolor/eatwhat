@@ -1,0 +1,41 @@
+:host { display:block; }
+view, text, button { box-sizing:border-box; }
+.taste-card { --taste-blue:#5b7ef6; --taste-purple:#9258ff; position:relative; padding:16px 16px 10px; border:1px solid #e7e7e9; border-radius:23px; background:#fff; box-shadow:0 1px 3px rgba(37,27,74,.025); color:#302b3b; }
+.taste-heading { display:flex; align-items:center; justify-content:center; min-height:36px; }
+.taste-value { text-align:center; color:var(--taste-blue); font-size:20px; font-weight:600; line-height:28px; letter-spacing:.1px; overflow-wrap:anywhere; }
+.is-ultra .taste-value { color:var(--taste-purple); }
+.flavor-heading { justify-content:space-between; padding:0 4px; }
+.flavor-end { color:#85858a; font-size:13px; font-weight:500; line-height:22px; }
+.flavor-end.is-active { color:var(--taste-purple); animation:flavor-sway 240ms cubic-bezier(.77,0,.175,1) infinite; }
+.taste-control { position:relative; height:58px; margin-top:8px; }
+.taste-rail { position:absolute; top:11px; right:0; left:0; height:36px; overflow:hidden; border-radius:999px; background:#e8e8e9; box-shadow:inset 0 0 0 .5px rgba(0,0,0,.05); pointer-events:none; }
+.taste-fill { position:absolute; left:0; top:0; bottom:0; overflow:hidden; background:var(--taste-blue); border-radius:999px 0 0 999px; }
+.ultra-fill { position:absolute; inset:0; overflow:hidden; background:linear-gradient(100deg,#3934c9 0%,#7045f1 38%,#a263ff 76%,#b478ff 100%); }
+.ultra-glow { position:absolute; inset:-60% -25%; pointer-events:none; }
+.ultra-glow-one { background:radial-gradient(ellipse at 30% 50%,rgba(157,92,255,.8),rgba(157,92,255,0) 62%); animation:ultra-drift-one 6s linear infinite; }
+.ultra-glow-two { background:radial-gradient(ellipse at 80% 65%,rgba(207,140,255,.48),rgba(207,140,255,0) 62%); animation:ultra-drift-two 7.6s linear infinite; }
+.particle-stream { position:absolute; inset:0; overflow:hidden; pointer-events:none; }
+.particle-path { position:absolute; left:0; right:0; height:0; opacity:0; transform:translate3d(100%,0,0); animation-name:particle-flow-left; animation-timing-function:linear; animation-iteration-count:infinite; will-change:transform; }
+.particle-dot { position:absolute; top:0; left:0; border-radius:50%; background:rgba(255,255,255,.72); box-shadow:0 0 5px rgba(255,255,255,.34); transform:translate(-50%,-50%); }
+.tick-rail { position:absolute; top:50%; right:21px; left:21px; height:0; pointer-events:none; }
+.tick-position { position:absolute; left:0; top:0; width:100%; height:0; }
+.tick-dot { position:absolute; left:-3px; top:-3px; width:6px; height:6px; border-radius:50%; background:#b1b1b4; }
+.taste-travel { position:absolute; top:8px; right:21px; left:21px; height:42px; pointer-events:none; }
+.taste-thumb-position { width:100%; height:42px; }
+.taste-thumb { position:absolute; top:0; left:-21px; width:42px; height:42px; overflow:hidden; border:1px solid rgba(88,77,107,.18); border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(46,30,81,.1); transform:scale(1); transition:transform var(--taste-press) cubic-bezier(.23,1,.32,1); }
+.taste-thumb-light { position:absolute; inset:1px; border-radius:50%; background:linear-gradient(165deg,#fff 0%,#fff 50%,#faf9fc 100%); }
+/* The native slider handles touch and accessibility; this layer owns the look. */
+.taste-native { position:absolute; z-index:2; top:0; right:7px; left:7px; height:58px; margin:0; padding:0; opacity:.01; }
+.is-dragging .taste-thumb { transform:scale(1.035); }
+.is-disabled { opacity:.52; }
+.theme-dark.taste-card { background:#2e2936; border-color:#47404f; box-shadow:0 1px 3px rgba(0,0,0,.08); }
+.theme-dark .flavor-end { color:#aaa0b8; }.theme-dark .flavor-end.is-active { color:#bb9af8; }
+.theme-dark .taste-rail { background:#4b4751; }.theme-dark .tick-dot { background:#817b8b; }
+.is-hidden .particle-path,.is-hidden .ultra-glow { animation-play-state:paused; }
+.reduce-motion .particle-path,.reduce-motion .ultra-glow,.reduce-motion .flavor-end { animation:none; }
+.reduce-motion .particle-path { opacity:0; }.reduce-motion .taste-thumb { transition:none; }.reduce-motion.is-dragging .taste-thumb { transform:none; }
+@keyframes particle-flow-left { 0% { opacity:0; transform:translate3d(100%,0,0); } 8% { opacity:1; } 92% { opacity:1; } 100% { opacity:0; transform:translate3d(0,0,0); } }
+@keyframes flavor-sway { 0%,100% { transform:translateX(0); } 25% { transform:translateX(-2px); } 75% { transform:translateX(2px); } }
+@keyframes ultra-drift-one { 0%,100% { transform:translate3d(-5%,0,0); opacity:.45; } 50% { transform:translate3d(7%,8%,0); opacity:.85; } }
+@keyframes ultra-drift-two { 0%,100% { transform:translate3d(6%,5%,0); opacity:.65; } 50% { transform:translate3d(-7%,-5%,0); opacity:.3; } }
+@media (prefers-reduced-motion:reduce) { .particle-path,.ultra-glow,.flavor-end { animation:none; }.particle-path { opacity:0; }.taste-thumb { transition:none; }.is-dragging .taste-thumb { transform:none; } }

@@ -1,6 +1,9 @@
 {
   "pages": [
+    "pages/preferences/index",
     "pages/index/index",
+    "pages/canteen/index",
+    "pages/canteen-records/index",
     "pages/location/index",
     "pages/conditions/index",
     "pages/results/index",
@@ -16,8 +19,8 @@
   "window": {
     "navigationBarTextStyle": "black",
     "navigationBarTitleText": "吃什么",
-    "navigationBarBackgroundColor": "#f3f3f8",
-    "backgroundColor": "#f3f3f8"
+    "navigationBarBackgroundColor": "#F7F6F2",
+    "backgroundColor": "#F7F6F2"
   },
   "darkmode": true,
   "themeLocation": "theme.json",

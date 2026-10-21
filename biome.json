@@ -13,6 +13,10 @@
   },
   "overrides": [
     {
+      "includes": ["apps/wechat/lib/decision/vendor/jsbi.js"],
+      "linter": { "enabled": false }
+    },
+    {
       "includes": ["apps/api/**/*.ts"],
       "linter": {
         "rules": {

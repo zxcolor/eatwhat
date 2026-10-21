@@ -9,12 +9,14 @@ function harness(name) {
   const calls = [];
   let definition;
   let listener;
-  const service = { state: { consent: true } };
+  const service = { state: { consent: true, status: 'ready' } };
   const records = { list: () => [{ recordedAtEpochMillis: 2000000000000, mealPeriod: 'LUNCH', decisionMode: 'QUICK', budgetMaxYuan: null, availableMinutes: 60, travelMode: 'WALK', resultCount: 3 }], clear: () => { calls.push({ type: 'clear-records' }); } };
   const nearby = {
     RETENTION_MS: 90 * 86400000,
     state: { enabled: false, available: true, phase: 'IDLE', count: 0, attempt: 0, message: '' },
     listSnapshots: () => [], subscribe(callback) { listener = callback; return () => { listener = null; }; },
+    async open() { calls.push({ type: 'open' }); },
+    stop() { calls.push({ type: 'stop' }); },
     async setEnabled(value) { calls.push({ type: 'enabled', value }); },
     async retry() { calls.push({ type: 'retry' }); },
     syncCapabilities() { calls.push({ type: 'configure' }); },
@@ -57,7 +59,7 @@ test('history page clear uses explicit confirmation and privacy loss clears disp
 test('nearby page mount does not locate or opt in and stale opt-in confirmation is ignored', async () => {
   const h = harness('nearby');
   h.page.onShow();
-  assert.equal(h.calls.length, 0);
+  assert.deepEqual(h.calls, [{ type: 'open' }]);
   h.page.enableCollection();
   const modal = h.calls.find(call => call.type === 'modal');
   assert.equal(modal.content.includes('位置和精度'), true);

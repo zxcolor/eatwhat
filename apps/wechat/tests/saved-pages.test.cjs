@@ -32,17 +32,25 @@ function harness(name, options = {}) {
   } };
   const client = savedModule.createSavedClient(service, account);
   const saved = { ...savedModule, ...client };
+  const virtualState = {status:'recommended',revision:1,current:{id:'virtual-meal',revision:1,name:'合成套餐',restaurantName:'合成小馆',mealName:'合成午餐',priceText:'¥28',distanceText:'100 单位',factsSummary:['米饭与时蔬'],reasons:['满足本次条件'],uncertainties:[]}};
+  let rendered = false;
+  const decision = {
+    getState: () => clone(virtualState),
+    resolve(id,revision) { return virtualState.current && id === virtualState.current.id && revision === virtualState.revision ? clone(virtualState.current) : null; },
+    markRendered(binding) { if (this.resolve(binding.candidateId,binding.revision)) rendered = true; },
+    confirm(binding) { assert.ok(rendered); assert.ok(this.resolve(binding.candidateId,binding.revision)); events.push({type:'VIRTUAL_CONFIRM',...clone(binding)});virtualState.status='confirmed';return clone(virtualState); },
+  };
   let definition;
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'pages', name, 'index.js'), 'utf8'), {
-    require(id) { if (id === '../../lib/service') return service; if (id === '../../lib/saved') return saved; throw new Error(`Unexpected module ${id}`); },
+    require(id) { if (id === '../../lib/service') return service; if (id === '../../lib/saved') return saved; if (id === '../../lib/decision/service') return decision; throw new Error(`Unexpected module ${id}`); },
     Page(value) { definition = value; },
     wx: new Proxy({}, { get(_target, property) { if (/storage/i.test(property)) throw new Error('Storage must not be used'); return value => { wxCalls.push({ type: property, value }); }; } }),
-    getApp: () => ({ syncPage(page) { page.setData({ themeClass: 'theme-dark' }); } }),
+    getApp: () => ({ ensureTasteProfile() { return true; }, syncPage(page) { page.setData({ themeClass: 'theme-dark' }); } }),
     getCurrentPages: () => [{ route: `pages/${name}/index` }], Date, Number, Object,
   });
-  const page = { ...definition, data: clone(definition.data), setData(value) { Object.assign(this.data, clone(value)); } };
-  page.onLoad({ section: options.section || 'FAVORITES', index: '0' });
-  return { page, calls, wxCalls, auth, state, client, result, events };
+  const page = { ...definition, data: clone(definition.data), setData(value,callback) { Object.assign(this.data, clone(value)); if (callback) callback(); } };
+  page.onLoad({ section: options.section || 'FAVORITES', id:'virtual-meal', revision:'1' });
+  return { page, calls, wxCalls, auth, state, client, result, events, virtualState };
 }
 function noSecrets(page) { const value = JSON.stringify(page.data); assert.equal(/resultToken|latitude|longitude|accessToken|refreshToken|nextCursor/.test(value), false); assert.equal(value.includes(TOKEN), false); assert.equal(value.includes(CURSOR), false); }
 function lastModal(f) { return f.wxCalls.filter(call => call.type === 'showModal').at(-1).value; }
@@ -113,39 +121,30 @@ test('capability change clears an open saved detail and previous section data', 
   assert.equal(f.page.data.detail, null); assert.deepEqual(f.page.data.rows, []); assert.equal(f.page.data.enabled, false);
 });
 
-test('detail keeps LIVE persistence disabled while preserving authorized navigation and phone behavior', () => {
+test('virtual detail never inherits online navigation or account persistence capabilities', () => {
   const f = harness('detail', { rights: 'LIVE_DISPLAY_ONLY' }); f.page.onShow();
-  assert.equal(f.page.data.canFavorite, false); assert.equal(f.page.data.canFeedback, false);
-  f.page.saveFavorite(); f.page.feedback({ currentTarget: { dataset: { type: 'LIKE' } } });
+  assert.equal(f.page.data.current, true);
+  for (const method of ['saveFavorite','feedback','navigate','call','copyAddress']) assert.equal(f.page[method],undefined);
   assert.equal(f.calls.length, 0); assert.equal(f.wxCalls.some(call => call.type === 'showActionSheet'), false);
-  f.page.navigate(); const map = f.wxCalls.find(call => call.type === 'openLocation'); map.value.success();
-  f.page.call(); const phone = f.wxCalls.find(call => call.type === 'makePhoneCall'); phone.value.success();
-  assert.deepEqual(f.events.map(event => event.type), ['NAVIGATION', 'CALL']); assert.equal(f.events[0].response, f.state.results); noSecrets(f.page);
+  assert.equal(f.wxCalls.some(call=>['openLocation','makePhoneCall','setClipboardData'].includes(call.type)),false);noSecrets(f.page);
 });
 
-test('detail licensed favorite selection and private feedback submit once without exposing result references', async () => {
-  const f = harness('detail'); f.page.onShow(); f.page.saveFavorite();
-  f.wxCalls.find(call => call.type === 'showActionSheet').value.success({ tapIndex: 1 }); await tick();
-  assert.equal(f.calls[0].request.data.group, 'REGULAR'); assert.equal(f.page.data.favoriteSaved, true);
-  f.page.saveFavorite(); assert.equal(f.calls.length, 1);
-  await f.page.feedback({ currentTarget: { dataset: { type: 'LIKE' } } });
-  await f.page.feedback({ currentTarget: { dataset: { type: 'LIKE' } } });
-  assert.equal(f.calls.length, 2); assert.equal(f.page.data.feedbackTypes.find(item => item.type === 'LIKE').submitted, true); noSecrets(f.page);
+test('virtual detail confirmation remains an in-memory choice even with licensed online capabilities', () => {
+  const f = harness('detail'); f.page.onShow(); f.page.confirm(); f.page.confirm();
+  assert.equal(f.calls.length,0);assert.equal(f.events.length,1);assert.equal(f.events[0].type,'VIRTUAL_CONFIRM');
+  assert.equal(f.page.data.confirmed,true);noSecrets(f.page);
 });
 
-test('detail action-sheet and in-flight save responses cannot restore an invalidated result', async () => {
-  const pending = deferred(); const f = harness('detail', { handler: () => pending.promise }); f.page.onShow();
-  f.page.saveFavorite(); const sheet = f.wxCalls.find(call => call.type === 'showActionSheet').value;
-  f.auth.authenticationRevision += 1; sheet.success({ tapIndex: 0 }); await tick(); assert.equal(f.calls.length, 0);
-  f.page.sync(); const operation = f.page.feedback({ currentTarget: { dataset: { type: 'LIKE' } } }); await tick();
-  f.state.epoch += 1; f.state.results = null; f.page.syncState(); pending.resolve(feedback()); await operation;
-  assert.equal(f.page.data.result, null); assert.equal(f.page.data.canFeedback, false); assert.equal(f.page.data.feedbackTypes.length, 0); noSecrets(f.page);
+test('virtual detail replacement invalidates confirmation without touching account state', () => {
+  const f=harness('detail');f.page.onShow();const authBefore=clone(f.auth);
+  f.virtualState.revision+=1;f.virtualState.current=null;f.page.syncState();f.page.confirm();
+  assert.equal(f.page.data.result,null);assert.equal(f.events.length,0);assert.equal(f.calls.length,0);assert.deepEqual(f.auth,authBefore);noSecrets(f.page);
 });
 
-test('detail platform failure callbacks do not update an already hidden page', () => {
-  const f = harness('detail'); f.page.onShow(); f.page.navigate(); f.page.call(); f.page.copyAddress(); f.page.onHide();
-  for (const call of f.wxCalls.filter(item => ['openLocation', 'makePhoneCall', 'setClipboardData'].includes(item.type))) call.value.fail();
-  assert.equal(f.page.data.error, '');
+test('hidden virtual detail rejects confirmation and emits no platform actions', () => {
+  const f = harness('detail'); f.page.onShow();f.page.onHide();f.page.confirm();
+  assert.equal(f.events.length,0);assert.equal(f.calls.length,0);assert.equal(f.page.data.error,'');
+  assert.equal(f.wxCalls.some(call=>['openLocation','makePhoneCall','setClipboardData','showActionSheet'].includes(call.type)),false);
 });
 
 test('saved and detail templates expose no share actions and only registered handlers', () => {

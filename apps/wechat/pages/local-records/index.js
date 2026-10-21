@@ -8,7 +8,7 @@ function timeLabel(value) {
   return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 Page({
-  data: { themeClass: '', entries: [], error: '' },
+  data: { themeClass: '', entries: [], consent: false, error: '' },
   onShow() {
     this._active = true;
     this._generation = (this._generation || 0) + 1;
@@ -20,7 +20,8 @@ Page({
   onUnload() { this._active = false; this._generation += 1; },
   syncState() {
     if (!this._active) return;
-    if (!service.state.consent) { this.setData({ entries: [] }); return; }
+    this.setData({ consent: service.state.consent === true });
+    if (!service.state.consent) { this.setData({ entries: [], error: '' }); return; }
     try {
       this.setData({ error: '', entries: records.list().map((entry, index) => ({
         id: index, title: `${timeLabel(entry.recordedAtEpochMillis)} · ${MEALS[entry.mealPeriod]}`,

@@ -1,28 +1,40 @@
-<view class="page {{themeClass}}">
+<view class="page utility-page settings-page {{themeClass}} {{reducedMotion ? 'reduce-motion' : ''}}">
+  <view class="page-eyebrow">按你的习惯</view>
   <view class="title">设置</view>
-  <view class="subtitle">让吃什么，保持你喜欢的样子。</view>
+  <view class="subtitle">偏好、外观与隐私，都由你掌握。</view>
+  <view class="settings-label">你的偏好</view>
+  <view class="card"><view class="row"><view class="section-title">MiMo食堂决策</view><switch checked="{{mimoEnabled}}" disabled="{{busy}}" color="#9258ff" bindchange="changeMimo" aria-label="MiMo食堂决策"/></view><view class="muted">单独同意后，将两项口味偏好交由小米MiMo提出菜单建议。关闭后使用本机规则；虚拟地图仍在本机决定。</view></view>
+  <view class="card preference-settings">
+    <view class="row"><view class="section-title">口味偏好</view><text class="setting-state {{tasteReady ? 'success-state' : ''}}">{{tasteReady ? '已确认' : '待完成'}}</text></view>
+    <view class="muted">{{tasteReady ? '已保存你确认的辣度与口味轻重。' : tasteStarted ? '还有未完成的选择，确认前不会进入决策首页。' : '先选择辣度与口味轻重，再进入首页。'}}只保存在这台设备。</view>
+    <button class="secondary" hover-class="utility-pressed" bindtap="editTaste">{{tasteReady ? '修改口味偏好' : '继续口味选择'}}</button>
+  </view>
+  <view class="settings-label">使用体验</view>
   <view class="card">
     <view class="section-title">外观</view>
     <view class="chips theme-options">
-      <button class="chip {{theme === 'system' ? 'selected' : ''}}" data-theme="system" bindtap="changeTheme">跟随系统</button>
-      <button class="chip {{theme === 'light' ? 'selected' : ''}}" data-theme="light" bindtap="changeTheme">浅色</button>
-      <button class="chip {{theme === 'dark' ? 'selected' : ''}}" data-theme="dark" bindtap="changeTheme">深色</button>
+      <button class="chip theme-option {{theme === 'system' ? 'selected' : ''}}" hover-class="utility-pressed" data-theme="system" bindtap="changeTheme" aria-label="跟随系统{{theme === 'system' ? '，已选' : ''}}"><view class="theme-swatch swatch-system"><view/></view><text>跟随系统</text><text class="theme-check" aria-hidden="true">✓</text></button>
+      <button class="chip theme-option {{theme === 'light' ? 'selected' : ''}}" hover-class="utility-pressed" data-theme="light" bindtap="changeTheme" aria-label="浅色{{theme === 'light' ? '，已选' : ''}}"><view class="theme-swatch swatch-light"><view/></view><text>浅色</text><text class="theme-check" aria-hidden="true">✓</text></button>
+      <button class="chip theme-option {{theme === 'dark' ? 'selected' : ''}}" hover-class="utility-pressed" data-theme="dark" bindtap="changeTheme" aria-label="深色{{theme === 'dark' ? '，已选' : ''}}"><view class="theme-swatch swatch-dark"><view/></view><text>深色</text><text class="theme-check" aria-hidden="true">✓</text></button>
     </view>
+    <view class="motion-setting"><view class="motion-copy"><view class="label">减少动态效果</view><view class="setting-hint">减少位移、回弹与扩散效果。</view></view><view class="motion-toggle" hover-class="motion-pressed" hover-start-time="0" hover-stay-time="80"><switch checked="{{reducedMotion}}" bindchange="changeReducedMotion" color="#b94a29" aria-label="减少动态效果"/></view></view>
   </view>
   <view class="card">
-    <view class="section-title">服务状态</view>
-    <view class="muted setting-description">{{statusLabel}}</view>
-    <button class="secondary" loading="{{busy}}" disabled="{{busy || !consent}}" bindtap="refreshService">重新检查服务</button>
-    <view wx:if="{{!consent}}" class="muted">请先在首页阅读并同意隐私说明。</view>
-    <view wx:if="{{error}}" class="error">{{error}}</view>
+    <view class="row"><view class="section-title">账号服务</view><text class="service-state {{serviceReady && !busy ? 'success-state' : ''}}">{{busy ? '正在检查' : statusLabel}}</text></view>
+    <view class="muted setting-description">账号与记录功能的连接状态。</view>
+    <button class="secondary" hover-class="utility-pressed" loading="{{busy}}" disabled="{{busy || !consent}}" bindtap="refreshService">{{busy ? '正在检查服务' : '重新检查服务'}}</button>
+    <view wx:if="{{!consent}}" class="setting-hint">请先到“个人”阅读并同意隐私说明。</view>
+    <view wx:if="{{error}}" class="error" role="alert">{{error}}</view>
   </view>
+  <view class="settings-label">隐私与本机数据</view>
   <view class="card">
     <view class="section-title">隐私</view>
-    <button class="secondary" bindtap="openPrivacy">查看隐私说明</button>
-    <button wx:if="{{consent}}" class="secondary" bindtap="withdrawConsent">撤回隐私同意</button>
-    <view class="muted">撤回同意将停止服务请求，并清除本次状态与本机决策、附近缓存。</view>
+    <button class="settings-row" hover-class="utility-pressed" bindtap="openPrivacy"><text>查看隐私说明</text><text class="row-arrow">›</text></button>
+    <view class="setting-hint">你的口味偏好仅保存在这台设备。</view>
   </view>
-  <view class="card"><view class="section-title">本机数据</view><button class="secondary" data-page="local-records" bindtap="open">最近决策与清理</button><button class="secondary" data-page="nearby" bindtap="open">附近餐厅缓存</button><view wx:if="{{localDataError}}" class="error">{{localDataError}}<button class="secondary" bindtap="retryCleanup">撤回同意并重试清理</button></view></view>
-  <view class="card"><view class="section-title">帮助</view><button class="secondary" data-page="support" bindtap="open">问题反馈</button></view>
-  <view class="card"><view class="row"><text class="label">吃什么 · 微信小程序</text><text class="muted">{{version}}</text></view><view class="muted setting-description">从零构建中的开发版本。</view></view>
+  <view class="card"><view class="section-title">本机数据</view><button class="settings-row" hover-class="utility-pressed" data-page="local-records" bindtap="open"><text>最近决策与清理</text><text class="row-arrow">›</text></button><button class="settings-row" hover-class="utility-pressed" data-page="nearby" bindtap="open"><text>附近餐厅缓存</text><text class="row-arrow">›</text></button><view wx:if="{{localDataError}}" class="error" role="alert">{{localDataError}}<button class="secondary" hover-class="utility-pressed" bindtap="retryCleanup">撤回同意并重试清理</button></view></view>
+  <view class="card"><button class="settings-row" hover-class="utility-pressed" data-page="canteen-records" bindtap="open"><text>食堂选择记录与清理</text><text class="row-arrow">›</text></button></view>
+  <view class="card"><button class="settings-row" hover-class="utility-pressed" data-page="support" bindtap="open"><text>问题反馈</text><text class="row-arrow">›</text></button></view>
+  <view wx:if="{{tasteReady || tasteStarted || consent}}" class="reset-section"><view class="settings-label">重置与撤回</view><button wx:if="{{tasteReady || tasteStarted}}" class="reset-button" hover-class="utility-pressed" bindtap="clearTaste">清除偏好并重新选择</button><button wx:if="{{consent}}" class="reset-button" hover-class="utility-pressed" bindtap="withdrawConsent">撤回隐私同意</button><view class="setting-hint">撤回同意将停止服务请求，并清除本次状态、口味偏好与本机决策、附近缓存。</view></view>
+  <view class="settings-footer"><view>吃什么 · 微信小程序</view><text>{{version}} · 开发版本</text></view>
 </view>

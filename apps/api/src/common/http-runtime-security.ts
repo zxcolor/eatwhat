@@ -53,6 +53,7 @@ interface HttpRuntimeSecurityConfig {
 }
 
 const JSON_POST_PATHS = new Set([
+	"/v1/canteen/decisions",
 	"/v1/account/export",
 	"/v1/auth/email/request-code",
 	"/v1/auth/identities",

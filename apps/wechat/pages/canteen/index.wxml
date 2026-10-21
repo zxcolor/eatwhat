@@ -1,0 +1,19 @@
+<view class="page canteen-page {{themeClass}} {{reducedMotion ? 'reduce-motion' : ''}}">
+  <view wx:for="{{cards}}" wx:key="slot" class="result-paper result-{{motionPhase}}" style="{{motionStyle}}" aria-live="polite">
+    <view class="paper-header result-part"><text class="stall-label">档口</text><text class="stall-name">{{item.stallName}}</text></view>
+    <view class="dish-name result-part">{{item.name}}</view>
+    <view class="paper-seam" aria-hidden="true"><view class="paper-notch notch-left"/><view class="paper-notch notch-right"/></view>
+    <view class="price-block result-part">
+      <view class="price-caption">菜单标价</view>
+      <view wx:if="{{item.priceNumber}}" class="fixed-price" aria-label="{{item.originalPriceText}}"><text class="price-number">{{item.priceNumber}}</text><text class="price-suffix">{{item.priceSuffix}}</text></view>
+      <view wx:else class="price-full">{{item.originalPriceText}}</view>
+      <view wx:if="{{item.priceKind === 'weight'}}" class="muted weight-copy">“均价14”为清单参考值，实付按所选重量计算。</view>
+      <view wx:for="{{item.notes}}" wx:for-item="note" wx:key="*this" class="muted dish-note">{{note}}</view>
+      <view wx:if="{{decisionSource}}" class="decision-source">{{decisionSource}}</view>
+      <view wx:if="{{decisionNote}}" class="muted dish-note">{{decisionNote}}</view>
+    </view>
+  </view>
+  <view wx:if="{{status === 'empty'}}" class="muted empty-copy">暂无可选菜品，可返回首页调整偏好。</view>
+  <view wx:if="{{error}}" class="error" role="alert">{{error}}</view>
+  <button class="primary decision-button" bindtap="decide" data-revision="{{revision}}" disabled="{{busy || status === 'empty'}}">{{decisionLabel}}</button>
+</view>

@@ -186,7 +186,21 @@ declare -a deployment_names=(
   WECHAT_MINIPROGRAM_AUTH_ENABLED
   WECHAT_OPEN_PLATFORM_REALM_ID
 )
+# Only these new non-secret settings are optional for pre-MiMo bundles. All
+# pre-existing required keys and rejection of arbitrary keys remain unchanged.
+for mimo_setting in MIMO_ENABLED MIMO_MODEL MIMO_TIMEOUT_MS MIMO_MAX_CALLS_PER_MINUTE MIMO_MAX_CONCURRENCY; do
+  if grep -Eq "^${mimo_setting}=" "$deployment_env"; then deployment_names+=("$mimo_setting"); fi
+done
 assert_exact_env_keys "$deployment_env" "${deployment_names[@]}"
+read_mimo_setting() {
+  if grep -Eq "^${1}=" "$deployment_env"; then read_deployment_value "$1"; else printf '%s' "$2"; fi
+}
+mimo_enabled="$(read_mimo_setting MIMO_ENABLED false)"
+mimo_model="$(read_mimo_setting MIMO_MODEL mimo-v2.6-flash)"
+mimo_timeout_ms="$(read_mimo_setting MIMO_TIMEOUT_MS 8000)"
+mimo_calls_per_minute="$(read_mimo_setting MIMO_MAX_CALLS_PER_MINUTE 30)"
+mimo_concurrency="$(read_mimo_setting MIMO_MAX_CONCURRENCY 4)"
+[[ "$mimo_enabled" == 'true' || "$mimo_enabled" == 'false' ]] || die 'MIMO_ENABLED must be true or false'
 
 compose_project_name="$(read_deployment_value COMPOSE_PROJECT_NAME)"
 shared_state_directory="$(read_deployment_value SHARED_STATE_DIRECTORY)"
@@ -396,6 +410,10 @@ assert_regular_file "$secrets_dir/postgres/server.key" 600 "${postgres_identity%
 assert_exact_env_keys "$secrets_dir/migration.env" DATABASE_MIGRATION_URL DATABASE_MIGRATION_SSL_CA_BASE64
 assert_exact_env_keys "$secrets_dir/maintenance.env" DATABASE_MAINTENANCE_URL DATABASE_MAINTENANCE_SSL_CA_BASE64
 declare -a api_env_names=(DATABASE_URL DATABASE_SSL_CA_BASE64)
+mimo_field_count="$(count_present_env_keys "$secrets_dir/api.env" MIMO_API_KEY)"
+if [[ "$mimo_enabled" == 'true' && "$mimo_field_count" -ne 1 ]]; then die 'MiMo requires MIMO_API_KEY in api.env'; fi
+# Keeping an unused MiMo key allows switching this feature off reversibly.
+if [[ "$mimo_field_count" -eq 1 ]]; then api_env_names+=(MIMO_API_KEY); fi
 if [[ "$amap_enabled" == 'true' ]]; then
   api_env_names+=(
     AMAP_WEB_SERVICE_KEY AMAP_WEB_SERVICE_SIGNATURE_PRIVATE_KEY AMAP_IP_WHITELIST_CONFIGURED
@@ -532,6 +550,11 @@ if ! docker run --rm --network none --read-only \
   --cap-drop ALL --security-opt no-new-privileges:true \
   --env-file "$secrets_dir/api.env" \
   --env AUTH_SCHEMA_TRANSITION_MODE="$auth_schema_transition_mode" \
+  --env MIMO_ENABLED="$mimo_enabled" \
+  --env MIMO_MODEL="$mimo_model" \
+  --env MIMO_TIMEOUT_MS="$mimo_timeout_ms" \
+  --env MIMO_MAX_CALLS_PER_MINUTE="$mimo_calls_per_minute" \
+  --env MIMO_MAX_CONCURRENCY="$mimo_concurrency" \
   --env ACCOUNTS_ENABLED="$accounts_enabled" \
   --env PHONE_AUTH_ENABLED="$phone_auth_enabled" \
   --env EMAIL_AUTH_ENABLED="$email_auth_enabled" \
@@ -545,6 +568,8 @@ if ! docker run --rm --network none --read-only \
   --env ALIYUN_CREDENTIAL_ALLOWED_PROVIDER=default/ecs_ram_role \
   --entrypoint node "$api_image" --input-type=module --eval '
     const { loadAuthRuntimeConfig } = await import("./dist/auth/auth-config.js");
+    const { loadCanteenMimoConfig } = await import("./dist/canteen/canteen-mimo.config.js");
+    loadCanteenMimoConfig(process.env);
     const enabled = process.env.ACCOUNTS_ENABLED === "true";
     const config = loadAuthRuntimeConfig(process.env, {
       accountsEnabled: enabled,

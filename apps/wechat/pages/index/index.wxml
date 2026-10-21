@@ -1,47 +1,71 @@
-<view class="shell {{themeClass}}">
+<page-meta page-style="{{decisionOpen || filterOpen ? 'overflow:hidden;' : ''}}"/>
+<view wx:if="{{preferenceReady}}" class="shell decision-shell {{themeClass}} {{reducedMotion ? 'motion-reduced' : ''}}">
   <view class="home-content" wx:if="{{tab === 0}}">
-    <view class="home-title">今天中午吃什么</view>
-    <button class="location" bindtap="open" data-page="location" aria-label="选择位置">
-      <image src="/assets/location.svg" class="location-icon"/><text>{{city}}</text><text class="chevron">⌄</text>
+    <view class="home-eyebrow"><view class="eyebrow-dot"/> 吃什么 · 每一餐，都简单一点</view>
+    <view class="home-title">今天吃什么？</view>
+    <button class="location" bindtap="open" data-page="location" aria-label="打开虚拟地图">
+      <image src="/assets/location.svg" class="location-icon"/><text class="location-name">{{city}}</text><text class="location-current">虚拟地点</text><image src="/assets/chevron-down.svg" class="chevron"/>
     </button>
-    <view class="consent-card" wx:if="{{!consent}}">
-      <view class="label">先了解我们如何使用数据</view>
-      <view class="muted consent-copy">定位由你主动选择。最近决策仅保存条件摘要；附近餐厅与位置缓存需要你单独开启。</view>
-      <text class="link policy-link" bindtap="privacy">阅读隐私说明</text>
-      <button class="primary" bindtap="accept">同意并开始</button>
-    </view>
-    <view class="error" wx:elif="{{status === 'loading'}}">正在检查服务…</view>
-    <view class="error" wx:elif="{{status === 'error' || status === 'update-required'}}">
-      <view>{{error || '暂时无法连接服务，请稍后重试。'}}</view>
-      <button class="secondary" bindtap="retry">重新检查</button>
-    </view>
-    <button class="decision-card" bindtap="decide" disabled="{{!consent || status !== 'ready'}}">
-      <image class="dice" src="/assets/dice.svg"/>
-      <text class="decision-title">帮我选</text><text class="decision-subtitle">What to eat？</text>
+    <button class="canteen-entry" data-page="canteen" bindtap="open" hover-class="press-soft" aria-label="食堂吃什么，帮你决定在学校食堂吃什么">
+      <view class="canteen-entry-mark" aria-hidden="true">食</view><view class="canteen-entry-copy"><text class="canteen-entry-title">食堂吃什么</text><text class="canteen-entry-hint">帮你决定在学校食堂吃什么</text></view><text class="canteen-entry-arrow" aria-hidden="true">↗</text>
     </button>
+    <view class="target-switch"><button class="target-option {{target === 'PACKAGE' ? 'selected' : ''}}" data-target="PACKAGE" bindtap="selectTarget">决定套餐</button><button class="target-option {{target === 'RESTAURANT' ? 'selected' : ''}}" data-target="RESTAURANT" bindtap="selectTarget">决定餐厅</button></view>
+    <button class="filter-entry" bindtap="openFilter" hover-class="press-soft" aria-label="调整本次筛选条件"><view class="filter-symbol"><image src="/assets/conditions.svg"/></view><view class="filter-entry-copy"><text class="filter-entry-title">这顿的条件</text><text class="filter-summary">{{filterSummary}}</text></view><text class="filter-change">调整 ›</text></button>
+    <button class="decision-card" bindtap="decide" bindtouchstart="pressDecision" hover-class="decision-card-pressed" hover-start-time="0" hover-stay-time="80">
+      <view wx:if="{{ripple}}" class="tap-ripple" style="left:{{ripple.x}}px;top:{{ripple.y}}px;"/>
+      <view class="decision-card-top"><text>{{confirmedChoice ? '这一餐，已经有答案' : '不用再纠结'}}</text><text class="personalized-label">按本次条件</text></view>
+      <view class="decision-card-main"><view class="decision-copy"><text class="decision-title">{{confirmedChoice ? '看看这一餐的选择' : '帮我决定'}}</text><text class="decision-subtitle">{{target === 'PACKAGE' ? '挑一份合口味的套餐' : '选一家合心意的餐厅'}}</text></view><view class="dice-orbit"><image class="dice" src="/assets/dice.svg"/></view></view>
+      <view class="decision-start"><text>{{confirmedChoice ? '查看本次决定' : '现在给我一个答案'}}</text><text class="start-arrow">→</text></view>
+    </button>
+    <view class="decision-help"><view class="help-check">✓</view><text>不合适就换一家，决定权始终在你</text></view>
+    <view class="candidate-section">
+      <view class="candidate-heading"><view><text class="candidate-title">也可以先看看</text><text class="candidate-count" wx:if="{{candidateCount !== null}}">{{candidateCount}} 个符合条件</text></view><button wx:if="{{previews.length}}" class="compare-toggle" bindtap="toggleCompare">{{compareOpen ? '收起' : '展开比较'}} {{compareOpen ? '−' : '+'}}</button></view>
+      <view wx:if="{{previewError}}" class="preview-empty"><text>{{previewError}}</text><button class="secondary" bindtap="retryPreview">重新读取</button></view>
+      <view wx:elif="{{!previews.length}}" class="preview-empty"><text>{{candidateCount === 0 ? '条件有点严格，调整一下再看看。' : '本轮候选已浏览，可以调整条件。'}}</text><button class="secondary" bindtap="openFilter">调整条件</button></view>
+      <view wx:elif="{{compareOpen}}" class="compare-list">
+        <view wx:for="{{previews}}" wx:key="id" class="compare-card"><view class="preview-illustration"><image src="/assets/meal-placeholder.svg" mode="aspectFit"/></view><view class="compare-copy"><text class="preview-name">{{item.name}}</text><text class="preview-store">{{target === 'PACKAGE' ? item.restaurantName : item.mealName}}</text><view class="preview-meta"><text>{{item.priceText}}</text><text>{{item.distanceText}}</text></view><text class="opening-unknown">营业状态未知 · 餐点示意</text></view></view>
+      </view>
+      <view wx:else class="preview-stack">
+        <view wx:if="{{previews.length > 2}}" class="stack-back stack-back-far"/><view wx:if="{{previews.length > 1}}" class="stack-back"/>
+        <swiper class="candidate-swiper" current="{{previewIndex}}" bindchange="previewChanged" duration="{{reducedMotion ? 0 : 300}}" indicator-dots="{{false}}" circular="{{false}}">
+          <swiper-item wx:for="{{previews}}" wx:key="id"><button class="preview-card" bindtap="toggleCompare" hover-class="press-soft"><view class="preview-illustration"><image src="/assets/meal-placeholder.svg" mode="aspectFit"/></view><view class="preview-copy"><text class="preview-name">{{item.name}}</text><text class="preview-store">{{target === 'PACKAGE' ? item.restaurantName : item.mealName}}</text><view class="preview-meta"><text>{{item.priceText}}</text><text>{{item.distanceText}}</text></view><text class="opening-unknown">营业状态未知 · 餐点示意</text></view></button></swiper-item>
+        </swiper>
+        <view class="preview-pagination"><text>{{previewIndex + 1}} / {{previews.length}}</text><text>左右滑动浏览 · 点击比较</text></view>
+      </view>
+      <view class="home-caption">候选预览按目录排列 · 虚拟场景，不读取真实定位</view>
+    </view>
   </view>
   <view class="tab-content" wx:elif="{{tab === 1}}">
-    <view class="home-title">历史</view>
-    <view class="card records-card">
-      <image class="empty-icon" src="/assets/history.svg"/>
-      <view class="section-title">{{historyEnabled ? '账号记录' : '暂无可查看的历史'}}</view>
+    <view class="home-eyebrow">留住每一次选择</view>
+    <view class="home-title">我的记录</view>
+    <view class="tab-intro">本机摘要与账号记录，在这里分别查看。</view>
+    <button class="canteen-entry" data-page="canteen-records" bindtap="open" hover-class="press-soft"><view class="canteen-entry-mark" aria-hidden="true">食</view><view class="canteen-entry-copy"><text class="canteen-entry-title">食堂选择记录</text><text class="canteen-entry-hint">查看自己确认的菜品与规格</text></view><text class="canteen-entry-arrow" aria-hidden="true">›</text></button>
+    <view class="card records-card"><view class="record-icon-wrap"><image class="empty-icon" src="/assets/history.svg"/></view><view class="record-title">本机最近决策</view><view class="muted">查看这台设备保留的决策摘要。</view><button class="primary" data-page="local-records" bindtap="open">查看本机摘要</button></view>
+    <view class="card account-records">
+      <view class="section-heading"><view class="label">收藏与账号记录</view><text class="status-chip">{{historyEnabled ? '账号服务' : '按服务能力开放'}}</text></view>
       <view class="muted">{{historyMessage}}</view>
-      <button class="secondary" data-page="local-records" bindtap="open">本机最近决策</button>
-      <button class="secondary" data-page="saved" bindtap="open">收藏与账号记录</button>
+      <button class="secondary" data-page="saved" bindtap="open">查看账号记录</button>
     </view>
+    <view class="page-footnote">当前虚拟决定只保留在本轮内存中，不会写入账号历史。</view>
   </view>
   <view class="tab-content" wx:else>
+    <view class="home-eyebrow">你的选择，你来掌握</view>
     <view class="home-title personal-title">个人</view>
+    <button class="personal-card taste-card" data-page="preferences" bindtap="open"><view class="taste-monogram">✓</view><view class="personal-text"><view class="taste-caption">已确认 · 仅存本机</view><view class="label">我的口味偏好</view><view class="muted">让下一餐，更合心意</view></view><text class="arrow">›</text></button>
+    <view class="group-label">用餐与外观</view>
+    <view class="menu-group">
+      <button class="personal-card" data-page="conditions" bindtap="open"><image class="personal-icon" src="/assets/conditions.svg"/><view class="personal-text"><view class="label">本次推荐条件</view><view class="muted">预算、虚拟距离与这顿的取舍</view></view><text class="arrow">›</text></button>
+      <button class="personal-card" data-page="settings" bindtap="open"><image class="personal-icon" src="/assets/settings.svg"/><view class="personal-text"><view class="label">设置</view><view class="muted">主题、隐私与本机数据</view></view><text class="arrow">›</text></button>
+    </view>
+    <view class="group-label">账号与记录</view>
+    <view class="consent-card" wx:if="{{!consent}}"><view class="label">开启账号功能前</view><view class="muted consent-copy">请先阅读隐私说明。当前虚拟推荐可继续使用。</view><text class="link policy-link" bindtap="privacy">阅读隐私说明 ›</text><button class="primary" bindtap="accept">同意隐私说明</button></view>
+    <view class="menu-group">
     <button class="personal-card" data-page="account" bindtap="open">
       <image class="personal-icon" src="/assets/account.svg"/><view class="personal-text"><view class="label">账号与安全</view><view class="muted">登录、账号资料与数据管理</view></view><text class="arrow">›</text>
     </button>
-    <button class="personal-card" data-page="conditions" bindtap="open">
-      <image class="personal-icon" src="/assets/conditions.svg"/><view class="personal-text"><view class="label">本次推荐条件</view><view class="muted">预算、时间、距离与用餐偏好</view></view><text class="arrow">›</text>
-    </button>
-    <button class="personal-card" data-page="settings" bindtap="open">
-      <image class="personal-icon" src="/assets/settings.svg"/><view class="personal-text"><view class="label">设置</view><view class="muted">主题、隐私与偏好设置</view></view><text class="arrow">›</text>
-    </button>
     <button class="personal-card" data-page="saved" bindtap="open"><image class="personal-icon" src="/assets/history.svg"/><view class="personal-text"><view class="label">收藏与账号记录</view><view class="muted">想去、常吃与私有反馈</view></view><text class="arrow">›</text></button>
+    </view>
+    <view class="page-footnote">吃什么 · {{version}}</view>
   </view>
   <view class="dock-wrap">
     <view class="dock">
@@ -51,4 +75,6 @@
       </button>
     </view>
   </view>
+  <filter-sheet id="filter-sheet" visible="{{filterOpen}}" theme-class="{{themeClass}}" reduced-motion="{{reducedMotion}}" bind:close="closeFilter" bind:apply="applyFilters"/>
+  <decision-sheet id="decision-sheet" visible="{{decisionOpen}}" theme-class="{{themeClass}}" reduced-motion="{{reducedMotion}}" reveal-origin="{{revealOrigin}}" source-rect="{{sourceRect}}" bind:close="closeDecision" bind:adjust="openFilter" bind:statechange="decisionChanged"/>
 </view>

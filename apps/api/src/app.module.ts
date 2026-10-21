@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { NearbyRestaurantsModule } from "./nearby-restaurants/nearby-restaurants.module.js";
 import { APP_GUARD } from "@nestjs/core";
 import { AuthModule } from "./auth/auth.module.js";
+import { CanteenDecisionModule } from "./canteen/canteen-decision.module.js";
 import { CommonSecurityModule } from "./common/common-security.module.js";
 import { IpRateLimitGuard } from "./common/ip-rate-limit.guard.js";
 import { AppConfigModule } from "./config/app-config.module.js";
@@ -20,6 +21,7 @@ import { SupportFeedbackModule } from "./support-feedback/support-feedback.modul
 
 @Module({
 	imports: [
+		CanteenDecisionModule,
 		NearbyRestaurantsModule,
 		CommonSecurityModule,
 		AppConfigModule,

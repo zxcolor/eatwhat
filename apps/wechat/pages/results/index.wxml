@@ -1,31 +1,31 @@
-<view class="page {{themeClass}}">
-  <view class="title">{{headline}}</view><view class="subtitle">{{summary}}</view>
-  <view wx:if="{{loading}}" class="card empty"><view class="loading-dot"></view><view class="section-title">正在看看附近有什么</view><view class="muted">根据你本次选择的条件查找，最多展示 3 个候选。</view></view>
-  <block wx:else>
-    <view wx:if="{{error}}" class="error">{{error}}</view>
-    <view wx:if="{{unavailableNotice}}" class="card muted">{{unavailableNotice}}</view>
-    <view wx:if="{{hasResponse && !totalCount}}" class="card empty"><view class="section-title">这次没有找到合适的结果</view><view class="muted">可以增加距离、放宽预算，或换一个出发地点。</view></view>
-    <view wx:if="{{totalCount}}" class="card"><view class="row"><view class="section-title">本次结果筛选</view><text class="muted">{{items.length}} / {{totalCount}} 条</text></view><view class="chips"><button class="chip {{filter.openNowOnly ? 'selected' : ''}}" data-key="openNowOnly" bindtap="toggleFilter">仅营业中</button><button class="chip {{filter.knownPriceOnly ? 'selected' : ''}}" data-key="knownPriceOnly" bindtap="toggleFilter">价格已知且不超预算</button></view><input class="filter-input" value="{{filter.query}}" maxlength="40" placeholder="按菜系标签筛选" bindinput="queryFilter" /><view class="muted">筛选保留来源顺序；未知信息仍显示为未知。</view><button class="secondary" bindtap="clearFilters">清除筛选</button></view>
-    <view wx:if="{{totalCount && !items.length}}" class="card empty"><view class="section-title">没有符合当前筛选的候选</view><view class="muted">清除筛选即可恢复本次结果。</view></view>
-    <view wx:if="{{notice}}" class="card muted">{{notice}}</view>
-    <view wx:if="{{hasResponse && liveOnly}}" class="muted policy-note">保持来源返回顺序，不计算适合度评分。</view>
-    <view wx:if="{{hasResponse && !canOpen}}" class="error">本次结果已失效或数据授权尚未确认。请重新获取后查看详情。</view>
-    <view wx:for="{{items}}" wx:key="index" class="card result-card">
-      <view class="row"><text class="candidate-number">候选 {{item.rank}}</text><text class="muted">{{item.mode}}</text></view>
-      <view class="restaurant-name">{{item.name}}</view>
-      <view class="facts"><text>{{item.price}}</text><text>{{item.distance}}</text><text>约 {{item.travel}}</text></view>
-      <view class="chips"><text class="chip">{{item.openLabel}}</text><text wx:if="{{item.sourceRating}}" class="chip">来源评分 {{item.sourceRating}}</text><text wx:if="{{item.fitLabel}}" class="chip">{{item.fitLabel}}</text></view>
-      <view wx:if="{{item.address}}" class="muted address">{{item.address}}</view>
-      <view class="reasons"><view wx:for="{{item.reasons}}" wx:for-item="reason" wx:key="code" class="reason">{{reason.text}}</view></view>
-      <view wx:for="{{item.warnings}}" wx:for-item="warning" wx:key="*this" class="muted warning">{{warning}}</view>
-      <view class="muted source">数据来源：{{item.sourceAttribution}}</view>
-      <button class="secondary" data-index="{{item.index}}" bindtap="detail" disabled="{{!canOpen}}">查看详情</button>
+<view wx:if="{{preferenceReady}}" class="page decision-page {{themeClass}}">
+  <view class="page-heading"><view class="virtual-badge">虚拟体验 · {{target === 'PACKAGE' ? '一份套餐' : '一家餐厅'}}</view><view class="title">{{current ? (confirmed ? '这顿，决定好了' : '这顿就吃这个') : '这次决定'}}</view></view>
+  <view wx:if="{{error}}" class="error" aria-live="polite">{{error}}</view>
+  <block wx:if="{{current}}">
+    <view class="single-result">
+      <view class="meal-art" aria-label="虚拟餐点示意，具体配料和分量未知"><view class="art-ring"/><view class="art-plate"><view class="art-rice"/><view class="art-main"/><view class="art-greens"/></view><view class="art-caption">餐点示意 · 非实物照片</view></view>
+      <view class="result-body">
+        <view class="pick-row"><view class="pick-label">{{target === 'PACKAGE' ? '替你选好的一份' : '替你选好的一家'}}</view><view wx:if="{{confirmed}}" class="chosen-label">✓ 已选定</view></view>
+        <view class="result-name">{{current.name}}</view>
+        <view class="restaurant">{{target === 'PACKAGE' ? current.restaurantName : current.mealName}}</view>
+        <view class="result-facts"><view class="fact"><view class="fact-label">{{target === 'PACKAGE' ? '虚拟套餐价' : '本次最低已知虚拟套餐价'}}</view><view class="price">{{current.priceText}}</view></view><view class="fact distance-fact"><view class="fact-label">从所选虚拟地点出发</view><view class="distance">{{current.distanceText}}</view></view></view>
+        <view wx:if="{{briefReason}}" class="brief-reason"><text class="reason-mark">✓</text><text>{{briefReason}}</text></view>
+        <view class="unknown-summary"><view class="uncertainty">营业状态未知</view><view wx:for="{{current.uncertainties}}" wx:key="*this" class="uncertainty">{{item}}</view><view wx:if="{{!current.uncertainties.length}}" class="uncertainty">具体配料、分量和营养未知</view></view>
+        <button class="detail-link" data-id="{{current.id}}" data-revision="{{current.revision}}" bindtap="detail" hover-class="quiet-pressed"><text>查看{{target === 'PACKAGE' ? '这份套餐' : '这家餐厅'}}详情</text><text>›</text></button>
+      </view>
     </view>
-    <view wx:if="{{hasResponse}}" class="card">
-      <view class="row" bindtap="toggleWhy"><view class="section-title">为什么是这些候选</view><text class="muted">{{showWhy ? '收起 −' : '展开 +'}}</text></view>
-      <view wx:if="{{showWhy}}" class="why muted"><view>服务依据本次地点、餐次、预算、可用时间、交通方式和排除条件获取候选。</view><view wx:if="{{liveOnly}}">实时展示模式保留数据来源顺序，不在客户端重新排序；相同条件再次请求可能得到相同结果。</view><view>价格、营业状态和到店时间可能变化，请以商户实际情况为准。</view><view wx:if="{{profileLabel}}">推荐规则：{{profileLabel}}</view></view>
+    <view wx:if="{{confirmed}}" class="confirmation" aria-live="polite"><view class="confirmation-title">这次选择已记下</view><view>仅记录本次虚拟决定，不是已吃记录，也不会产生真实订单。</view></view>
+    <view class="decision-context"><view class="context-row"><button class="context-location" bindtap="location" hover-class="quiet-pressed"><view class="context-label">虚拟地点</view><view>{{originLabel}} ⌄</view></button><button class="context-adjust" bindtap="adjust" hover-class="quiet-pressed">调整条件</button></view><view wx:if="{{summary}}" class="condition-summary">{{summary}}</view></view>
+    <view class="why-section">
+      <button class="why-toggle" bindtap="toggleWhy" hover-class="quiet-pressed"><text>{{showWhy ? '收起推荐依据' : '为什么选它'}}</text><text class="toggle-mark">{{showWhy ? '−' : '+'}}</text></button>
+      <view wx:if="{{showWhy}}" class="why-content"><view class="why-label">已知的模拟信息</view><view wx:if="{{current.roleText}}" class="why-line">{{current.roleText}}</view><view wx:for="{{current.factsSummary}}" wx:key="*this" class="why-line">{{item}}</view><view class="why-label">本次推荐依据</view><view wx:for="{{current.reasons}}" wx:key="*this" class="why-line">{{item}}</view><view wx:for="{{reasons}}" wx:key="*this" class="why-line">{{item}}</view><view class="why-footnote">先核对你选择的条件；标注不全的条件不会当作已经满足。随机与换口味只在主动点击时使用，不会自动成为个人偏好或比较结论。</view></view>
     </view>
-    <button class="primary" bindtap="retry" disabled="{{!canRetry}}">按相同条件重新请求</button><view class="muted retry-note">结果可能相同。</view>
-    <button class="secondary" bindtap="adjust">返回调整条件</button>
+    <view wx:if="{{!confirmed}}" class="strategy-row"><view class="strategy-label">想换种选法</view><view class="strategy-options"><button data-strategy="uniform" bindtap="chooseStrategy" hover-class="quiet-pressed">随机一次</button><text>·</text><button data-strategy="weighted" bindtap="chooseStrategy" hover-class="quiet-pressed">偶尔换个口味</button></view></view>
+    <view class="result-actions">
+      <block wx:if="{{!confirmed}}"><button class="secondary" data-id="{{current.id}}" data-revision="{{current.revision}}" bindtap="next" hover-class="secondary-pressed">换一个</button><button class="primary" data-id="{{current.id}}" data-revision="{{current.revision}}" bindtap="confirm" hover-class="primary-pressed">就选这个</button></block>
+      <block wx:else><button class="secondary" bindtap="restart" hover-class="secondary-pressed">重新决定</button><button class="primary" data-id="{{current.id}}" data-revision="{{current.revision}}" bindtap="detail" hover-class="primary-pressed">查看这次选择</button></block>
+    </view>
   </block>
+  <view wx:else class="decision-empty"><view class="empty-mark">{{status === 'needs_information' ? '?' : status === 'exhausted' ? '↻' : '—'}}</view><view class="empty-eyebrow">{{status === 'needs_information' ? '有些条件还无法核实' : status === 'exhausted' ? '本轮选择已看完' : '本次虚拟决定'}}</view><view class="empty-title">{{empty.title}}</view><view class="empty-copy">{{empty.description}}</view><view wx:if="{{uncertainties.length}}" class="empty-unknowns"><view wx:for="{{uncertainties}}" wx:key="*this" class="uncertainty">{{item}}</view></view><view class="empty-context"><view class="context-label">当前条件</view><view wx:if="{{summary}}" class="condition-summary">{{summary}}</view><button class="context-location" bindtap="location" hover-class="quiet-pressed">虚拟 · {{originLabel}} ⌄</button></view><button class="primary" bindtap="emptyAction" hover-class="primary-pressed">{{empty.action}}</button></view>
+  <view class="virtual-note">虚拟场景基于历史原型，含模拟属性。价格不代表当前售价或可购买承诺，距离不对应现实路线。本次体验仅保留在内存中。</view>
 </view>
