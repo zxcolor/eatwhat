@@ -1,59 +1,34 @@
 const profile = require('../../lib/taste-profile');
-const { GROUPS, BUDGET_OPTIONS, SPICY_OPTIONS, PRIORITIES, normalizeAnswers } = require('../../lib/decision/taste-profile');
+const { SPICY_LEVELS, DEFAULT_SPICY_LEVEL, DEFAULT_FLAVOR_INTENSITY, normalizeAnswers, missingFields } = require('../../lib/decision/taste-profile');
+const { getHomeTitle } = require('../../lib/home-title');
 
-const FIELDS = ['likedGroups', 'avoidedGroups', 'budgetCents', 'maxSpicy', 'priority'];
-const FIELD_LABELS = { likedGroups: '常想吃的类型', avoidedGroups: '避开的类型', budgetCents: '预算', maxSpicy: '辣度', priority: '决定时的取舍' };
-const STEP_TITLES = ['常想吃的类型', '避开的类型', '预算与辣度', '决定时更看重'];
-const SAFE_ERRORS = new Set([
-  '同一种类型不能同时喜欢和避开。',
-  '请至少保留一种可选的餐厅类型。',
-  '喜欢优先需要至少选择一种喜欢的餐厅类型。',
-  '请先完成每一项偏好选择。',
-]);
-function has(answers, field) { return Object.keys(answers).includes(field); }
-function firstStep(answers) {
-  if (!has(answers, 'likedGroups')) return 1;
-  if (!has(answers, 'avoidedGroups')) return 2;
-  if (!has(answers, 'budgetCents') || !has(answers, 'maxSpicy')) return 3;
-  return has(answers, 'priority') ? 5 : 4;
-}
-function stepComplete(answers, step) {
-  if (step === 1) return has(answers, 'likedGroups');
-  if (step === 2) return has(answers, 'avoidedGroups');
-  if (step === 3) return has(answers, 'budgetCents') && has(answers, 'maxSpicy');
-  return has(answers, 'priority');
-}
-function groupSummary(answers, field, none) {
-  if (!has(answers, field)) return '尚未选择';
-  return answers[field].length ? GROUPS.filter(group => answers[field].includes(group.id)).map(group => group.label).join('、') : none;
-}
-function optionSummary(answers, field, options) {
-  return has(answers, field) ? options.find(option => option.value === answers[field])?.label || '尚未选择' : '尚未选择';
-}
+const FIELDS = ['spicyLevel', 'flavorIntensity'];
+const VALUE_KEYS = { spicyLevel: 'spicyValue', flavorIntensity: 'intensityValue' };
 
 Page({
   data: {
-    themeClass: 'theme-light', started: false, editing: false, step: 1, revision: 0,
-    progressStep: 1, stepTitle: STEP_TITLES[0], coverage: 0, steps: [],
-    groups: [], budgets: [], spicyOptions: [], priorities: [], summary: [],
-    likedNone: false, avoidedNone: false, canNext: false, ready: false,
-    readinessMessage: '', missingSummary: '', busy: false, error: '',
+    themeClass: 'theme-light', reducedMotion: false,
+    spicyLevels: SPICY_LEVELS, spicyValue: DEFAULT_SPICY_LEVEL, intensityValue: DEFAULT_FLAVOR_INTENSITY,
+    defaultSpicy: DEFAULT_SPICY_LEVEL, defaultIntensity: DEFAULT_FLAVOR_INTENSITY,
+    revision: 0, showEnter: false, dragging: false, busy: false, error: '',
   },
   onLoad(query = {}) {
     this._editRequested = query.edit === '1';
     this._editInitialized = false;
-    this._step = null;
+    this._active = false;
     this._generation = 0;
     this._finishing = false;
-    this._redirecting = false;
-    this._homeTimer = null;
+    this._touched = { spicyLevel: false, flavorIntensity: false };
+    this._draggingFields = new Set();
+    this._observedRevision = null;
   },
   onShow() {
-    this.cancelHomeRedirect();
     this._active = true;
     this._generation += 1;
-    this._redirecting = false;
     getApp().syncPage(this);
+    this.stopTitleClock();
+    this.updateTitle(this._titleGeneration);
+    wx.hideShareMenu();
     try {
       if (this._editRequested && !this._editInitialized) {
         this._editInitialized = true;
@@ -61,179 +36,135 @@ Page({
       }
       this.syncState();
     } catch (error) { this.showError(error); }
-    wx.hideShareMenu();
   },
-  onHide() { this._active = false; this._generation += 1; this.cancelHomeRedirect(); },
-  onUnload() { this._active = false; this._generation += 1; this.cancelHomeRedirect(); },
-  cancelHomeRedirect() {
-    if (this._homeTimer !== null) clearTimeout(this._homeTimer);
-    this._homeTimer = null;
-    this._redirecting = false;
+  onHide() { this.suspend(); },
+  onUnload() { this.suspend(); },
+  suspend() {
+    this._active = false;
+    this._generation += 1;
+    this._draggingFields.clear();
+    clearTimeout(this._redirectTimer);
+    this.stopTitleClock();
+    this.setData({ dragging: false });
   },
-  queueHomeRedirect() {
-    if (this._redirecting) return;
-    this._redirecting = true;
-    const generation = this._generation;
-    const failed = () => {
-      if (!this._active || generation !== this._generation) return;
-      this._redirecting = false;
-      this.setData({ error: '暂时无法打开首页，请重新进入小程序。' });
-    };
-    const timer = setTimeout(() => {
-      if (this._homeTimer !== timer || !this._active || generation !== this._generation) return;
-      this._homeTimer = null;
-      let state;
-      try { state = profile.getState(); }
-      catch (error) { this._redirecting = false; this.showError(error); return; }
-      if (!state.ready || state.started || state.editing || this._editRequested) {
-        this._redirecting = false;
-        this.syncState();
-        return;
-      }
-      try { wx.reLaunch({ url: '/pages/index/index', fail: failed }); }
-      catch (_) { failed(); }
-    }, 0);
-    this._homeTimer = timer;
+  stopTitleClock() {
+    clearTimeout(this._titleTimer);
+    this._titleGeneration = (this._titleGeneration || 0) + 1;
+    this._navigationTitle = '';
+  },
+  updateTitle(generation) {
+    if (!this._active || generation !== this._titleGeneration) return;
+    const now = Date.now();
+    const title = getHomeTitle(now);
+    if (title !== this._navigationTitle) {
+      this._navigationTitle = title;
+      wx.setNavigationBarTitle({ title, fail: () => {
+        if (this._active && generation === this._titleGeneration) this._navigationTitle = '';
+      } });
+    }
+    this._titleTimer = setTimeout(() => this.updateTitle(generation), 60000 - now % 60000);
   },
   syncState() {
-    try { this.renderState(); }
-    catch (error) { this.showError(error); }
-  },
-  renderState() {
     if (!this._active) return;
     const state = profile.getState();
-    if (state.ready && !state.started && !state.editing && !this._editRequested) {
-      this.queueHomeRedirect();
+    if (state.ready && !state.started && !this._editRequested) {
+      this.queueHome();
       return;
     }
-    this.cancelHomeRedirect();
+    // An external edit or expired draft cannot reuse this visit's gestures.
+    if (this._observedRevision !== null && this._observedRevision !== state.revision) {
+      this._touched = { spicyLevel: false, flavorIntensity: false };
+    }
+    this._observedRevision = state.revision;
     const answers = state.answers || {};
-    const assessment = profile.assess();
-    const started = state.started;
-    const step = this._step || firstStep(answers);
-    this._step = step;
-    const groupField = step === 2 ? 'avoidedGroups' : 'likedGroups';
-    this.setData({
-      started, editing: !!state.editing, step, revision: state.revision,
-      progressStep: Math.min(step, 4), stepTitle: STEP_TITLES[Math.min(step, 4) - 1],
-      coverage: FIELDS.filter(field => has(answers, field)).length,
-      steps: STEP_TITLES.map((label, index) => ({ label, number: index + 1, complete: stepComplete(answers, index + 1), current: step === index + 1 })),
-      groups: GROUPS.map(group => ({ id: group.id, label: group.label, selected: !!answers[groupField]?.includes(group.id) })),
-      budgets: BUDGET_OPTIONS.map((option, index) => ({ ...option, index, selected: has(answers, 'budgetCents') && option.value === answers.budgetCents })),
-      spicyOptions: SPICY_OPTIONS.map((option, index) => ({ ...option, index, selected: has(answers, 'maxSpicy') && option.value === answers.maxSpicy })),
-      priorities: PRIORITIES.map(option => ({ ...option, selected: option.id === answers.priority })),
-      likedNone: has(answers, 'likedGroups') && answers.likedGroups.length === 0,
-      avoidedNone: has(answers, 'avoidedGroups') && answers.avoidedGroups.length === 0,
-      summary: [
-        { step: 1, label: '常想吃', value: groupSummary(answers, 'likedGroups', '暂时没有特别偏好') },
-        { step: 2, label: '想避开', value: groupSummary(answers, 'avoidedGroups', '没有要避开的类型') },
-        { step: 3, label: '日常预算', value: optionSummary(answers, 'budgetCents', BUDGET_OPTIONS) },
-        { step: 3, label: '能接受的辣度', value: optionSummary(answers, 'maxSpicy', SPICY_OPTIONS) },
-        { step: 4, label: '更看重', value: PRIORITIES.find(option => option.id === answers.priority)?.label || '尚未选择' },
-      ],
-      canNext: started && stepComplete(answers, step), ready: assessment.ready === true,
-      readinessMessage: assessment.message || '', busy: this._finishing,
-      missingSummary: assessment.missingFields?.length ? `还需选择：${assessment.missingFields.map(field => FIELD_LABELS[field]).filter(Boolean).join('、')}` : '',
-      error: state.error || this.data.error,
-    });
+    const values = {};
+    if (!this._draggingFields.has('spicyLevel')) values.spicyValue = answers.spicyLevel ?? DEFAULT_SPICY_LEVEL;
+    if (!this._draggingFields.has('flavorIntensity')) values.intensityValue = answers.flavorIntensity ?? DEFAULT_FLAVOR_INTENSITY;
+    this.setData({ ...values, revision: state.revision,
+      showEnter: this._touched.spicyLevel && this._touched.flavorIntensity && missingFields(answers).length === 0,
+      busy: this._finishing });
   },
-  showError(error) {
-    if (!this._active) return;
-    let message = '暂时无法保存偏好，请重试。';
-    if (error?.code === 'INVALID_TASTE_PROFILE' && SAFE_ERRORS.has(error.message)) message = error.message;
-    else { try { message = profile.getState().error || message; } catch (_) { /* Keep the fixed local message. */ } }
-    this.setData({ error: message });
+  queueHome() {
+    clearTimeout(this._redirectTimer);
+    const generation = this._generation;
+    this._redirectTimer = setTimeout(() => {
+      if (!this._active || generation !== this._generation) return;
+      const state = profile.getState();
+      if (!state.ready || state.started || this._editRequested) { this.syncState(); return; }
+      const fail = () => {
+        if (this._active && generation === this._generation) this.setData({ error: '暂时无法进入首页，请重试。' });
+      };
+      try { wx.reLaunch({ url: '/pages/index/index', fail }); }
+      catch (_) { fail(); }
+    }, 0);
   },
-  current(event) {
-    if (!this._active || this._finishing || this._redirecting) return false;
-    try {
-      const revision = Number(event?.currentTarget?.dataset?.revision);
-      if (Number.isInteger(revision) && revision === this.data.revision && revision === profile.getState().revision) return true;
-      this.syncState(); this.setData({ error: '偏好已更新，请按当前页面继续。' });
-      return false;
-    } catch (error) { this.showError(error); return false; }
-  },
-  start() {
-    if (!this._active || this._finishing || this.data.started) return;
-    try {
-      if (this._editRequested) profile.beginEdit();
-      else profile.start();
-      this._step = null;
-      this.setData({ error: '' });
+  validDetail(event) {
+    if (!this._active || this._finishing) return null;
+    const { field, value, revision } = event.detail || {};
+    if (!FIELDS.includes(field)) return null;
+    if (revision !== this.data.revision || revision !== profile.getState().revision) {
       this.syncState();
-    } catch (error) { this.showError(error); }
-  },
-  saveAnswer(field, value) {
-    try {
-      normalizeAnswers({ ...profile.getState().answers, [field]: value });
-      profile.answer(field, value, this.data.revision);
-      this.setData({ error: '' });
-      this.syncState();
-    } catch (error) { this.showError(error); }
-  },
-  toggleGroup(event) {
-    if (!this.current(event) || !this.data.started || ![1, 2].includes(this.data.step)) return;
-    const id = event.currentTarget.dataset.id;
-    if (!GROUPS.some(group => group.id === id)) return;
-    const field = this.data.step === 1 ? 'likedGroups' : 'avoidedGroups';
-    const otherField = field === 'likedGroups' ? 'avoidedGroups' : 'likedGroups';
-    const answers = profile.getState().answers;
-    if (answers[otherField]?.includes(id)) {
-      this.setData({ error: field === 'likedGroups' ? '这个类型已选为避开，请到“避开的类型”中先修改。' : '这个类型已选为常想吃，请返回上一步修改。' });
-      return;
+      return null;
     }
-    const selected = answers[field] || [];
-    this.saveAnswer(field, selected.includes(id) ? selected.filter(value => value !== id) : [...selected, id]);
+    try { normalizeAnswers({ [field]: value }); }
+    catch (_) { return null; }
+    return { field, value };
   },
-  chooseNone(event) {
-    if (!this.current(event) || !this.data.started || ![1, 2].includes(this.data.step)) return;
-    this.saveAnswer(this.data.step === 1 ? 'likedGroups' : 'avoidedGroups', []);
+  onSliderDragState(event) {
+    if (!this._active || !FIELDS.includes(event.detail?.field)) return;
+    const { field, dragging } = event.detail;
+    if (dragging) this._draggingFields.add(field);
+    else this._draggingFields.delete(field);
+    this.setData({ dragging: this._draggingFields.size > 0 });
+    if (!dragging) this.syncState();
   },
-  selectOption(event) {
-    if (!this.current(event) || !this.data.started || this.data.step !== 3) return;
-    const { field, index: rawIndex } = event.currentTarget.dataset;
-    const options = field === 'budgetCents' ? BUDGET_OPTIONS : field === 'maxSpicy' ? SPICY_OPTIONS : null;
-    const index = Number(rawIndex);
-    if (!options || !Number.isInteger(index) || !options[index]) return;
-    this.saveAnswer(field, options[index].value);
+  onSliderInput(event) {
+    const detail = this.validDetail(event);
+    if (detail) this.setData({ [VALUE_KEYS[detail.field]]: detail.value });
   },
-  selectPriority(event) {
-    if (!this.current(event) || !this.data.started || this.data.step !== 4) return;
-    const id = event.currentTarget.dataset.id;
-    if (!PRIORITIES.some(option => option.id === id)) return;
-    this.saveAnswer('priority', id);
+  onSliderCommit(event) {
+    const detail = this.validDetail(event);
+    if (!detail || event.detail.dragged !== true) return;
+    this.saveValue(detail.field, detail.value, true);
   },
-  next(event) {
-    if (!this.current(event) || !this.data.started || !this.data.canNext || this.data.step >= 5) return;
-    this._step = this.data.step + 1;
-    this.setData({ error: '' });
-    this.syncState();
-    wx.pageScrollTo({ scrollTop: 0, duration: 0 });
+  onSliderReset(event) {
+    const detail = this.validDetail(event);
+    if (!detail) return;
+    this._touched[detail.field] = false;
+    this.setData({ showEnter: false, [VALUE_KEYS[detail.field]]: detail.value });
+    this.saveValue(detail.field, detail.value, false);
   },
-  previous(event) {
-    if (!this.current(event) || !this.data.started || this.data.step <= 1) return;
-    this._step = this.data.step - 1;
-    this.setData({ error: '' });
-    this.syncState();
-    wx.pageScrollTo({ scrollTop: 0, duration: 0 });
-  },
-  editStep(event) {
-    if (!this.current(event) || !this.data.started) return;
-    const step = Number(event.currentTarget.dataset.step);
-    if (!Number.isInteger(step) || step < 1 || step > 4) return;
-    this._step = step;
-    this.setData({ error: '' });
-    this.syncState();
-    wx.pageScrollTo({ scrollTop: 0, duration: 0 });
+  saveValue(field, value, dragged) {
+    try {
+      let state = profile.getState();
+      if (this._observedRevision !== null && state.revision !== this._observedRevision) {
+        this._touched = { spicyLevel: false, flavorIntensity: false };
+      }
+      if (!state.started) state = state.ready ? profile.beginEdit() : profile.start();
+      const updated = profile.answer(field, value, state.revision);
+      this._observedRevision = updated.revision;
+      this._touched[field] = dragged;
+      this.setData({ [VALUE_KEYS[field]]: value, error: '' });
+      this.syncState();
+    } catch (error) {
+      this._touched[field] = false;
+      this.setData({ showEnter: false });
+      this.showError(error);
+    }
   },
   async finish(event) {
-    if (!this.current(event) || !this.data.started || this.data.step !== 5) return;
+    if (!this._active || this._finishing || this.data.dragging || !this.data.showEnter) return;
+    const state = profile.getState();
+    if (Number(event.currentTarget.dataset.revision) !== state.revision || !this._touched.spicyLevel || !this._touched.flavorIntensity) {
+      this.syncState();
+      return;
+    }
     try {
       if (!profile.assess().ready) { this.syncState(); return; }
       this._finishing = true;
       const generation = this._generation;
       this.setData({ busy: true, error: '' });
-      try { await getApp().completeTasteProfile(this.data.revision); }
+      try { await getApp().completeTasteProfile(state.revision, 'home'); }
       catch (error) { if (this._active && generation === this._generation) this.showError(error); }
       finally {
         this._finishing = false;
@@ -241,10 +172,12 @@ Page({
       }
     } catch (error) { this.showError(error); }
   },
-  privacy() { if (this._active && !this._finishing) wx.navigateTo({ url: '/pages/privacy/index' }); },
-  openCanteen() {
-    if (!this._active || this._finishing) return;
-    this.cancelHomeRedirect();
-    wx.navigateTo({ url: '/pages/canteen/index' });
+  showError(error) {
+    if (!this._active) return;
+    let message = '暂时无法保存口味，请重试。';
+    try { message = profile.getState().error || message; } catch (_) { /* Keep the local fallback. */ }
+    if (error?.code === 'STALE_TASTE_PROFILE') message = '口味已更新，请重新拖动两个滑条。';
+    if (error?.code === 'TASTE_NAVIGATION_ERROR') message = '口味已保存，暂时无法进入首页，请重试。';
+    this.setData({ error: message });
   },
 });

@@ -76,6 +76,12 @@ $allowedKeys = [System.Collections.Generic.HashSet[string]]::new(
     'QWEN_API_KEY',
     'QWEN_MODEL',
     'QWEN_TIMEOUT_MS',
+    'MIMO_ENABLED',
+    'MIMO_API_KEY',
+    'MIMO_MODEL',
+    'MIMO_TIMEOUT_MS',
+    'MIMO_MAX_CALLS_PER_MINUTE',
+    'MIMO_MAX_CONCURRENCY',
     'AUTH_SCHEMA_TRANSITION_MODE',
     'PHONE_AUTH_ENABLED',
     'EMAIL_AUTH_ENABLED',
@@ -133,6 +139,7 @@ $secretKeys = [System.Collections.Generic.HashSet[string]]::new(
     'AMAP_WEB_SERVICE_KEY',
     'AMAP_WEB_SERVICE_SIGNATURE_PRIVATE_KEY',
     'QWEN_API_KEY',
+    'MIMO_API_KEY',
     'AUTH_HASH_KEYS_JSON',
     'AUTH_OTP_PEPPER_KEYS_JSON',
     'SUPPORT_FEEDBACK_ENCRYPTION_KEYS_JSON',
@@ -213,6 +220,9 @@ function Test-SecretEnabledForRuntime {
         'QWEN_API_KEY' {
             return $Entries.Contains('QWEN_ENABLED') -and
                 $Entries['QWEN_ENABLED'] -ceq 'true'
+        }
+        'MIMO_API_KEY' {
+            return $Entries.Contains('MIMO_ENABLED') -and $Entries['MIMO_ENABLED'] -ceq 'true'
         }
         { $_ -in @('DATABASE_URL', 'DATABASE_SSL_CA_BASE64') } {
             return $Entries.Contains('DATABASE_ENABLED') -and
@@ -394,6 +404,10 @@ try {
         (-not $entries.Contains('QWEN_API_KEY') -or
             [string]::IsNullOrWhiteSpace($entries['QWEN_API_KEY']))) {
         throw 'QWEN_ENABLED=true 时必须在同一私有文件中填写 QWEN_API_KEY。'
+    }
+    if ($entries.Contains('MIMO_ENABLED') -and $entries['MIMO_ENABLED'] -ceq 'true' -and
+        (-not $entries.Contains('MIMO_API_KEY') -or [string]::IsNullOrWhiteSpace($entries['MIMO_API_KEY']))) {
+        throw 'MIMO_ENABLED=true 时必须在同一私有文件中填写 MIMO_API_KEY。'
     }
     if ($entries.Contains('SUPPORT_FEEDBACK_ENABLED') -and
         $entries['SUPPORT_FEEDBACK_ENABLED'] -eq 'true') {

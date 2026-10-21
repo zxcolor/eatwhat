@@ -1,5 +1,6 @@
 const service = require('../../lib/service')
 const tasteProfile = require('../../lib/taste-profile')
+const canteenAI = require('../../lib/canteen-ai')
 
 Page({
   data: { themeClass: '', theme: 'system', reducedMotion: false, version: service.VERSION, consent: false, serviceReady: false, statusLabel: '', busy: false, error: '', localDataError: '', tasteReady: false, tasteStarted: false },
@@ -10,7 +11,7 @@ Page({
   updateView(fallbackError = '') {
     const taste = tasteProfile.getState()
     this.setData({
-      tasteReady: taste.ready, tasteStarted: taste.started,
+      tasteReady: taste.ready, tasteStarted: taste.started, mimoEnabled: canteenAI.preference() === 'enabled',
       theme: getApp().globalData.theme || 'system', consent: service.state.consent,
       serviceReady: service.state.status === 'ready' && !!service.state.config,
       statusLabel: service.state.status === 'ready' && service.state.config ? '已取得服务配置' : service.state.status === 'loading' ? '正在连接服务' : service.state.consent ? '服务尚未就绪' : '等待隐私同意',
@@ -27,6 +28,20 @@ Page({
   changeReducedMotion(event) {
     if (!this._active || typeof event.detail?.value !== 'boolean') return
     getApp().applyReducedMotion(event.detail.value)
+  },
+  async changeMimo(event) {
+    if (!this._active || this.data.busy || typeof event.detail?.value !== 'boolean') return
+    const generation = this._generation
+    this.setData({ busy: true, error: '' })
+    try {
+      if (event.detail.value) await canteenAI.requestConsent(() => this._active && generation === this._generation, true)
+      else canteenAI.disable()
+      if (this._active && generation === this._generation) this.updateView()
+    } catch (error) {
+      if (this._active && generation === this._generation && error?.code !== 'CANCELLED') this.setData({ error: error.message })
+    } finally {
+      if (this._active && generation === this._generation) this.setData({ busy: false, mimoEnabled: canteenAI.preference() === 'enabled' })
+    }
   },
   openPrivacy() { wx.navigateTo({ url: '/pages/privacy/index' }) },
   editTaste() { if (this._active) wx.navigateTo({ url: '/pages/preferences/index?edit=1' }) },

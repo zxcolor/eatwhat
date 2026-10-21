@@ -276,10 +276,10 @@ function createService(dependencies = {}) {
 			reasons.push("由同一份套餐满足全部硬条件");
 		reasons.push(
 			settings.strategy === "explicit"
-				? "在未展示且满足硬条件的选项中，按你的偏好得分最高"
+				? "在未展示且满足硬条件的选项中，按当前评分规则选择"
 				: settings.strategy === "uniform"
 					? "从未展示且满足硬条件的选项中随机抽取"
-					: "按偏好分配抽取权重，本次换个口味",
+					: "按当前评分分配抽取权重，本次换个口味",
 		);
 		const uncertainties = ["具体配料、分量和营养未知"];
 		if (display.vegetarian === null) uncertainties.push("模拟素食属性未知");

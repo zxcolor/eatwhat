@@ -14,14 +14,13 @@ function choose(itemId, filters = {}) {
   return round;
 }
 
-test('default pool contains exactly 124 real food records, with correct stall bindings', () => {
-  const { candidates, weightedExcludedCount } = decision.getCandidates();
-  assert.equal(candidates.length, 124);
-  assert.equal(new Set(candidates.map(candidate => candidate.item.id)).size, 124);
-  assert.equal(weightedExcludedCount, 0);
+test('default pool contains exactly 87 current menu records, with correct stall bindings', () => {
+  const { candidates, tasteSummary } = decision.getCandidates();
+  assert.equal(candidates.length, 87);
+  assert.equal(new Set(candidates.map(candidate => candidate.item.id)).size, 87);
+  assert.equal(tasteSummary.neutralTotal, 87);
   const excluded = policy.items.filter(rule => !rule.defaultCandidate);
-  assert.equal(excluded.filter(rule => rule.reason === 'addon').length, 17);
-  assert.equal(excluded.filter(rule => rule.reason === 'drink').length, 2);
+  assert.equal(excluded.length, 0);
   for (const candidate of candidates) {
     assert.equal(candidate.stall.id, candidate.item.stallId);
     assert.deepEqual(candidate.item, menu.items.find(item => item.id === candidate.item.id));
@@ -29,7 +28,7 @@ test('default pool contains exactly 124 real food records, with correct stall bi
     if (candidate.item.price.kind !== 'variants') assert.deepEqual(candidate.variants, []);
   }
   for (const name of ['小米粥', '紫米粥', '煮鸡蛋', '卤蛋', '香干']) {
-    assert.ok(candidates.some(candidate => candidate.item.name === name), `${name} remains eligible as a listed food`);
+    assert.ok(!candidates.some(candidate => candidate.item.name === name), `${name} was removed from the latest supplied menu`);
   }
 });
 
@@ -48,44 +47,35 @@ test('category options preserve original names, omit excluded-only categories an
   }
 });
 
-test('weight-priced foods are eligible without a budget and excluded by every strict budget', () => {
+test('weight-priced foods retain all three candidates and obsolete budgets cannot filter them', () => {
   const weighted = decision.getCandidates().candidates.filter(candidate => candidate.item.price.kind === 'weight');
   assert.deepEqual(weighted.map(candidate => candidate.item.name), ['麻辣香锅', '麻辣烫', '麻辣拌']);
   for (const budgetMaxFen of [0, 1400, 100000]) {
-    const filtered = decision.getCandidates({ budgetMaxFen });
-    assert.equal(filtered.weightedExcludedCount, 3);
-    assert.ok(filtered.candidates.every(candidate => candidate.item.price.kind !== 'weight'));
+    assert.throws(() => decision.getCandidates({ budgetMaxFen }), { code: 'CANTEEN_INVALID_FILTER' });
   }
-  assert.equal(decision.getCandidates({ budgetMaxFen: 100000 }).candidates.length, 121);
-  assert.equal(decision.getCandidates({ budgetMaxFen: 1400, category: '主食' }).weightedExcludedCount, 0);
-  const onlyWeight = decision.getCandidates({ budgetMaxFen: 1400, category: '餐品与称重价格' });
-  assert.equal(onlyWeight.weightedExcludedCount, 3);
-  assert.deepEqual(onlyWeight.candidates, []);
+  assert.equal(decision.getCandidates({ category: '餐品与称重价格' }).candidates.length, 3);
 });
 
-test('fixed prices meet the exact integer-fen upper bound', () => {
+test('fixed prices remain exact menu amounts without a price-dependent candidate filter', () => {
   for (const { item } of decision.getCandidates().candidates.filter(candidate => candidate.item.price.kind === 'fixed')) {
-    assert.ok(decision.getCandidates({ budgetMaxFen: item.price.amountFen }).candidates.some(candidate => candidate.item.id === item.id));
-    assert.ok(!decision.getCandidates({ budgetMaxFen: item.price.amountFen - 1 }).candidates.some(candidate => candidate.item.id === item.id));
+    const selected = choose(item.id).confirmation();
+    assert.equal(selected.amountFen, item.price.amountFen);
+    assert.equal(selected.priceText, item.originalPriceText);
   }
 });
 
-test('all five variants retain one dish slot and expose only budget-eligible real specifications', () => {
+test('all five variable-price dishes retain one slot with exactly their currently supplied sizes', () => {
   const expected = {
-    福建扁食: [800, 1300], 紫菜虾米馄饨: [800, 1300], 虾三鲜馄饨: [1000, 1400],
-    荠菜馄饨: [900, 1300], 虾仁馄饨: [1100, 1500],
+    福建扁食: [1300], 紫菜虾米馄饨: [1300], 虾三鲜馄饨: [1000, 1400],
+    荠菜馄饨: [1300], 虾仁馄饨: [1100, 1500],
   };
   const variants = decision.getCandidates().candidates.filter(candidate => candidate.item.price.kind === 'variants');
   assert.equal(variants.length, 5);
   for (const candidate of variants) {
-    const [small, large] = expected[candidate.item.name];
-    assert.deepEqual(candidate.variants.map(variant => variant.amountFen), [small, large]);
-    assert.deepEqual(candidate.variants.map(variant => variant.name), ['小份', '大份']);
-    for (const [budgetMaxFen, prices] of [[small - 1, []], [small, [small]], [large - 1, [small]], [large, [small, large]]]) {
-      const matches = decision.getCandidates({ budgetMaxFen }).candidates.filter(entry => entry.item.id === candidate.item.id);
-      assert.equal(matches.length, prices.length === 0 ? 0 : 1);
-      if (matches.length) assert.deepEqual(matches[0].variants.map(variant => variant.amountFen), prices);
-    }
+    const prices = expected[candidate.item.name];
+    assert.deepEqual(candidate.variants.map(variant => variant.amountFen), prices);
+    assert.deepEqual(candidate.variants.map(variant => variant.name), prices.length === 1 ? ['大份'] : ['小份', '大份']);
+    assert.equal(decision.getCandidates().candidates.filter(entry => entry.item.id === candidate.item.id).length, 1);
   }
 });
 
@@ -96,14 +86,14 @@ test('invalid budgets and category types are rejected rather than silently widen
   for (const filters of [null, false, [], '预算', { category: 1 }, { category: {} }, { category: [] }]) {
     assert.throws(() => decision.getCandidates(filters), { code: 'CANTEEN_INVALID_FILTER' });
   }
-  assert.deepEqual(decision.getCandidates({ budgetMaxFen: 0 }).candidates, []);
+  assert.throws(() => decision.getCandidates({ budgetMaxFen: 0 }), { code: 'CANTEEN_INVALID_FILTER' });
 });
 
 test('new round is idle and unrestricted, with no automatic initial selection', () => {
   const state = decision.createRound().snapshot();
-  assert.deepEqual(state.filters, { budgetMaxFen: null, category: null });
-  assert.equal(state.totalCount, 124);
-  assert.equal(state.remainingCount, 124);
+  assert.deepEqual(state.filters, { category: null });
+  assert.equal(state.totalCount, 87);
+  assert.equal(state.remainingCount, 87);
   assert.equal(state.seenCount, 0);
   assert.equal(state.status, 'idle');
   assert.equal(state.current, null);
@@ -136,37 +126,37 @@ test('invalid random providers fail atomically and never select outside the cand
   }
 });
 
-test('a round visits all 124 dish IDs once, then requires explicit restart', () => {
+test('a round visits all 87 dish IDs once, then requires explicit restart', () => {
   let randomCalls = 0;
   const round = decision.createRound({ random: () => { randomCalls += 1; return 0; } });
   const seen = new Set();
   let last;
-  for (let i = 0; i < 124; i += 1) {
+  for (let i = 0; i < 87; i += 1) {
     last = round.next();
     assert.ok(!seen.has(last.current.item.id));
     seen.add(last.current.item.id);
     assert.equal(last.seenCount, i + 1);
-    assert.equal(last.remainingCount, 123 - i);
+    assert.equal(last.remainingCount, 86 - i);
   }
   const exhausted = round.next();
   assert.equal(exhausted.status, 'exhausted');
   assert.deepEqual(exhausted.current, last.current);
   assert.deepEqual(round.next(), exhausted);
-  assert.equal(randomCalls, 124);
+  assert.equal(randomCalls, 87);
   const restarted = round.restart();
   assert.equal(restarted.status, 'idle');
   assert.equal(restarted.current, null);
   assert.equal(restarted.seenCount, 0);
-  assert.equal(restarted.remainingCount, 124);
+  assert.equal(restarted.remainingCount, 87);
   assert.equal(round.next().current.item.id, [...seen][0]);
 });
 
 test('change dish can select another food at the same stall', () => {
   const round = decision.createRound({ random: () => 0 });
-  round.configure({ category: '主食' });
+  round.configure({ category: '石锅拌饭' });
   const first = round.next().current;
   const second = round.next().current;
-  assert.equal(first.stall.name, '民族风味');
+  assert.equal(first.stall.name, '韩式拌饭');
   assert.equal(second.stall.id, first.stall.id);
   assert.notEqual(second.item.id, first.item.id);
 });
@@ -174,7 +164,7 @@ test('change dish can select another food at the same stall', () => {
 test('changing a variant does not consume another dish, and next always changes the dish ID', () => {
   const round = decision.createRound({ random: () => 0 });
   round.configure({ category: '千里香海味馄饨' });
-  const first = round.next();
+  const first = round.choose('fujian-fengwei-017');
   assert.equal(first.selectedVariantId, null);
   const small = round.selectVariant('small');
   const large = round.selectVariant('large');
@@ -187,22 +177,23 @@ test('changing a variant does not consume another dish, and next always changes 
   assert.equal(second.seenCount, 2);
 });
 
-test('a single candidate displays normally, is still confirmable after exhaustion, and does not loop', () => {
+test('the last remaining candidate stays confirmable after exhaustion and does not loop', () => {
   const round = decision.createRound({ random: () => 0 });
-  round.configure({ category: '福建小吃', budgetMaxFen: 100 });
+  round.configure({ category: '餐品与称重价格' });
+  round.next(); round.next();
   const selected = round.next();
   assert.equal(selected.status, 'ready');
-  assert.equal(selected.totalCount, 1);
-  assert.equal(selected.current.item.name, '香干');
+  assert.equal(selected.totalCount, 3);
+  assert.equal(selected.current.item.name, '麻辣拌');
   assert.equal(selected.remainingCount, 0);
   assert.equal(round.next().status, 'exhausted');
-  assert.equal(round.confirmation().amountFen, 100);
-  assert.equal(round.snapshot().seenCount, 1);
+  assert.equal(round.confirmation().amountFen, null);
+  assert.equal(round.snapshot().seenCount, 3);
 });
 
 test('zero matches and unknown categories remain empty without automatic fallback', () => {
   const round = decision.createRound({ random: () => assert.fail('Empty rounds must not draw') });
-  for (const filters of [{ budgetMaxFen: 0 }, { category: '不存在的分类' }, { category: '餐品与称重价格', budgetMaxFen: 1400 }]) {
+  for (const filters of [{ category: '' }, { category: '不存在的分类' }, { category: '主食' }]) {
     assert.equal(round.configure(filters).status, 'empty');
     const next = round.next();
     assert.equal(next.status, 'empty');
@@ -218,7 +209,7 @@ test('new conditions immediately clear old results and variant choices, includin
   round.configure({ category: '千里香海味馄饨' });
   round.next();
   round.selectVariant('large');
-  const state = round.configure({ budgetMaxFen: 100 });
+  const state = round.configure({ category: '石锅拌饭' });
   assert.equal(state.current, null);
   assert.equal(state.selectedVariantId, null);
   assert.equal(state.seenCount, 0);
@@ -227,19 +218,19 @@ test('new conditions immediately clear old results and variant choices, includin
   const ids = new Set();
   for (let i = 0; i < state.totalCount; i += 1) {
     const next = round.next();
-    assert.ok(next.current.item.price.amountFen <= 100);
+    assert.equal(next.current.item.category, '石锅拌饭');
     assert.ok(!ids.has(next.current.item.id));
     ids.add(next.current.item.id);
   }
   assert.equal(round.next().status, 'exhausted');
   const unrestricted = round.configure({});
-  assert.equal(unrestricted.totalCount, 124);
+  assert.equal(unrestricted.totalCount, 87);
   assert.equal(unrestricted.current, null);
 });
 
 test('an invalid reconfiguration preserves the previous valid round exactly', () => {
   const round = decision.createRound({ random: () => 0 });
-  round.configure({ budgetMaxFen: 800, category: '主食' });
+  round.configure({ category: '石锅拌饭' });
   round.next();
   const before = round.snapshot();
   assert.throws(() => round.configure({ budgetMaxFen: -100 }), { code: 'CANTEEN_INVALID_FILTER' });
@@ -261,7 +252,7 @@ test('confirmation keeps same-name foods attached to their own stall, price and 
   assert.notEqual(shandong.itemId, hanshi.itemId);
   assert.equal(shandong.variantId, null);
   assert.equal(shandong.variantName, null);
-  assert.equal(shandong.menuVersion, 'canteen-menu-v1');
+  assert.equal(shandong.menuVersion, 'canteen-menu-v2');
   assert.deepEqual(Object.keys(shandong).sort(), ['menuVersion', 'itemId', 'stallId', 'variantId', 'variantName', 'priceKind', 'amountFen', 'unit', 'priceText'].sort());
 });
 
@@ -272,18 +263,18 @@ test('confirming any variant requires an explicit eligible choice and records th
     for (const variant of item.price.variants) {
       round.selectVariant(variant.id);
       assert.deepEqual(round.confirmation(), {
-        menuVersion: 'canteen-menu-v1', itemId: item.id, stallId: item.stallId,
+        menuVersion: 'canteen-menu-v2', itemId: item.id, stallId: item.stallId,
         variantId: variant.id, variantName: variant.name, priceKind: 'variants',
         amountFen: variant.amountFen, unit: variant.unit, priceText: variant.originalPriceText,
       });
     }
-    const limited = choose(item.id, { budgetMaxFen: item.price.variants[0].amountFen });
+    const limited = choose(item.id);
     assert.equal(limited.snapshot().selectedVariantId, null, 'Even one eligible variant is an explicit user choice');
-    assert.throws(() => limited.selectVariant('large'), { code: 'CANTEEN_INVALID_VARIANT' });
+    if (item.price.variants.length === 1) assert.throws(() => limited.selectVariant('small'), { code: 'CANTEEN_INVALID_VARIANT' });
     assert.throws(() => limited.selectVariant(null), { code: 'CANTEEN_INVALID_VARIANT' });
     assert.throws(() => limited.selectVariant('foreign-variant'), { code: 'CANTEEN_INVALID_VARIANT' });
     assert.throws(() => limited.confirmation(), { code: 'CANTEEN_INVALID_VARIANT' });
-    limited.selectVariant('small');
+    limited.selectVariant(item.price.variants[0].id);
     assert.equal(limited.confirmation().amountFen, item.price.variants[0].amountFen);
   }
 });
@@ -292,31 +283,31 @@ test('weight confirmations preserve actual pricing rules without inventing a pai
   for (const item of menu.items.filter(entry => entry.price.kind === 'weight')) {
     const round = choose(item.id);
     assert.deepEqual(round.confirmation(), {
-      menuVersion: 'canteen-menu-v1', itemId: item.id, stallId: item.stallId,
+      menuVersion: 'canteen-menu-v2', itemId: item.id, stallId: item.stallId,
       variantId: null, variantName: null, priceKind: 'weight', amountFen: null, unit: null,
       priceText: '素菜1.2元/50g；荤菜2.8元/50g，均价14',
     });
     assert.throws(() => round.selectVariant('small'), { code: 'CANTEEN_INVALID_VARIANT' });
-    round.configure({ budgetMaxFen: 1400 });
+    round.configure({ category: '石锅拌饭' });
     assert.throws(() => round.confirmation(), { code: 'CANTEEN_NO_SELECTION' });
   }
 });
 
 test('external snapshots cannot alter the true price, filters, available variants or internal round', () => {
   const item = menu.items.find(entry => entry.name === '福建扁食');
-  const round = choose(item.id, { budgetMaxFen: 800 });
-  const state = round.selectVariant('small');
-  state.filters.budgetMaxFen = 100000;
+  const round = choose(item.id, { category: '福建小吃' });
+  const state = round.selectVariant('large');
+  state.filters.category = 'forged';
   state.current.item.price.variants[0].amountFen = 0;
-  state.current.variants.push({ id: 'large', name: '大份', amountFen: 0 });
+  state.current.variants.push({ id: 'small', name: '小份', amountFen: 0 });
   state.current.stall.id = 'forged';
-  assert.equal(round.snapshot().filters.budgetMaxFen, 800);
-  assert.equal(round.confirmation().amountFen, 800);
+  assert.equal(round.snapshot().filters.category, '福建小吃');
+  assert.equal(round.confirmation().amountFen, 1300);
   assert.equal(round.confirmation().stallId, item.stallId);
-  assert.throws(() => round.selectVariant('large'), { code: 'CANTEEN_INVALID_VARIANT' });
+  assert.throws(() => round.selectVariant('small'), { code: 'CANTEEN_INVALID_VARIANT' });
   const candidateList = decision.getCandidates();
   candidateList.candidates[0].item.price.amountFen = 0;
-  assert.equal(decision.getCandidates().candidates[0].item.price.amountFen, 600);
+  assert.equal(decision.getCandidates().candidates[0].item.price.amountFen, menu.items[0].price.amountFen);
   const categories = decision.getCategories();
   categories.push('forged');
   assert.ok(!decision.getCategories().includes('forged'));

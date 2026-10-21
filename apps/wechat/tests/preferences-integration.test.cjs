@@ -255,46 +255,18 @@ function harness(options = {}) {
 function event(page, data = {}) {
   return { currentTarget: { dataset: { revision: page.data.revision, ...data } } };
 }
-function assertLiveAssessment(h, page, count) {
-  const state = h.profile.getState();
-  const assessment = h.profile.assess();
-  assert.equal(page.data.coverage, count);
-  assert.equal(page.data.ready, assessment.ready, 'The page reflects the actual current catalog assessment after each answer');
-  assert.equal(page.data.readinessMessage, assessment.message);
-  assert.equal(Object.keys(state.answers).length, count);
-  assert.equal(h.profile.isReady(), false, 'Answer sufficiency does not replace explicit confirmation');
-  assert.equal(h.decision.getState().current, null);
-  assert.equal(page.data.error, '');
+function drag(page,field,value) {
+  page.onSliderCommit({detail:{field,value,revision:page.data.revision,dragged:true}});
 }
-
-function fillThroughPage(h, liked = 'hotpot') {
-  const page = h.top();
-  assert.equal(page.route, 'pages/preferences/index');
-  page.start();
-  assert.equal(page.data.started, true);
-  assertLiveAssessment(h, page, 0);
-  page.toggleGroup(event(page, { id: liked }));
-  assertLiveAssessment(h, page, 1);
-  page.next(event(page));
-  assert.equal(page.data.step, 2);
-  page.chooseNone(event(page));
-  assertLiveAssessment(h, page, 2);
-  page.next(event(page));
-  assert.equal(page.data.step, 3);
-  page.selectOption(event(page, { field: 'budgetCents', index: 0 }));
-  assertLiveAssessment(h, page, 3);
-  assert.equal(page.data.canNext, false, 'Budget alone does not answer the separate spice field');
-  page.selectOption(event(page, { field: 'maxSpicy', index: 0 }));
-  assertLiveAssessment(h, page, 4);
-  page.next(event(page));
-  assert.equal(page.data.step, 4);
-  page.selectPriority(event(page, { id: 'taste' }));
-  assertLiveAssessment(h, page, 5);
-  assert.equal(page.data.ready, true);
-  assert.equal(h.top(), page);
-  page.next(event(page));
-  assert.equal(page.data.step, 5);
-  return page;
+function assertLiveAssessment(h,page,count) {
+  assert.equal(Object.keys(h.profile.getState().answers).length,count);
+  assert.equal(h.profile.assess().ready,count===2);
+  assert.equal(h.profile.isReady(),false);assert.equal(h.decision.getState().current,null);assert.equal(page.data.error,'');
+}
+function fillThroughPage(h,spicy=2,flavor=50) {
+  const page=h.top();assert.equal(page.route,'pages/preferences/index');
+  drag(page,'spicyLevel',spicy);assert.equal(page.data.showEnter,false);
+  drag(page,'flavorIntensity',flavor);assertLiveAssessment(h,page,2);assert.equal(page.data.showEnter,true);return page;
 }
 
 async function finishThroughPage(h, page = h.top()) {
@@ -332,14 +304,12 @@ test('integration: first launch opens an unanswered preference Page without savi
   const page = h.coldStart();
   assert.equal(h.appConfig.pages[0], 'pages/preferences/index');
   assert.equal(page.route, 'pages/preferences/index');
-  assert.equal(page.data.started, false);
-  assert.equal(page.data.coverage, 0);
-  assert.equal(page.data.ready, false);
+  assert.equal(h.profile.getState().started, false);
+  assert.equal(page.data.spicyValue, 0);
+  assert.equal(page.data.intensityValue, 50);
+  assert.equal(page.data.showEnter, false);
   assert.deepEqual(clone(h.profile.getState().answers), {});
-  assert.equal(page.data.groups.some(group => group.selected), false);
-  assert.equal(page.data.budgets.some(option => option.selected), false);
-  assert.equal(page.data.spicyOptions.some(option => option.selected), false);
-  assert.equal(page.data.priorities.some(option => option.selected), false);
+  assert.equal(Object.keys(h.profile.getState().answers).length, 0);
   assert.equal(h.storage.has(TASTE_KEY), false);
   assert.equal(h.writes.some(write => write.key === TASTE_KEY), false);
   assert.equal(h.decision.getState().profileReady, false);
@@ -351,8 +321,7 @@ test('integration: first launch opens an unanswered preference Page without savi
 test('integration: all five deep-linked decision routes remain blocked while a real draft is incomplete', async () => {
   const h = harness({ rejectReentrant: true });
   const start = h.coldStart();
-  start.start();
-  start.toggleGroup(event(start, { id: 'hotpot' }));
+  drag(start,'spicyLevel',2);
   for (const route of ['index', 'conditions', 'results', 'detail', 'location']) {
     const rejected = h.navigate(`/pages/${route}/index?id=synthetic&revision=1`);
     await h.settleNavigation();
@@ -360,21 +329,22 @@ test('integration: all five deep-linked decision routes remain blocked while a r
     assert.equal(rejected.data.preferenceReady, false, `${route} cannot render its decision content`);
     assert.equal(h.profile.isReady(), false);
     assert.equal(h.decision.getState().current, null);
-    assert.equal(h.top().data.coverage, 1);
-    assert.deepEqual(clone(h.profile.getState().answers), { likedGroups: ['hotpot'] });
+    assert.equal(h.top().data.showEnter, false);
+    assert.deepEqual(clone(h.profile.getState().answers), { spicyLevel: 2 });
   }
   assert.equal(h.decision.getDiagnostics().events.events.length, 0);
   h.assertOffline();
 });
 
-test('integration: every Page answer updates sufficiency and confirmation produces an actual preferred-type card', async () => {
+test('integration: each slider answer updates sufficiency and explicit confirmation enables an actual local card', async () => {
   const h = harness();
   h.coldStart();
-  const page = fillThroughPage(h, 'hotpot');
+  const page = fillThroughPage(h, 2);
   assert.equal(h.navigation.includes('/pages/index/index'), false);
   await finishThroughPage(h, page);
   const state = await currentCard(h);
-  assert.ok(h.model.GROUPS.find(group => group.id === 'hotpot').categories.includes(state.current.storeCategory));
+  assert.deepEqual(clone(h.profile.getProfile()),{spicyLevel:2,flavorIntensity:50});
+  assert.equal(h.profile.assess().personalizedReady,false);
   assert.match(state.current.scoreMeaning, /不是满意度概率/);
   assert.equal(h.decision.getDiagnostics().policy.learningEnabled, false);
   assert.equal(h.decision.getDiagnostics().policy.activeQuestionsEnabled, false);
@@ -385,11 +355,11 @@ test('integration: every Page answer updates sufficiency and confirmation produc
 test('integration: a fresh module graph restores only a confirmed profile and enters home', async () => {
   const first = harness();
   first.coldStart();
-  const page = fillThroughPage(first, 'noodles');
+  const page = fillThroughPage(first, 0);
   const unconfirmed = harness({ storage: first.snapshot(), now: first.now() });
   assert.equal(unconfirmed.coldStart().route, 'pages/preferences/index');
   assert.equal(unconfirmed.profile.isReady(), false);
-  assert.equal(unconfirmed.top().data.step, 5);
+  assert.equal(unconfirmed.top().data.showEnter, false);
   await finishThroughPage(first, page);
   const second = harness({ storage: first.snapshot(), now: first.now(), rejectReentrant: true });
   second.coldStart();
@@ -397,38 +367,35 @@ test('integration: a fresh module graph restores only a confirmed profile and en
   assert.equal((await second.settleNavigation()).route, 'pages/index/index');
   assert.equal(second.relaunches.length, 1);
   assert.equal(second.relaunches[0].depth, 0);
-  assert.deepEqual(clone(second.profile.getProfile().likedGroups), ['noodles']);
+  assert.equal(second.profile.getProfile().spicyLevel, 0);
   const state = await currentCard(second);
-  assert.ok(second.model.GROUPS.find(group => group.id === 'noodles').categories.includes(state.current.storeCategory));
+  assert.equal(state.current.spicy, 0);
   first.assertOffline(); unconfirmed.assertOffline(); second.assertOffline();
 });
 
-test('integration: editing immediately invalidates the rendered card and changed likes change the actual result', async () => {
+test('integration: editing invalidates the rendered card and a new non-spicy declaration constrains the next result', async () => {
   const h = harness();
   h.coldStart();
-  await finishThroughPage(h, fillThroughPage(h, 'hotpot'));
+  await finishThroughPage(h, fillThroughPage(h, 2));
   const before = await currentCard(h);
   const oldBinding = { candidateId: before.current.id, revision: before.revision };
   h.navigate('/pages/preferences/index?edit=1');
-  assert.equal(h.top().data.editing, true);
+  assert.equal(h.profile.getState().editing, true);
   assert.equal(h.profile.isReady(), false);
   assert.equal(h.decision.resolve(oldBinding.candidateId, oldBinding.revision), null);
   assert.throws(() => h.decision.confirm(oldBinding));
   h.navigate('/pages/index/index');
   await h.settleNavigation();
   assert.equal(h.top().route, 'pages/preferences/index');
-  assert.equal(h.top().data.editing, true);
+  assert.equal(h.profile.getState().editing, true);
   const editing = h.top();
-  editing.editStep(event(editing, { step: 1 }));
-  editing.toggleGroup(event(editing, { id: 'noodles' }));
-  editing.toggleGroup(event(editing, { id: 'hotpot' }));
-  assert.deepEqual(clone(h.profile.getState().answers.likedGroups), ['noodles']);
-  assert.equal(h.profile.isReady(), false);
-  while (editing.data.step < 5) editing.next(event(editing));
+  drag(editing,'spicyLevel',0);drag(editing,'flavorIntensity',60);
+  assert.deepEqual(clone(h.profile.getState().answers),{spicyLevel:0,flavorIntensity:60});
+  assert.equal(h.profile.isReady(),false);
   await finishThroughPage(h, editing);
   const after = await currentCard(h);
-  assert.notEqual(after.current.id, before.current.id);
-  assert.ok(h.model.GROUPS.find(group => group.id === 'noodles').categories.includes(after.current.storeCategory));
+  assert.notEqual(after.revision, before.revision);
+  assert.equal(after.current.spicy, 0);
   assert.throws(() => h.decision.confirm(oldBinding));
   h.assertOffline();
 });
@@ -436,12 +403,13 @@ test('integration: editing immediately invalidates the rendered card and changed
 test('integration: immediately reconfirming identical answers starts a new decision epoch without an intervening engine read', async () => {
   const h = harness({ rejectReentrant: true });
   h.coldStart();
-  await finishThroughPage(h, fillThroughPage(h, 'hotpot'));
+  await finishThroughPage(h, fillThroughPage(h, 2));
   const before = await currentCard(h);
   const oldBinding = { candidateId: before.current.id, revision: before.revision };
   const editing = h.navigate('/pages/preferences/index?edit=1');
-  assert.equal(editing.data.editing, true);
-  assert.equal(editing.data.step, 5);
+  assert.equal(h.profile.getState().editing, true);
+  assert.equal(editing.data.showEnter, false);
+  drag(editing,'spicyLevel',2);drag(editing,'flavorIntensity',50);
   // Do not read decision state or resolve a binding while the draft is open.
   // Those reads would lazily clear the old approval and hide a stale-card bug.
   await editing.finish(event(editing));
@@ -458,11 +426,11 @@ test('integration: immediately reconfirming identical answers starts a new decis
 test('integration: seven-day incomplete draft and ninety-day approval expire through real lifecycle checks', async () => {
   const draft = harness();
   const first = draft.coldStart();
-  first.start(); first.toggleGroup(event(first, { id: 'hotpot' }));
+  drag(first,'spicyLevel',2);
   draft.advance(draft.profile.DRAFT_TTL_MS);
   const expiredDraft = draft.foreground();
   assert.equal(expiredDraft.route, 'pages/preferences/index');
-  assert.equal(expiredDraft.data.started, false);
+  assert.equal(draft.profile.getState().started, false);
   assert.equal(draft.profile.isReady(), false);
   assert.deepEqual(clone(draft.profile.getState().answers), {});
   draft.navigate('/pages/index/index');
@@ -494,7 +462,7 @@ test('integration: Settings clear and privacy withdrawal erase approval and retu
     assert.equal(h.modals.length, 1);
     h.modals[0].success({ confirm: true, cancel: false });
     assert.equal(h.top().route, 'pages/preferences/index');
-    assert.equal(h.top().data.started, false);
+    assert.equal(h.profile.getState().started, false);
     assert.equal(h.profile.isReady(), false);
     assert.equal(h.storage.has(TASTE_KEY), false);
     assert.equal(h.decision.getState().current, null);
@@ -512,9 +480,9 @@ test('integration: storage failures on Start and confirmation never open home or
   const h = harness();
   const introduction = h.coldStart();
   h.failures.tasteWrite = true;
-  introduction.start();
+  drag(introduction,'spicyLevel',2);
   assert.equal(h.top().route, 'pages/preferences/index');
-  assert.equal(introduction.data.started, false);
+  assert.equal(h.profile.getState().started, false);
   assert.match(introduction.data.error, /保存失败/);
   assert.equal(h.profile.isReady(), false);
   assert.equal(h.storage.has(TASTE_KEY), false);
@@ -523,7 +491,7 @@ test('integration: storage failures on Start and confirmation never open home or
   h.failures.tasteWrite = true;
   await confirmation.finish(event(confirmation));
   assert.equal(h.top().route, 'pages/preferences/index');
-  assert.equal(confirmation.data.step, 5);
+  assert.equal(confirmation.data.showEnter, true);
   assert.equal(confirmation.data.busy, false);
   assert.match(confirmation.data.error, /保存失败/);
   assert.equal(h.profile.isReady(), false);

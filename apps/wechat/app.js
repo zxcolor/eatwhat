@@ -2,6 +2,7 @@ const service = require('./lib/service');
 const account = require('./lib/account');
 const localRecords = require('./lib/local-records');
 const canteenRecords = require('./lib/canteen-records');
+const canteenAI = require('./lib/canteen-ai');
 const nearby = require('./lib/nearby');
 const saved = require('./lib/saved');
 const decision = require('./lib/decision/service');
@@ -39,6 +40,7 @@ App({
   onShow() {
     const pages = getCurrentPages();
     const route = pages.length ? pages[pages.length - 1].route : '';
+    if (route === 'pages/canteen/index' && !this.ensureTasteProfile({ returnTo: 'canteen' })) return;
     if (['pages/index/index', 'pages/conditions/index', 'pages/results/index', 'pages/detail/index', 'pages/location/index'].includes(route)
       && !this.ensureTasteProfile()) return;
     if (service.state.consent && ['pages/account/index', 'pages/saved/index', 'pages/support/index', 'pages/nearby/index'].includes(route)) {
@@ -46,7 +48,7 @@ App({
       this.checkService();
     }
   },
-  onHide() { nearby.stop(); account.suspend(); saved.invalidate(); service.invalidate(); this.updatePages(); },
+  onHide() { nearby.stop(); account.suspend(); saved.invalidate(); canteenAI.cancel(); service.invalidate(); this.updatePages(); },
   async checkService() {
     const pending = service.refreshConfig();
     nearby.syncCapabilities();
@@ -67,6 +69,7 @@ App({
     saved.invalidate();
     service.setConsent(false);
     const failures = [];
+    try { canteenAI.withdraw(); } catch (error) { failures.push(error.message); }
     try { tasteProfile.clear(); } catch (error) { failures.push(error.message); }
     let consentRevoked = false;
     try { wx.setStorageSync(CONSENT_KEY, false); consentRevoked = true; } catch (_) { /* Removing the key is an independent fallback. */ }
@@ -101,7 +104,7 @@ App({
   syncTasteProfile() {
     decision.setProfile(tasteProfile.getProfile());
   },
-  ensureTasteProfile() {
+  ensureTasteProfile({ returnTo = 'home' } = {}) {
     if (tasteProfile.isReady()) {
       const pending = this._preferenceRedirect;
       if (pending) clearTimeout(pending.timer);
@@ -113,7 +116,7 @@ App({
     decision.setProfile(null);
     const pages = getCurrentPages();
     if (pages[pages.length - 1]?.route === 'pages/preferences/index' || this._preferenceRedirect) return false;
-    const pending = { attempts: 0, timer: null };
+    const pending = { attempts: 0, timer: null, returnTo: returnTo === 'canteen' ? 'canteen' : 'home' };
     this._preferenceRedirect = pending;
     this._openingPreferences = true;
     const finish = () => {
@@ -143,7 +146,7 @@ App({
         }
       };
       try {
-        wx.reLaunch({ url: '/pages/preferences/index',
+        wx.reLaunch({ url: pending.returnTo === 'canteen' ? '/pages/preferences/index?returnTo=canteen' : '/pages/preferences/index',
           success: () => { if (!settled) { settled = true; finish(); } }, fail: failed });
       } catch (_) { failed(); }
     };
@@ -152,14 +155,22 @@ App({
     pending.timer = setTimeout(openPreferences, 0);
     return false;
   },
-  completeTasteProfile(revision) {
+  completeTasteProfile(revision, returnTo = 'home') {
     tasteProfile.confirm(revision);
     // A new explicit confirmation starts a fresh decision epoch, even when
     // the answers are unchanged and no decision read occurred during editing.
     decision.setProfile(null);
     this.syncTasteProfile();
     this._openingPreferences = false;
-    wx.reLaunch({ url: '/pages/index/index' });
+    return new Promise((resolve, reject) => {
+      wx.reLaunch({ url: returnTo === 'canteen' ? '/pages/canteen/index' : '/pages/index/index',
+        success: resolve,
+        fail: () => {
+          const error = new Error('口味已保存，暂时无法进入页面，请重试。');
+          error.code = 'TASTE_NAVIGATION_ERROR';
+          reject(error);
+        } });
+    });
   },
   clearTasteProfile() {
     decision.setProfile(null);

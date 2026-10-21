@@ -194,12 +194,12 @@ function buildProblem(options) {
       // Category membership is an explicit UI taxonomy; affinity is the user's
       // stated configuration, never a learned food fact or satisfaction score.
       candidate.facts.storeTypeGroup = group
-        ? { state: 'known', value: group, source: 'declared_store_category_grouping', version: model.POLICY_VERSION }
-        : { state: 'unknown', source: 'unmapped_or_unknown_store_category', version: model.POLICY_VERSION };
+        ? { state: 'known', value: group, source: 'declared_store_category_grouping', version: model.LEGACY_POLICY_VERSION }
+        : { state: 'unknown', source: 'unmapped_or_unknown_store_category', version: model.LEGACY_POLICY_VERSION };
       candidate.facts.storeTypeAffinity = group
         ? { state: 'known', value: settings.taste.likedGroups.includes(group) ? 1 : 0.5,
-          source: 'user_declared_store_type_preference', version: model.POLICY_VERSION }
-        : { state: 'unknown', source: 'unmapped_or_unknown_store_category', version: model.POLICY_VERSION };
+          source: 'user_declared_store_type_preference', version: model.LEGACY_POLICY_VERSION }
+        : { state: 'unknown', source: 'unmapped_or_unknown_store_category', version: model.LEGACY_POLICY_VERSION };
     }
     attributes.storeTypeGroup = { type: 'string', semanticGroup: 'store_type_exclusion', roles: ['hard'] };
     attributes.storeTypeAffinity = { type: 'number', semanticGroup: 'store_type_preference', roles: ['soft'] };
@@ -223,98 +223,10 @@ function getDisplay(candidateId, target, problem) {
   return display ? clone(display) : null;
 }
 
-function utilityVaries(core, candidates, terms) {
-  if (candidates.length < 2 || terms.length === 0) return false;
-  let first = null;
-  const seenFacts = new Set();
-  for (const candidate of candidates) {
-    const signature = JSON.stringify(terms.map(term => {
-      const item = candidate.facts[term.attribute];
-      return item?.state === 'known' ? ['known', item.value] : [item?.state || 'unknown'];
-    }));
-    if (seenFacts.has(signature)) continue;
-    seenFacts.add(signature);
-    const score = core.utility(candidate, { terms }).value;
-    if (first === null) first = score;
-    else if (score.cmp(first) !== 0) return true;
-  }
-  return false;
-}
-
 function assessProfile(input) {
-  const model = require('./taste-profile');
-  const answers = model.normalizeAnswers(input);
-  const missingFields = model.missingFields(answers);
-  if (missingFields.length) return { profileComplete: false, personalizedReady: false, ready: false,
-    status: 'incomplete', missingFields, signals: [], counts: {}, message: '完成偏好选择后，再为你决定。' };
-  const core = require('./core');
-  const options = model.compile(answers);
-  const counts = {};
-  const targetReadiness = {};
-  const hardFields = { budget: 'budgetCents', spicy: 'maxSpicy', avoided_store_types: 'avoidedGroups' };
-  const mealRejectionReasons = new Map();
-  for (const target of ['PACKAGE', 'RESTAURANT']) {
-    const problem = buildProblem({ ...options, target });
-    core.validate(problem);
-    const count = { total: problem.candidates.length, feasible: 0, unknown: 0, rejected: 0 };
-    const feasibleCandidates = [];
-    const hardSignals = new Set();
-    for (const candidate of problem.candidates) {
-      const traces = problem.request.conditions.map(condition => ({ id: condition.id,
-        verdict: core.evaluate(candidate, condition).verdict }));
-      if (traces.some(trace => trace.verdict === 'violated')) {
-        count.rejected++;
-        for (const trace of traces) {
-          if (trace.verdict !== 'violated' || !hardFields[trace.id]) continue;
-          const field = hardFields[trace.id];
-          hardSignals.add(field);
-          if (target === 'PACKAGE') {
-            const id = candidate.metadata.restaurantId;
-            if (!mealRejectionReasons.has(id)) mealRejectionReasons.set(id, new Set());
-            mealRejectionReasons.get(id).add(field);
-          }
-        }
-        if (target === 'RESTAURANT' && traces.some(trace => trace.id === 'same_meal' && trace.verdict === 'violated')) {
-          // An empty restaurant is not evidence that a user constraint helped.
-          // Only known meal-level rejection reasons count for a failed witness.
-          for (const field of mealRejectionReasons.get(candidate.id) || []) hardSignals.add(field);
-        }
-      } else if (traces.some(trace => trace.verdict === 'insufficient')) count.unknown++;
-      else { count.feasible++; feasibleCandidates.push(candidate); }
-    }
-    counts[target] = count;
-    // Generic main-course preference cannot by itself establish personalization.
-    // Compare exact user-term utilities, rather than counting answers or using
-    // a floating tolerance, pseudo-confidence or a random recommendation draw.
-    const userTerms = problem.request.explicit_preferences.terms.filter(term =>
-      ['price', 'distance', 'store_type_preference'].includes(term.id) && term.weight > 0);
-    const varyingTerms = userTerms.filter(term => utilityVaries(core, feasibleCandidates, [term]));
-    const scoreDiscriminates = varyingTerms.length > 0 && utilityVaries(core, feasibleCandidates, userTerms);
-    const constrainedSingleton = feasibleCandidates.length === 1 && hardSignals.size > 0;
-    const termFields = { price: 'price', distance: 'distance', store_type_preference: 'likedGroups' };
-    targetReadiness[target] = { scoreDiscriminates, constrainedSingleton,
-      supportedSignals: [...new Set([...varyingTerms.map(term => termFields[term.id]), ...hardSignals])] };
-  }
-  const supported = new Set(Object.values(targetReadiness).flatMap(value => value.supportedSignals));
-  const signals = [];
-  if (supported.has('likedGroups')) signals.push({ id: 'likedGroups', label: '喜欢的餐厅类型能区分当前选择' });
-  if (supported.has('price')) signals.push({ id: 'price', label: '价格偏好能区分当前选择' });
-  if (supported.has('distance')) signals.push({ id: 'distance', label: '距离偏好能区分当前选择' });
-  if (supported.has('avoidedGroups')) signals.push({ id: 'avoidedGroups', label: '已排除你避开的餐厅类型' });
-  if (supported.has('budgetCents')) signals.push({ id: 'budgetCents', label: '已排除超出预算的选择' });
-  if (supported.has('maxSpicy')) signals.push({ id: 'maxSpicy', label: '已排除超过模拟辣度上限的选择' });
-  const usable = Object.values(counts).every(count => count.feasible > 0);
-  const personalizedReady = usable && Object.values(targetReadiness).every(value => value.scoreDiscriminates || value.constrainedSingleton);
-  const ready = personalizedReady;
-  const status = ready ? 'ready' : usable ? 'needs_preference' : Object.values(counts).some(count => count.feasible === 0 && count.unknown > 0)
-    ? 'needs_information' : 'no_feasible_candidates';
-  const usableRanking = [supported.has('price') ? '价格' : '', supported.has('distance') ? '距离' : ''].filter(Boolean).join('与');
-  return { profileComplete: true, personalizedReady, ready, status, missingFields: [], signals, counts, targetReadiness,
-    message: ready ? supported.has('likedGroups') ? '你喜欢的类型已能区分当前选择，可以为你决定。'
-      : usableRanking ? `将按你选择的${usableRanking}权衡，为你决定。` : '你的明确条件已筛出唯一可行选择，可以为你决定。'
-      : status === 'needs_preference' ? '当前偏好还不能区分可行选择，请调整喜欢的类型、预算或决定重点。'
-      : status === 'needs_information' ? '偏好已齐全，但部分候选资料不足，请调整条件或等待资料补充。'
-        : '偏好已齐全，当前目录没有符合条件的选择，请调整条件。' };
+  // Declaration completeness is separate from catalog-supported precision.
+  // Price/distance differences do not establish a user's slider preferences.
+  return require('./taste-profile').assessAnswers(input);
 }
 
 module.exports = { buildProblem, getDisplay, assessProfile, manifest: catalog.sourceManifest };

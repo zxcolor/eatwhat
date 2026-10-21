@@ -6,6 +6,7 @@ const model = require('../lib/decision/taste-profile');
 const adapter = require('../lib/decision/catalog');
 const core = require('../lib/decision/core');
 const actualCatalog = require('../data/virtual-catalog');
+const { legacyOptions } = require('./fixtures/legacy-taste.cjs');
 
 function clone(value) { return JSON.parse(JSON.stringify(value)); }
 function answers(patch = {}) {
@@ -59,59 +60,54 @@ test('explicit taxonomy covers each actual store label once, with no invented fo
   }
 });
 
-test('unanswered differs from explicit neutral arrays and unlimited choices', () => {
+test('slider defaults do not count as answers and both explicit values are required', () => {
+
   assert.deepEqual(model.normalizeAnswers(), {});
-  assert.deepEqual(model.missingFields({}), model.FIELDS);
-  const neutral = answers({ likedGroups: [], avoidedGroups: [] });
-  assert.deepEqual(model.missingFields(neutral), []);
-  assert.equal(model.compile(neutral).taste.weight, 0);
-  assert.throws(() => model.compile({ ...neutral, maxSpicy: undefined }), /辣度/);
-  assert.throws(() => model.compile({ priority: 'balanced' }), /完成/);
-  assert.deepEqual(clone(adapter.assessProfile({})), {
-    profileComplete: false, personalizedReady: false, ready: false, status: 'incomplete',
-    missingFields: model.FIELDS, signals: [], counts: {}, message: '完成偏好选择后，再为你决定。',
-  });
+  assert.deepEqual(model.missingFields({}), ['spicyLevel', 'flavorIntensity']);
+  assert.deepEqual(model.missingFields({spicyLevel: 0}), ['flavorIntensity']);
+  assert.deepEqual(model.missingFields({spicyLevel: 0, flavorIntensity: 50}), []);
+  assert.throws(() => model.compile({spicyLevel: 0}), /完成/);
+  const pending = adapter.assessProfile({});
+  assert.equal(pending.ready, false); assert.equal(pending.profileComplete, false);
+  assert.deepEqual(pending.missingFields, model.FIELDS);
+  assert.equal(model.compile({spicyLevel: 0, flavorIntensity: 50}).taste, null);
+
 });
 
-test('normalization rejects malformed or contradictory declarations without modifying inputs', () => {
-  for (const invalid of [null, [], new Date(), new Map(), 'answer', { extra: true }, { likedGroups: null }, { likedGroups: Array(1) }, { avoidedGroups: 'hotpot' },
-    { likedGroups: ['hotpot', 'hotpot'] }, { likedGroups: ['unknown'] }, { budgetCents: 0 }, { budgetCents: '2000' },
-    { maxSpicy: 2 }, { maxSpicy: NaN }, { priority: 'random' },
-    { likedGroups: ['hotpot'], avoidedGroups: ['hotpot'] },
-    { avoidedGroups: model.GROUPS.map(group => group.id) }, { likedGroups: [], priority: 'taste' }]) {
-    assert.throws(() => model.normalizeAnswers(invalid), error => error.code === 'INVALID_TASTE_PROFILE');
+test('slider normalization rejects coercion, invalid ranges and legacy fields without mutating input', () => {
+
+  for (const invalid of [null, [], new Date(), new Map(), 'answer', {extra:true}, {likedGroups:[]},
+    {budgetCents:2000}, {priority:'taste'}, {spicyLevel:null}, {spicyLevel:undefined}, {spicyLevel:-1},
+    {spicyLevel:7}, {spicyLevel:0.5}, {spicyLevel:NaN}, {spicyLevel:Infinity}, {spicyLevel:'2'},
+    {flavorIntensity:-1}, {flavorIntensity:101}, {flavorIntensity:0.5}, {flavorIntensity:false}, {flavorIntensity:'50'}]) {
+    assert.throws(() => model.normalizeAnswers(invalid), {code:'INVALID_TASTE_PROFILE'});
   }
-  const input = answers({ likedGroups: ['noodles', 'hotpot'], avoidedGroups: ['drinks'] });
-  const before = clone(input);
-  const normalized = model.normalizeAnswers(input);
-  assert.deepEqual(normalized.likedGroups, ['hotpot', 'noodles']);
-  normalized.likedGroups.push('dessert');
-  assert.deepEqual(input, before);
-  const compiled = model.compile(input);
-  compiled.taste.likedGroups.push('dessert');
-  assert.deepEqual(input, before);
+  const input={spicyLevel:6,flavorIntensity:100}, before=clone(input);
+  const normalized=model.normalizeAnswers(input); normalized.spicyLevel=0;
+  const compiled=model.compile(input); compiled.weights.price=99;
+  assert.deepEqual(input,before);
+
 });
 
-test('compiled priorities use declared fixed weights and actual target terms', () => {
-  const expected = { balanced: [4, 2, 2, 1], taste: [6, 1, 1, 1], price: [2, 6, 1, 1], distance: [2, 1, 6, 1] };
-  for (const [priority, [taste, price, distance, main]] of Object.entries(expected)) {
-    const options = model.compile(answers({ priority, budgetCents: 3000, maxSpicy: 1 }));
-    assert.deepEqual(options, { budgetCents: 3000, maxSpicy: 1, weights: { price, distance, main },
-      taste: { version: 1, likedGroups: ['hotpot'], avoidedGroups: [], weight: taste } });
-    for (const target of ['PACKAGE', 'RESTAURANT']) {
-      const problem = loadCatalog(twinData).buildProblem({ ...options, target });
-      core.validate(problem);
-      const weights = Object.fromEntries(problem.request.explicit_preferences.terms.map(term => [term.id, term.weight]));
-      assert.deepEqual(weights, { price, distance, ...(target === 'PACKAGE' ? { main } : {}), store_type_preference: taste });
+test('explicit legacy adapter inputs retain their fixed weights and actual target terms', () => {
+
+  const expected={balanced:[4,2,2,1],taste:[6,1,1,1],price:[2,6,1,1],distance:[2,1,6,1]};
+  for(const [priority,[taste,price,distance,main]] of Object.entries(expected)) {
+    const options=legacyOptions(answers({priority,budgetCents:3000,maxSpicy:1}));
+    for(const target of ['PACKAGE','RESTAURANT']) {
+      const problem=loadCatalog(twinData).buildProblem({...options,target}); core.validate(problem);
+      assert.deepEqual(Object.fromEntries(problem.request.explicit_preferences.terms.map(term=>[term.id,term.weight])),
+        {price,distance,...(target==='PACKAGE'?{main}:{}),store_type_preference:taste});
     }
   }
+
 });
 
 test('different stated favorite types change equal-price and equal-distance choices in both targets', () => {
   const local = loadCatalog(twinData);
   for (const target of ['PACKAGE', 'RESTAURANT']) {
     for (const [liked, expected] of [['hotpot', 'a'], ['noodles', 'b']]) {
-      const problem = local.buildProblem({ ...model.compile(answers({ likedGroups: [liked] })), target });
+      const problem = local.buildProblem({ ...legacyOptions(answers({ likedGroups: [liked] })), target });
       const result = core.decide(clone(problem), core.createSession(1));
       const prefix = target === 'RESTAURANT' ? 'r-' : '';
       assert.equal(result.selectedId, prefix + expected);
@@ -125,7 +121,7 @@ test('different stated favorite types change equal-price and equal-distance choi
 test('taste uses a fixed denominator and explicit neutral fallback while unknown stays unknown', () => {
   const local = loadCatalog(fixture([{ id: 'liked', category: '川渝火锅' }, { id: 'neutral', category: '米粉面馆' },
     { id: 'unknown', category: null }, { id: 'unmapped', category: '名称像火锅但未映射的店铺' }]));
-  const problem = local.buildProblem(model.compile(answers()));
+  const problem = local.buildProblem(legacyOptions(answers()));
   for (const row of problem.candidates) {
     const score = core.utility(row, problem.request.explicit_preferences);
     assert.deepEqual(score.weightSum.toPair(), ['9', '1']);
@@ -143,7 +139,7 @@ test('excluded store types are hard constraints that price advantage cannot offs
   const local = loadCatalog(fixture([{ id: 'cheap', category: '川渝火锅', price: 1 },
     { id: 'allowed', category: '米粉面馆', price: 10000 }, { id: 'unknown', category: null, price: 0 }]));
   for (const target of ['PACKAGE', 'RESTAURANT']) {
-    const problem = local.buildProblem({ ...model.compile(answers({ likedGroups: [], avoidedGroups: ['hotpot'], priority: 'price' })), target });
+    const problem = local.buildProblem({ ...legacyOptions(answers({ likedGroups: [], avoidedGroups: ['hotpot'], priority: 'price' })), target });
     const result = core.decide(clone(problem), core.createSession(0));
     const prefix = target === 'RESTAURANT' ? 'r-' : '';
     assert.equal(result.selectedId, `${prefix}allowed`);
@@ -160,7 +156,7 @@ test('spicy limit remains a hard condition with unknown unresolved, and restaura
   data.meals[1].familyId = data.meals[0].familyId;
   data.restaurants.splice(1, 1);
   const local = loadCatalog(data);
-  const problem = local.buildProblem({ ...model.compile(answers({ maxSpicy: 1, budgetCents: 3000 })), target: 'RESTAURANT' });
+  const problem = local.buildProblem({ ...legacyOptions(answers({ maxSpicy: 1, budgetCents: 3000 })), target: 'RESTAURANT' });
   const result = core.decide(clone(problem), core.createSession(0));
   assert.equal(result.selectedId, 'r-cheap');
   assert.deepEqual(result.unknown, ['r-unknown']);
@@ -171,7 +167,7 @@ test('spicy limit remains a hard condition with unknown unresolved, and restaura
 });
 
 test('normal taste models are canonicalized and malformed models cannot weaken exclusions', () => {
-  const taste = model.compile(answers({ likedGroups: ['noodles', 'hotpot'] })).taste;
+  const taste = legacyOptions(answers({ likedGroups: ['noodles', 'hotpot'] })).taste;
   assert.deepEqual(model.normalizeTaste(taste).likedGroups, ['hotpot', 'noodles']);
   assert.equal(model.normalizeTaste(null), null);
   for (const invalid of [undefined, {}, [], { ...taste, version: 2 }, { ...taste, extra: true },
@@ -192,134 +188,84 @@ test('no-profile problem preserves original fields, terms and behavior', () => {
   assert.equal(core.decide(clone(oldDefault), core.createSession(0)).selectedId, 'a');
 });
 
-test('complete neutral preferences can be ready through explicitly selected price and distance weights', () => {
-  const result = loadCatalog(fixture([{ id: 'a', category: '川渝火锅' },
-    { id: 'b', category: '米粉面馆', price: 2000, x: 600 }])).assessProfile(answers({ likedGroups: [] }));
-  assert.equal(result.profileComplete, true);
-  assert.equal(result.ready, true);
-  assert.equal(result.personalizedReady, true);
-  assert.equal(result.status, 'ready');
-  assert.match(result.message, /价格与距离/);
-  assert.deepEqual(clone(result.signals), [{ id: 'price', label: '价格偏好能区分当前选择' },
-    { id: 'distance', label: '距离偏好能区分当前选择' }]);
-  assert.deepEqual(clone(result.counts), { PACKAGE: { total: 2, feasible: 2, unknown: 0, rejected: 0 },
-    RESTAURANT: { total: 2, feasible: 2, unknown: 0, rejected: 0 } });
+test('complete sliders permit confirmation without claiming personalized price or distance weights', () => {
+
+  const result=loadCatalog(twinData).assessProfile({spicyLevel:2,flavorIntensity:50});
+  assert.equal(result.ready,true); assert.equal(result.profileComplete,true); assert.equal(result.personalizedReady,false);
+  const compiled=model.compile({spicyLevel:2,flavorIntensity:50});
+  assert.deepEqual(compiled.weights,{price:1,distance:1,main:1}); assert.equal(compiled.taste,null);
+  assert.equal(compiled.budgetCents,null); assert.equal(compiled.maxSpicy,null);
+
 });
 
-test('complete answers with no effective distinction stay gated, including generic main-role differences', () => {
-  const data = clone(twinData);
-  data.meals[1].facts.mealRole = fact('snack');
-  const result = loadCatalog(data).assessProfile(answers({ likedGroups: [] }));
-  assert.equal(result.profileComplete, true);
-  assert.equal(result.personalizedReady, false);
-  assert.equal(result.ready, false);
-  assert.equal(result.status, 'needs_preference');
-  assert.deepEqual(Array.from(result.missingFields), []);
-  assert.match(result.message, /还不能区分/);
-  assert.deepEqual(clone(result.signals), []);
-  for (const target of ['PACKAGE', 'RESTAURANT']) {
-    assert.equal(result.counts[target].feasible, 2);
-    assert.deepEqual(clone(result.targetReadiness[target]), {
-      scoreDiscriminates: false, constrainedSingleton: false, supportedSignals: [],
-    });
+test('flat catalog scores cannot prevent confirmation of the two explicitly dragged sliders', () => {
+
+  const data=clone(twinData);data.meals[1].facts.mealRole=fact('snack');
+  const result=loadCatalog(data).assessProfile({spicyLevel:0,flavorIntensity:0});
+  assert.equal(result.ready,true);assert.equal(result.personalizedReady,false);assert.deepEqual(Array.from(result.missingFields),[]);
+
+});
+
+test('only the non-spicy endpoint maps to the legacy hard spice scale', () => {
+
+  for(let spicyLevel=0;spicyLevel<=6;spicyLevel++) {
+    const compiled=model.compile({spicyLevel,flavorIntensity:50});
+    assert.equal(compiled.maxSpicy,spicyLevel===0?0:null);
+    assert.equal(compiled.budgetCents,null); assert.equal(compiled.taste,null);
   }
+
 });
 
-test('one feasible result qualifies only when explicit known hard conditions rejected other candidates', () => {
-  const local = loadCatalog(fixture([{ id: 'cheap', category: '川渝火锅', price: 1000 },
-    { id: 'costly', category: '米粉面馆', price: 3000 }]));
-  const result = local.assessProfile(answers({ likedGroups: [], budgetCents: 2000 }));
-  assert.equal(result.ready, true);
-  assert.match(result.message, /唯一可行选择/);
-  for (const target of ['PACKAGE', 'RESTAURANT']) {
-    assert.equal(result.counts[target].feasible, 1);
-    assert.equal(result.counts[target].rejected, 1);
-    assert.deepEqual(clone(result.targetReadiness[target]), {
-      scoreDiscriminates: false, constrainedSingleton: true, supportedSignals: ['budgetCents'],
-    });
-  }
-  const solitary = loadCatalog(fixture([{ id: 'only', category: '川渝火锅' }])).assessProfile(answers({ likedGroups: [] }));
-  assert.equal(solitary.ready, false);
-  assert.equal(solitary.status, 'needs_preference');
+test('the retained legacy category adapter still enforces exclusions independently of slider readiness', () => {
+
+  const local=loadCatalog(twinData);
+  const problem=local.buildProblem(legacyOptions(answers({likedGroups:[],avoidedGroups:['hotpot']})));
+  const result=core.decide(clone(problem),core.createSession(0));
+  assert.equal(result.selectedId,'b'); assert.deepEqual(result.rejected,['a']);
+  assert.equal(local.assessProfile({spicyLevel:2,flavorIntensity:50}).personalizedReady,false);
+
 });
 
-test('hard type exclusions can produce a supported singleton without inventing ranking variation', () => {
-  const result = loadCatalog(twinData).assessProfile(answers({ likedGroups: [], avoidedGroups: ['hotpot'] }));
-  assert.equal(result.ready, true);
-  for (const target of ['PACKAGE', 'RESTAURANT']) {
-    assert.equal(result.targetReadiness[target].scoreDiscriminates, false);
-    assert.equal(result.targetReadiness[target].constrainedSingleton, true);
-    assert.deepEqual(Array.from(result.targetReadiness[target].supportedSignals), ['avoidedGroups']);
-  }
+test('legacy category, budget and priority answers cannot impersonate the slider profile', () => {
+
+  for(const legacy of [answers(),answers({likedGroups:['grill']}),{spicyLevel:2,flavorIntensity:50,budgetCents:1000}])
+    assert.throws(()=>adapter.assessProfile(legacy),{code:'INVALID_TASTE_PROFILE'});
+
 });
 
-test('unavailable favorite types are not reported as supported taste personalization', () => {
-  const result = loadCatalog(fixture([{ id: 'a', category: '川渝火锅' },
-    { id: 'b', category: '米粉面馆', price: 2000 }])).assessProfile(answers({ likedGroups: ['grill'] }));
-  assert.equal(result.ready, true);
-  assert.deepEqual(clone(result.signals), [{ id: 'price', label: '价格偏好能区分当前选择' }]);
-  assert.match(result.message, /价格/);
-  assert.doesNotMatch(result.message, /喜欢/);
-  for (const value of Object.values(result.targetReadiness)) assert.equal(value.supportedSignals.includes('likedGroups'), false);
+test('flavor intensity is retained as a declaration without fabricated menu attributes', () => {
+
+  const low=model.compile({spicyLevel:2,flavorIntensity:0});
+  const high=model.compile({spicyLevel:2,flavorIntensity:100});
+  assert.deepEqual(low,high);
+  const local=loadCatalog(twinData); const problem=local.buildProblem(low);
+  assert.ok(problem.candidates.every(row=>!Object.hasOwn(row.facts,'flavorIntensity')));
+  assert.equal(local.assessProfile({spicyLevel:2,flavorIntensity:100}).personalizedReady,false);
+
 });
 
-test('readiness compares exact combined utilities, including cancellation and flat price anchors', () => {
-  const cancelled = loadCatalog(fixture([{ id: 'a', category: '川渝火锅', price: 1000, x: 800 },
-    { id: 'b', category: '米粉面馆', price: 2000, x: 500 }])).assessProfile(answers({ likedGroups: [] }));
-  assert.equal(cancelled.ready, false);
-  assert.equal(cancelled.status, 'needs_preference');
-  for (const value of Object.values(cancelled.targetReadiness)) {
-    assert.equal(value.scoreDiscriminates, false);
-    assert.deepEqual(Array.from(value.supportedSignals), ['price', 'distance']);
-  }
-  const saturated = loadCatalog(fixture([{ id: 'a', category: '川渝火锅', price: 6000 },
-    { id: 'b', category: '米粉面馆', price: 7000 }])).assessProfile(answers({ likedGroups: [] }));
-  assert.equal(saturated.ready, false);
-  assert.deepEqual(clone(saturated.signals), []);
-  const tiny = loadCatalog(fixture([{ id: 'a', category: '川渝火锅', x: 500 },
-    { id: 'b', category: '米粉面馆', x: 500 + 2 ** -40 }])).assessProfile(answers({ likedGroups: [] }));
-  assert.equal(tiny.ready, true);
-  for (const value of Object.values(tiny.targetReadiness)) assert.equal(value.scoreDiscriminates, true);
+test('complete declarations and unknown food information remain distinct states', () => {
+
+  const local=loadCatalog(fixture([{id:'only',category:'川渝火锅',price:null,spicy:null}]));
+  assert.equal(local.assessProfile({spicyLevel:0}).ready,false);
+  const declaration=local.assessProfile({spicyLevel:0,flavorIntensity:50});
+  assert.equal(declaration.ready,true); assert.equal(declaration.personalizedReady,false);
+  const problem=local.buildProblem(model.compile({spicyLevel:0,flavorIntensity:50}));
+  const selected=core.decide(clone(problem),core.createSession(0));
+  assert.equal(selected.selectedId,null); assert.ok(selected.unknown.includes('only'));
+
 });
 
-test('assessment distinguishes unanswered, complete but infeasible, and complete but unknown data', () => {
-  const complete = answers({ budgetCents: 2000 });
-  for (const [price, status, field] of [[3000, 'no_feasible_candidates', 'rejected'], [null, 'needs_information', 'unknown']]) {
-    const result = loadCatalog(fixture([{ id: 'only', category: '川渝火锅', price }])).assessProfile(complete);
-    assert.equal(result.profileComplete, true);
-    assert.equal(result.personalizedReady, false);
-    assert.equal(result.ready, false);
-    assert.equal(result.status, status);
-    assert.deepEqual(Array.from(result.missingFields), []);
-    assert.equal(result.counts.PACKAGE[field], 1);
-    assert.equal(result.counts.RESTAURANT[field], 1);
-    assert.match(result.message, /偏好已齐全/);
-  }
-});
+test('real virtual catalog classification still matches independent non-spicy facts after slider confirmation', () => {
 
-test('full real virtual catalog readiness counts match independent raw-fact classification', () => {
-  const input = answers({ likedGroups: ['noodles'], avoidedGroups: ['hotpot'], budgetCents: 3000, maxSpicy: 1, priority: 'price' });
-  const result = adapter.assessProfile(input);
-  const restaurants = new Map(actualCatalog.restaurants.map(row => [row.id, row]));
-  const avoidedLabels = new Set(model.GROUPS.find(group => group.id === 'hotpot').categories);
-  const expected = { total: 1092, feasible: 0, unknown: 0, rejected: 0 };
-  const feasibleRestaurants = new Set();
-  for (const meal of actualCatalog.meals) {
-    const category = restaurants.get(meal.restaurantId).storeCategory.value;
-    const rejected = avoidedLabels.has(category) || meal.facts.priceCents.value > 3000
-      || (meal.facts.spicy.state === 'known' && meal.facts.spicy.value > 1);
-    const kind = rejected ? 'rejected' : meal.facts.spicy.state === 'unknown' ? 'unknown' : 'feasible';
-    expected[kind]++;
-    if (kind === 'feasible') feasibleRestaurants.add(meal.restaurantId);
-  }
-  assert.deepEqual(result.counts.PACKAGE, expected);
-  assert.equal(result.counts.RESTAURANT.total, 363);
-  assert.equal(result.counts.RESTAURANT.feasible, feasibleRestaurants.size);
-  assert.equal(result.ready, true);
-  assert.ok(expected.feasible > 0 && expected.unknown > 0 && expected.rejected > 0);
-  const problem = adapter.buildProblem(model.compile(input));
-  assert.equal(problem.candidates.length, 1092);
-  assert.ok(problem.candidates.every(row => row.facts.storeTypeGroup.state === 'known'));
-  assert.deepEqual(actualCatalog.sourceManifest.counts.unknown, { priceCents: 0, spicy: 380,
-    vegetarian: 485, mealRole: 8, foodCategory: 1092, ingredients: 1092, actualMealRole: 1092 });
+  const input={spicyLevel:0,flavorIntensity:37};
+  assert.equal(adapter.assessProfile(input).ready,true);
+  const expected={feasible:[],unknown:[],rejected:[]};
+  for(const meal of actualCatalog.meals){const kind=meal.facts.spicy.state==='unknown'?'unknown':meal.facts.spicy.value>0?'rejected':'feasible';expected[kind].push(meal.id);}
+  const problem=adapter.buildProblem(model.compile(input));
+  const result=core.decide(clone(problem),core.createSession(0));
+  for(const key of Object.keys(expected))assert.deepEqual([...result[key]].sort(),expected[key].sort());
+  assert.equal(problem.candidates.length,1092);
+  assert.deepEqual(actualCatalog.sourceManifest.counts.unknown,{priceCents:0,spicy:380,vegetarian:485,mealRole:8,foodCategory:1092,ingredients:1092,actualMealRole:1092});
+
 });

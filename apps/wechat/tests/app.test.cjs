@@ -18,6 +18,7 @@ function fixture(consent = false, faults = {}, route = '') {
   vm.runInNewContext(source, {
     setTimeout, clearTimeout,
     require(name) {
+      if (name.endsWith('/canteen-ai')) return { cancel() { calls.push(['cancel-mimo']); }, withdraw() { calls.push(['withdraw-mimo']); } };
       if (name.endsWith('/decision/service')) return { reset() { calls.push(['clear-virtual']); }, setProfile(value) { calls.push([value === null ? 'clear-virtual' : 'set-profile']); } };
       if (name.endsWith('/taste-profile')) return { load() {}, getProfile: () => null, isReady: () => false, clear() { calls.push(['clear-taste']); } };
       if (name.endsWith('/service')) return service;
@@ -103,12 +104,14 @@ test('decision metadata is recorded only for the currently accepted response', (
   h.state.consent = false; h.app.recordDecision(response); assert.equal(h.calls.filter(call => call[0] === 'record-decision').length, 1);
 });
 
-test('canteen routes remain local without online consent, profile redirects or nearby collection', () => {
+test('canteen requires confirmed taste while record history stays local without nearby collection', async () => {
   for (const route of ['pages/canteen/index', 'pages/canteen-records/index']) {
     const h = fixture(false, {}, route);
     h.app.onLaunch(); h.app.onShow();
+    await new Promise(resolve => setTimeout(resolve, 0));
     assert.ok(h.calls.some(call => call[0] === 'prune-canteen'));
-    assert.equal(h.calls.some(call => ['navigate', 'config', 'nearby-open'].includes(call[0])), false);
+    assert.equal(h.calls.some(call => ['config', 'nearby-open'].includes(call[0])), false);
+    assert.equal(h.calls.some(call => call[0] === 'navigate'), route === 'pages/canteen/index');
   }
 });
 

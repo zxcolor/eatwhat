@@ -6,19 +6,19 @@ const crypto = require('node:crypto');
 const vm = require('node:vm');
 const menu = require('../data/canteen-menu.json');
 const policy = require('../data/canteen-policy.json');
+const historical = require('../data/canteen-history-catalogs.json').catalogs[0];
 const { ARTIFACTS, serializeRuntime, buildArtifacts } = require('../scripts/build-canteen-data.cjs');
 
 const SOURCE_PATH = path.resolve(__dirname, '../../..', 'docs/canteen/餐品清单.md');
 const sourceText = fs.readFileSync(SOURCE_PATH, 'utf8');
 const STALLS = [
-  ['minzu-fengwei', '民族风味', 9],
-  ['lanzhou-lamian', '兰州拉面', 14],
-  ['shandong-jianbing', '山东煎饼', 25],
+  ['lanzhou-lamian', '兰州拉面', 10],
+  ['shandong-jianbing', '山东煎饼', 10],
   ['shishang-luroufan', '食尚卤肉饭', 26],
   ['hanshi-banfan', '韩式拌饭', 21],
-  ['anhui-baozi', '安徽包子', 15],
+  ['anhui-baozi', '安徽包子', 3],
   ['mala-xiangguo', '麻辣香锅', 3],
-  ['fujian-fengwei', '福建风味', 30],
+  ['fujian-fengwei', '福建风味', 14],
 ];
 
 // Read the supplied Markdown independently of the static data and runtime code.
@@ -47,9 +47,9 @@ function readSource() {
       continue;
     }
     const row = /^\| ([^|]+?) \| ([^|]+?) \|$/.exec(rawLine);
-    if (!row || row[1] === '餐品' || /^[- :]+$/.test(row[1])) continue;
-    assert.ok(stallName && category, `unscoped source row: ${rawLine}`);
-    rows.push({ stallName, category, name: row[1], originalPriceText: row[2] });
+    if (!row || row[1].trim() === '餐品' || /^[- :]+$/.test(row[1])) continue;
+    assert.ok(stallName, `unscoped source row: ${rawLine}`);
+    rows.push({ stallName, category, name: row[1].trim(), originalPriceText: row[2].trim() });
   }
   return { stalls, rows };
 }
@@ -62,19 +62,19 @@ const findItem = (stallId, name) => menu.items.find(item => item.stallId === sta
 test('source snapshot is the supplied Markdown, with no photograph verification claim', () => {
   const normalized = `${sourceText.replace(/\r\n/g, '\n').trimEnd()}\n`;
   assert.equal(crypto.createHash('sha256').update(normalized).digest('hex'),
-    '7bc37f65f94c5611dfe1931571439e32abc8dc04c35b861cf1d2884333231c1c');
+    'aad6adb4f5c5a8f79541a9d01a4073f23405b1f0015d6c0065f077c8fe1c972f');
   assert.equal(menu.schemaVersion, 1);
-  assert.equal(menu.version, 'canteen-menu-v1');
+  assert.equal(menu.version, 'canteen-menu-v2');
   assert.deepEqual(menu.source, {
     document: '餐品清单.md', basis: 'user-provided-markdown', imagesVerified: false,
   });
-  assert.equal(source.stalls.length, 8);
-  assert.equal(source.rows.length, 143);
-  assert.equal(source.stalls.reduce((count, stall) => count + stall.sourceImages.length, 0), 12);
+  assert.equal(source.stalls.length, 7);
+  assert.equal(source.rows.length, 87);
+  assert.equal(source.stalls.reduce((count, stall) => count + stall.sourceImages.length, 0), 0);
 });
 
-test('all eight stalls retain original names and source links, with exact per-stall counts', () => {
-  assert.equal(menu.stalls.length, 8);
+test('all seven current stalls retain original names and exactly the supplied source links', () => {
+  assert.equal(menu.stalls.length, 7);
   assert.deepEqual(menu.stalls.map(({ name, sourceImages }) => ({ name, sourceImages })), source.stalls);
   assert.deepEqual(menu.stalls.map(stall => [stall.id, stall.name]), STALLS.map(([id, name]) => [id, name]));
   for (const [id, name, count] of STALLS) {
@@ -83,9 +83,9 @@ test('all eight stalls retain original names and source links, with exact per-st
   }
 });
 
-test('all 143 rows match the source names, full categories, price wording and stall binding', () => {
+test('all 87 rows match the source names, nullable categories, price wording and stall binding', () => {
   const nameById = new Map(menu.stalls.map(stall => [stall.id, stall.name]));
-  assert.equal(menu.items.length, 143);
+  assert.equal(menu.items.length, 87);
   assert.deepEqual(menu.items.map(item => ({
     stallName: nameById.get(item.stallId), category: item.category,
     name: item.name, originalPriceText: item.originalPriceText,
@@ -99,20 +99,23 @@ test('all 143 rows match the source names, full categories, price wording and st
   }
 });
 
-test('stable IDs are unique, stall-scoped and fixed to the original source order', () => {
-  assert.equal(itemById.size, 143);
-  assert.equal(new Set(menu.stalls.map(stall => stall.id)).size, 8);
+test('stable IDs are unique and retain their v1 identities despite menu deletions', () => {
+  assert.equal(itemById.size, 87);
+  assert.equal(new Set(menu.stalls.map(stall => stall.id)).size, 7);
   for (const [stallId] of STALLS) {
     const items = menu.items.filter(item => item.stallId === stallId);
-    items.forEach((item, index) => {
-      assert.equal(item.id, `${stallId}-${String(index + 1).padStart(3, '0')}`);
+    items.forEach(item => {
+      const original = historical.menu.items.find(entry => entry.id === item.id);
+      assert.ok(original);
+      assert.equal(item.stallId, original.stallId);
+      assert.equal(item.name, original.name);
     });
   }
 });
 
-test('135 fixed prices use integer fen and retain original units or explicit null', () => {
+test('79 fixed prices use integer fen and retain original units or explicit null', () => {
   const fixed = menu.items.filter(item => item.price.kind === 'fixed');
-  assert.equal(fixed.length, 135);
+  assert.equal(fixed.length, 79);
   for (const item of fixed) {
     const sourceRow = source.rows.find(row => row.name === item.name
       && row.stallName === menu.stalls.find(stall => stall.id === item.stallId).name);
@@ -123,16 +126,16 @@ test('135 fixed prices use integer fen and retain original units or explicit nul
     assert.ok(Number.isSafeInteger(item.price.amountFen));
     assert.ok(item.price.amountFen > 0);
   }
-  assert.equal(findItem('shandong-jianbing', '杂粮煎饼').price.unit, null);
+  assert.equal(findItem('shandong-jianbing', '番茄鸡排饭').price.unit, null);
   assert.equal(findItem('fujian-fengwei', '福鼎肉片').price.unit, null);
-  assert.equal(findItem('fujian-fengwei', '牛面筋').price.amountFen, 50);
-  assert.equal(findItem('anhui-baozi', '紫菜鸡蛋汤').price.amountFen, 250);
+  assert.equal(findItem('fujian-fengwei', '牛面筋'), undefined);
+  assert.equal(findItem('anhui-baozi', '紫菜鸡蛋汤'), undefined);
 });
 
-test('five multi-spec foods remain five records, with both exact small and large prices', () => {
+test('five specification-based foods retain only the exact sizes supplied by menu v2', () => {
   const expected = [
-    ['福建扁食', 800, 1300], ['紫菜虾米馄饨', 800, 1300],
-    ['虾三鲜馄饨', 1000, 1400], ['荠菜馄饨', 900, 1300], ['虾仁馄饨', 1100, 1500],
+    ['福建扁食', null, 1300], ['紫菜虾米馄饨', null, 1300],
+    ['虾三鲜馄饨', 1000, 1400], ['荠菜馄饨', null, 1300], ['虾仁馄饨', 1100, 1500],
   ];
   const variants = menu.items.filter(item => item.price.kind === 'variants');
   assert.equal(variants.length, 5);
@@ -140,7 +143,7 @@ test('five multi-spec foods remain five records, with both exact small and large
   for (const [name, small, large] of expected) {
     const item = findItem('fujian-fengwei', name);
     assert.deepEqual(item.price, { kind: 'variants', variants: [
-      { id: 'small', name: '小份', amountFen: small, unit: null, originalPriceText: `小份${small / 100}元` },
+      ...(small === null ? [] : [{ id: 'small', name: '小份', amountFen: small, unit: null, originalPriceText: `小份${small / 100}元` }]),
       { id: 'large', name: '大份', amountFen: large, unit: null, originalPriceText: `大份${large / 100}元` },
     ] });
     assert.equal(item.price.variants.map(variant => variant.originalPriceText).join('；'), item.originalPriceText);
@@ -172,34 +175,36 @@ test('cross-stall duplicate names preserve distinct IDs, prices and units', () =
   assert.deepEqual(shandong.price, { kind: 'fixed', amountFen: 1300, unit: null });
   assert.equal(korean.originalPriceText, '14元/份');
   assert.deepEqual(korean.price, { kind: 'fixed', amountFen: 1400, unit: '份' });
-  assert.equal(menu.items.filter(item => item.name === '小米粥').length, 2);
-  assert.equal(menu.items.filter(item => item.name === '豆沙包').length, 2);
+  assert.equal(historical.menu.items.filter(item => item.name === '小米粥').length, 2);
+  assert.equal(historical.menu.items.filter(item => item.name === '豆沙包').length, 2);
+  assert.equal(menu.items.filter(item => ['小米粥', '豆沙包'].includes(item.name)).length, 0);
 });
 
-test('rice noodles 01 and 02 retain complete names and egg keeps its one dual-use record', () => {
+test('rice noodles 01 and 02 retain complete names while deleted egg remains only in history', () => {
   const first = findItem('fujian-fengwei', '生烫牛肉米线（01：米线+青菜+肉酱）');
   const second = findItem('fujian-fengwei', '生烫牛肉米线（02：米线+青菜+卤蛋+牛肉丸+肉酱）');
   assert.notEqual(first.id, second.id);
   assert.deepEqual(first.price, { kind: 'fixed', amountFen: 1000, unit: null });
   assert.deepEqual(second.price, { kind: 'fixed', amountFen: 1300, unit: null });
-  const eggs = menu.items.filter(item => item.stallId === 'fujian-fengwei' && item.name === '卤蛋');
+  const eggs = historical.menu.items.filter(item => item.stallId === 'fujian-fengwei' && item.name === '卤蛋');
   assert.equal(eggs.length, 1);
   assert.equal(eggs[0].category, '福建小吃');
   assert.equal(eggs[0].originalPriceText, '1.5元/份（亦可作米线浇头）');
   assert.deepEqual(eggs[0].notes, ['亦可作米线浇头']);
   assert.deepEqual(eggs[0].price, { kind: 'fixed', amountFen: 150, unit: '份' });
-  assert.equal(policyById.get(eggs[0].id).defaultCandidate, true);
+  assert.equal(policyById.has(eggs[0].id), false);
+  assert.ok(historical.defaultCandidateIds.includes(eggs[0].id));
 });
 
-test('all 143 explicit policy records are separate from menu facts and yield 124 default foods', () => {
+test('all 87 current policy records remain separate from menu facts and are eligible foods', () => {
   assert.equal(policy.schemaVersion, 1);
-  assert.equal(policy.items.length, 143);
-  assert.equal(policyById.size, 143);
+  assert.equal(policy.items.length, 87);
+  assert.equal(policyById.size, 87);
   assert.deepEqual(policy.items.map(item => item.itemId), menu.items.map(item => item.id));
-  assert.equal(policy.items.filter(item => item.defaultCandidate).length, 124);
-  assert.equal(policy.items.filter(item => item.reason === 'food').length, 124);
-  assert.equal(policy.items.filter(item => item.reason === 'addon').length, 17);
-  assert.equal(policy.items.filter(item => item.reason === 'drink').length, 2);
+  assert.equal(policy.items.filter(item => item.defaultCandidate).length, 87);
+  assert.equal(policy.items.filter(item => item.reason === 'food').length, 87);
+  assert.equal(policy.items.filter(item => item.reason === 'addon').length, 0);
+  assert.equal(policy.items.filter(item => item.reason === 'drink').length, 0);
   for (const entry of policy.items) {
     assert.deepEqual(Object.keys(entry).sort(), ['itemId', 'defaultCandidate', 'reason'].sort());
     assert.equal(typeof entry.defaultCandidate, 'boolean');
@@ -209,19 +214,20 @@ test('all 143 explicit policy records are separate from menu facts and yield 124
   }
 });
 
-test('only the 17 explicitly listed addons and two soy drinks are excluded by default', () => {
+test('the historical 17 addons and two drinks remain outside the current menu and archive eligibility', () => {
   const excludedIds = new Set([
     ...Array.from({ length: 8 }, (_, index) => `shandong-jianbing-${String(index + 18).padStart(3, '0')}`),
     ...Array.from({ length: 9 }, (_, index) => `fujian-fengwei-${String(index + 22).padStart(3, '0')}`),
     'shandong-jianbing-016', 'shandong-jianbing-017',
   ]);
-  assert.deepEqual(new Set(policy.items.filter(item => !item.defaultCandidate).map(item => item.itemId)), excludedIds);
-  assert.deepEqual(policy.items.filter(item => item.reason === 'drink').map(item => itemById.get(item.itemId).name),
+  assert.deepEqual(new Set(historical.menu.items.filter(item => !historical.defaultCandidateIds.includes(item.id)).map(item => item.id)), excludedIds);
+  assert.deepEqual(historical.menu.items.filter(item => ['shandong-jianbing-016', 'shandong-jianbing-017'].includes(item.id)).map(item => item.name),
     ['原味豆浆', '红枣豆浆']);
-  assert.deepEqual(policy.items.filter(item => item.reason === 'addon').map(item => itemById.get(item.itemId).name),
+  assert.deepEqual(historical.menu.items.filter(item => excludedIds.has(item.id) && !['shandong-jianbing-016', 'shandong-jianbing-017'].includes(item.id)).map(item => item.name),
     ['辣条', '双汇肠', '里脊', '鸡柳', '培根', '肉松', '鸡排', '纯肉肠',
       '牛面筋', '牛肉丸', '炸蛋', '肉丝', '鸡杂', '牛百叶', '鲜切吊龙', '鲜卤牛腩', '鲜虾仁']);
   for (const item of menu.items) {
+    assert.equal(excludedIds.has(item.id), false);
     if (!excludedIds.has(item.id)) assert.equal(policyById.get(item.id).defaultCandidate, true, item.id);
   }
   for (const name of ['小米粥', '紫米粥', '煮鸡蛋', '豆沙包', '烤肠', '思念汤圆', '香干']) {

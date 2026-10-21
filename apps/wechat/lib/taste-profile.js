@@ -95,6 +95,13 @@ function createStore(dependencies = {}) {
     catch (_) { error = '暂时无法读取本机偏好，请重新开始选择。'; return getState(); }
     if (saved === undefined || saved === null || saved === '') return getState();
     if (saved?.revoked === true) return getState();
+    if (saved.schemaVersion !== model.SCHEMA_VERSION || saved.policyVersion !== model.POLICY_VERSION) {
+      // The old category/budget questionnaire cannot supply slider answers.
+      // Loading is read-only for incompatible records; only an explicit start
+      // or edit saves the new schema over the previous record.
+      error = '口味设置已更新，请重新选择辣度与口味浓淡并确认。';
+      return getState();
+    }
     try {
       if (!only(saved, ['schemaVersion', 'policyVersion', 'consentAt', 'sequence', 'active', 'draft'])
         || saved.schemaVersion !== model.SCHEMA_VERSION || saved.policyVersion !== model.POLICY_VERSION
@@ -105,7 +112,7 @@ function createStore(dependencies = {}) {
       active = clone(saved.active); draft = clone(saved.draft);
       if (active) {
         activeAssessment = catalog.assessProfile(active.answers);
-        if (!activeAssessment.profileComplete || !activeAssessment.personalizedReady) throw new Error('invalid explicit profile');
+        if (!activeAssessment.profileComplete || !activeAssessment.ready) throw new Error('invalid explicit profile');
       }
       expire();
     } catch (_) {
@@ -163,7 +170,7 @@ function createStore(dependencies = {}) {
     if (!model.FIELDS.includes(field)) fail('这项选择无效，请重新选择。');
     let answers;
     try { answers = model.normalizeAnswers({ ...draft.answers, [field]: value }); }
-    catch (_) { fail('选择存在冲突，请先取消重复的喜欢或避开类型，再重新选择。', 'INVALID_TASTE_PROFILE'); }
+    catch (_) { fail('辣度或口味浓淡数值无效，请重新选择。', 'INVALID_TASTE_PROFILE'); }
     if (equal(answers, draft.answers)) { error = ''; return getState(); }
     const nextDraft = { answers, revision: sequence + 1, updatedAt: now() };
     persist(record(active, nextDraft, nextDraft.revision));
@@ -181,7 +188,7 @@ function createStore(dependencies = {}) {
     if (!draft || revokeBlocked) fail('请先完成口味选择。');
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision !== draft.revision) fail('这份选择已经更新，请核对后重新确认。', 'STALE_TASTE_PROFILE');
     const result = assess();
-    if (!result.ready) fail(result.message || '还需要补充能用于推荐的偏好。', 'INCOMPLETE_TASTE_PROFILE');
+    if (!result.ready) fail(result.message || '请完成辣度与口味浓淡选择。', 'INCOMPLETE_TASTE_PROFILE');
     const nextActive = { answers: clone(draft.answers), revision: draft.revision,
       confirmedRevision: draft.revision, confirmedAt: now() };
     persist(record(nextActive, null));

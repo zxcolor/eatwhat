@@ -23,6 +23,9 @@
 			"name": "Recommendations"
 		},
 		{
+			"name": "Canteen decisions"
+		},
+		{
 			"name": "Recommendation events"
 		},
 		{
@@ -153,6 +156,51 @@
 					"500": {
 						"$ref": "#/components/responses/InternalError"
 					}
+				}
+			}
+		},
+		"/v1/canteen/decisions": {
+			"post": {
+				"operationId": "createCanteenDecision",
+				"tags": ["Canteen decisions"],
+				"summary": "从当前食堂剩余菜单选择一道菜",
+				"description": "须由用户单独同意 MiMo 数据处理后调用。只接收两项口味声明、菜单与偏好修订、本轮已展示编号及请求标识，不接受自由文本、账号、定位或额外字段。每客户端 IP 每进程最多 12 次/60 秒。服务端 MiMo 默认关闭，只有开启并配置密钥才调用小米官方接口；关闭、超时、容量耗尽或模型输出不合规时返回 LOCAL 并提供 fallbackReason。名称与价格由客户端从相同版本的固化菜单读取。所有菜品精细口味属性尚未核实。",
+				"parameters": [
+					{ "$ref": "#/components/parameters/RequestCorrelationId" },
+					{ "$ref": "#/components/parameters/ClientContractVersion" }
+				],
+				"requestBody": {
+					"required": true,
+					"content": { "application/json": { "schema": { "$ref": "#/components/schemas/CanteenDecisionRequest" } } }
+				},
+				"responses": {
+					"200": {
+						"description": "返回本轮候选 ID、来源及明确的回退状态；候选耗尽时 selectedItemId 为 null。",
+						"headers": { "X-ChiShenMe-Contract-Version": { "$ref": "#/components/headers/ContractVersion" } },
+						"content": { "application/json": { "schema": { "$ref": "#/components/schemas/CanteenDecisionResponse" } } }
+					},
+					"400": {
+						"description": "JSON、请求结构、同意版本或已展示菜品编号无效；不调用 MiMo。",
+						"headers": { "X-ChiShenMe-Contract-Version": { "$ref": "#/components/headers/ContractVersion" } },
+						"content": { "application/json": { "schema": { "oneOf": [
+							{ "$ref": "#/components/schemas/InvalidJsonError" },
+							{ "$ref": "#/components/schemas/InvalidRequestError" },
+							{ "type": "object", "additionalProperties": false, "required": ["requestId", "code", "message"], "properties": {
+								"requestId": { "$ref": "#/components/schemas/ErrorRequestId" }, "code": { "const": "CANTEEN_INVALID_EXCLUSIONS" }, "message": { "const": "本轮菜品编号无效" }
+							} }
+						] } } }
+					},
+					"409": {
+						"description": "菜单版本与服务端不一致；不调用 MiMo。",
+						"headers": { "X-ChiShenMe-Contract-Version": { "$ref": "#/components/headers/ContractVersion" } },
+						"content": { "application/json": { "schema": { "type": "object", "additionalProperties": false, "required": ["requestId", "code", "message"], "properties": {
+							"requestId": { "$ref": "#/components/schemas/ErrorRequestId" }, "code": { "const": "CANTEEN_MENU_MISMATCH" }, "message": { "const": "食堂菜单已更新，请更新小程序后重试" }
+						} } } }
+					},
+					"413": { "$ref": "#/components/responses/PayloadTooLarge" },
+					"415": { "$ref": "#/components/responses/UnsupportedMediaType" },
+					"429": { "$ref": "#/components/responses/RateLimited" },
+					"500": { "$ref": "#/components/responses/InternalError" }
 				}
 			}
 		},
@@ -2126,6 +2174,230 @@
 	},
 	"components": {
 		"schemas": {
+			"CanteenDecisionRequest": {
+				"type": "object",
+				"properties": {
+					"requestId": {
+						"type": "string",
+						"pattern": "^[A-Za-z0-9_-]{8,80}$"
+					},
+					"menuVersion": {
+						"type": "string",
+						"pattern": "^canteen-menu-v[1-9][0-9]*$"
+					},
+					"preferenceRevision": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 9007199254740991
+					},
+					"consentVersion": {
+						"type": "string",
+						"const": "canteen-mimo-v1"
+					},
+					"preferences": {
+						"type": "object",
+						"properties": {
+							"spicyLevel": {
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 6
+							},
+							"flavorIntensity": {
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 100
+							}
+						},
+						"required": [
+							"spicyLevel",
+							"flavorIntensity"
+						],
+						"additionalProperties": false
+					},
+					"excludedItemIds": {
+						"maxItems": 200,
+						"type": "array",
+						"items": {
+							"type": "string",
+							"pattern": "^[a-z][a-z0-9-]{1,79}$"
+						}
+					}
+				},
+				"required": [
+					"requestId",
+					"menuVersion",
+					"preferenceRevision",
+					"consentVersion",
+					"preferences",
+					"excludedItemIds"
+				],
+				"additionalProperties": false,
+				"allOf": [
+					{
+						"properties": {
+							"excludedItemIds": {
+								"uniqueItems": true
+							}
+						}
+					}
+				]
+			},
+			"CanteenDecisionResponse": {
+				"type": "object",
+				"properties": {
+					"requestId": {
+						"type": "string"
+					},
+					"menuVersion": {
+						"type": "string"
+					},
+					"preferenceRevision": {
+						"type": "integer",
+						"minimum": 1,
+						"maximum": 9007199254740991
+					},
+					"status": {
+						"type": "string",
+						"enum": [
+							"SELECTED",
+							"EXHAUSTED"
+						]
+					},
+					"selectedItemId": {
+						"anyOf": [
+							{
+								"type": "string",
+								"pattern": "^[a-z][a-z0-9-]{1,79}$"
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"source": {
+						"type": "string",
+						"enum": [
+							"MIMO",
+							"LOCAL"
+						]
+					},
+					"model": {
+						"anyOf": [
+							{
+								"type": "string",
+								"enum": [
+									"mimo-v2.6-flash",
+									"mimo-v2.6-pro"
+								]
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"fallbackReason": {
+						"anyOf": [
+							{
+								"type": "string",
+								"enum": [
+									"DISABLED",
+									"UNAVAILABLE",
+									"CAPACITY",
+									"INVALID_MODEL_RESULT",
+									"SINGLE_CANDIDATE",
+									"NO_CANDIDATES"
+								]
+							},
+							{
+								"type": "null"
+							}
+						]
+					},
+					"notice": {
+						"type": "string",
+						"const": "TASTE_ATTRIBUTES_UNVERIFIED"
+					}
+				},
+				"required": [
+					"requestId",
+					"menuVersion",
+					"preferenceRevision",
+					"status",
+					"selectedItemId",
+					"source",
+					"model",
+					"fallbackReason",
+					"notice"
+				],
+				"additionalProperties": false,
+				"allOf": [
+					{
+						"oneOf": [
+							{
+								"properties": {
+									"status": {
+										"const": "SELECTED"
+									},
+									"selectedItemId": {
+										"type": "string"
+									},
+									"fallbackReason": {
+										"not": {
+											"const": "NO_CANDIDATES"
+										}
+									}
+								}
+							},
+							{
+								"properties": {
+									"status": {
+										"const": "EXHAUSTED"
+									},
+									"selectedItemId": {
+										"type": "null"
+									},
+									"source": {
+										"const": "LOCAL"
+									},
+									"fallbackReason": {
+										"const": "NO_CANDIDATES"
+									}
+								}
+							}
+						]
+					},
+					{
+						"oneOf": [
+							{
+								"properties": {
+									"source": {
+										"const": "MIMO"
+									},
+									"model": {
+										"type": "string"
+									},
+									"fallbackReason": {
+										"type": "null"
+									}
+								}
+							},
+							{
+								"properties": {
+									"source": {
+										"const": "LOCAL"
+									},
+									"model": {
+										"type": "null"
+									},
+									"fallbackReason": {
+										"type": "string"
+									}
+								}
+							}
+						]
+					}
+				]
+			},
 			"ContractUuid": {
 				"type": "string",
 				"format": "uuid",

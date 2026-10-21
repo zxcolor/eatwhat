@@ -9,17 +9,17 @@ const core = require('../lib/decision/core');
 const rawCatalog = require('../data/virtual-catalog.json');
 const { createStore, STORAGE_KEY, PROFILE_TTL_MS, DRAFT_TTL_MS } = require('../lib/taste-profile');
 const { createService } = require('../lib/decision/service');
+const { legacyOptions } = require('./fixtures/legacy-taste.cjs');
 
 // Independent synthetic audit. No wx session, real person, network or real
 // preference evidence is used by these tests.
 const copy = value => JSON.parse(JSON.stringify(value));
-const declarations = changes => ({ likedGroups: ['hotpot'], avoidedGroups: [],
-  budgetCents: null, maxSpicy: null, priority: 'taste', ...changes });
+const declarations = changes => ({ spicyLevel: 2, flavorIntensity: 50, ...changes });
 const known = value => ({ state: 'known', value, source: 'independent-audit-fixture', version: '1' });
 const unknown = () => ({ state: 'unknown', source: 'independent-audit-fixture', version: '1' });
 
 function tradeoffProblem(priority, changes = {}) {
-  const problem = catalog.buildProblem({ ...model.compile(declarations({ priority, ...changes })), target: 'PACKAGE' });
+  const problem = catalog.buildProblem({ ...legacyOptions({likedGroups:['hotpot'],avoidedGroups:[],budgetCents:null,maxSpicy:null,priority,...changes}), target: 'PACKAGE' });
   problem.candidates = [
     { id: 'cheap', name: 'Synthetic cheap option', facts: { priceCents: known(1000), distanceUnits: known(150), mealRole: known('main'),
       spicy: known(0), vegetarian: known(false), storeTypeGroup: known('quick'), storeTypeAffinity: known(0.5) } },
@@ -29,39 +29,22 @@ function tradeoffProblem(priority, changes = {}) {
   return problem;
 }
 
-test('audit: absent answers are not explicit empty lists or unlimited values', () => {
-  assert.deepEqual(model.missingFields({}), ['likedGroups', 'avoidedGroups', 'budgetCents', 'maxSpicy', 'priority']);
-  const empty = declarations({ likedGroups: [], priority: 'balanced' });
-  assert.deepEqual(model.missingFields(empty), []);
-  for (const field of model.FIELDS) {
-    const partial = copy(empty);
-    delete partial[field];
-    assert.deepEqual(model.missingFields(partial), [field]);
-    assert.throws(() => model.compile(partial), /偏好|选择/);
-  }
-  assert.equal(model.compile(empty).taste.weight, 0);
-  assert.equal(catalog.assessProfile(empty).ready, true, 'Explicit price/distance balancing remains usable without category likes');
-  assert.throws(() => model.normalizeAnswers({ likedGroups: null }));
-  assert.throws(() => model.normalizeAnswers({ budgetCents: undefined }));
-  assert.throws(() => model.normalizeAnswers({ maxSpicy: false }));
+test('audit: absent slider answers are distinct from explicit zero and displayed defaults', () => {
+
+  assert.deepEqual(model.missingFields({}),['spicyLevel','flavorIntensity']);
+  const values=declarations({spicyLevel:0,flavorIntensity:0});
+  for(const field of model.FIELDS){const partial=copy(values);delete partial[field];assert.deepEqual(model.missingFields(partial),[field]);assert.throws(()=>model.compile(partial));}
+  assert.equal(model.compile(values).taste,null);assert.equal(catalog.assessProfile(values).ready,true);
+  for(const invalid of [{spicyLevel:null},{flavorIntensity:undefined},{spicyLevel:false}])assert.throws(()=>model.normalizeAnswers(invalid));
+
 });
 
-test('audit: conflicting declarations and non-taxonomy categories never become implicit defaults', () => {
-  for (const value of [
-    declarations({ avoidedGroups: ['hotpot'] }),
-    declarations({ likedGroups: ['hotpot', 'hotpot'] }),
-    declarations({ likedGroups: ['川渝火锅'] }),
-    declarations({ likedGroups: [], priority: 'taste' }),
-    declarations({ likedGroups: ['__proto__'] }),
-    { ...declarations(), confidence: 0.99 },
-  ]) assert.throws(() => model.compile(value));
-  const allAvoided = declarations({ likedGroups: [], avoidedGroups: model.GROUPS.map(group => group.id), priority: 'balanced' });
-  assert.throws(() => model.compile(allAvoided));
-  const input = declarations({ likedGroups: ['quick', 'hotpot'] });
-  const before = copy(input);
-  const compiled = model.compile(input);
-  compiled.taste.likedGroups.length = 0;
-  assert.deepEqual(input, before, 'Compilation must not take ownership of mutable UI answers');
+test('audit: legacy, extra and out-of-range answers never become implicit slider defaults', () => {
+
+  for(const value of [declarations({spicyLevel:7}),declarations({flavorIntensity:101}),declarations({spicyLevel:-1}),
+    declarations({flavorIntensity:'50'}),declarations({likedGroups:['hotpot']}),{...declarations(),confidence:.99}])assert.throws(()=>model.compile(value));
+  const input=declarations(),before=copy(input),compiled=model.compile(input);compiled.weights.price=99;assert.deepEqual(input,before);
+
 });
 
 test('audit: category taxonomy has exactly one assignment for every reviewed store label', () => {
@@ -72,7 +55,7 @@ test('audit: category taxonomy has exactly one assignment for every reviewed sto
   }
   const reviewed = new Set(rawCatalog.restaurants.map(row => row.storeCategory.value));
   assert.deepEqual([...mapping.keys()].sort(), [...reviewed].sort());
-  const options = model.compile(declarations({ likedGroups: ['hotpot'], avoidedGroups: ['grill'] }));
+  const options = legacyOptions({likedGroups:['hotpot'],avoidedGroups:['grill'],budgetCents:null,maxSpicy:null,priority:'taste'});
   const stores = new Map(rawCatalog.restaurants.map(row => [row.id, row]));
   for (const target of ['PACKAGE', 'RESTAURANT']) {
     const problem = catalog.buildProblem({ ...options, target });
@@ -111,21 +94,16 @@ test('audit: affinity cannot rescue excluded or unknown store categories', () =>
   assert.equal(result.feasible.includes('unknown'), false);
 });
 
-test('audit: every priority has effective positive weights in both targets and no active semantic duplicates', () => {
-  for (const priority of ['balanced', 'taste', 'price', 'distance']) {
-    const profile = declarations({ priority });
-    const assessment = catalog.assessProfile(profile);
-    assert.equal(assessment.profileComplete, true);
-    assert.equal(assessment.ready, true);
-    for (const target of ['PACKAGE', 'RESTAURANT']) {
-      assert.ok(assessment.counts[target].feasible > 0);
-      const problem = catalog.buildProblem({ ...model.compile(profile), target });
-      const terms = problem.request.explicit_preferences.terms.filter(term => term.enabled !== false && term.weight > 0);
-      assert.ok(terms.length > 0);
-      assert.ok(terms.some(term => term.attribute === 'priceCents' || term.attribute === 'distanceUnits'));
-      const groups = terms.map(term => problem.attributes[term.attribute].semanticGroup);
-      assert.equal(new Set(groups).size, groups.length);
-      if (target === 'RESTAURANT') assert.equal(terms.some(term => term.attribute === 'mealRole'), false);
+test('audit: sliders use positive neutral weights with no active semantic duplicates', () => {
+  for(const spicyLevel of [0,2,6])for(const flavorIntensity of [0,50,100]) {
+    const profile=declarations({spicyLevel,flavorIntensity});
+    assert.equal(catalog.assessProfile(profile).ready,true);assert.equal(catalog.assessProfile(profile).personalizedReady,false);
+    for(const target of ['PACKAGE','RESTAURANT']) {
+      const problem=catalog.buildProblem({...model.compile(profile),target});core.validate(problem);
+      const terms=problem.request.explicit_preferences.terms.filter(term=>term.enabled!==false&&term.weight>0);
+      assert.ok(terms.length>0);assert.ok(terms.every(term=>term.weight===1));
+      const groups=terms.map(term=>problem.attributes[term.attribute].semanticGroup);assert.equal(new Set(groups).size,groups.length);
+      if(target==='RESTAURANT')assert.equal(terms.some(term=>term.attribute==='mealRole'),false);
     }
   }
 });
@@ -164,7 +142,7 @@ function localStore(initial) {
 
 function fillDraft(store, answers = declarations()) {
   store.start();
-  for (const field of ['likedGroups', 'avoidedGroups', 'budgetCents', 'maxSpicy', 'priority']) {
+  for (const field of model.FIELDS) {
     store.answer(field, answers[field], store.getState().revision);
   }
   return store.getState();
@@ -180,7 +158,7 @@ test('audit: persistence requires Start and explicit revision-bound confirmation
   const h = localStore();
   assert.equal(h.store.load().ready, false);
   assert.equal(h.calls.writes, 0, 'Reading the landing page must not imply storage consent');
-  assert.throws(() => h.store.answer('likedGroups', ['hotpot'], 0));
+  assert.throws(() => h.store.answer('spicyLevel', 2, 0));
   const draft = fillDraft(h.store);
   assert.equal(h.store.isReady(), false, 'Complete answers alone are still unconfirmed');
   assert.equal(h.store.getProfile(), null);
@@ -195,7 +173,7 @@ test('audit: persistence requires Start and explicit revision-bound confirmation
   assert.equal(h.calls.writes, writes, 'Duplicate confirmation must not renew retention or duplicate writes');
   assert.deepEqual(h.saved(), persisted);
   const profile = h.store.getProfile();
-  profile.likedGroups.length = 0;
+  profile.spicyLevel = 6;
   assert.deepEqual(h.store.getProfile(), declarations());
   const reloaded = h.reload();
   assert.equal(reloaded.load().ready, true);
@@ -207,10 +185,10 @@ test('audit: stale answers and conflicting edits preserve the exact previous dra
   fillDraft(h.store);
   const prior = h.store.getState();
   const saved = h.saved();
-  assert.throws(() => h.store.answer('likedGroups', ['quick'], prior.revision - 1), error => error.code === 'STALE_TASTE_PROFILE');
+  assert.throws(() => h.store.answer('spicyLevel', 4, prior.revision - 1), error => error.code === 'STALE_TASTE_PROFILE');
   assert.deepEqual(h.store.getState().answers, prior.answers);
   assert.deepEqual(h.saved(), saved);
-  assert.throws(() => h.store.answer('avoidedGroups', ['hotpot'], prior.revision));
+  assert.throws(() => h.store.answer('flavorIntensity', 101, prior.revision));
   assert.deepEqual(h.store.getState().answers, prior.answers);
   assert.equal(h.store.getState().revision, prior.revision);
   assert.deepEqual(h.saved(), saved);
@@ -222,7 +200,7 @@ test('audit: editing preserves the previous stored profile but blocks its use an
   const originalConfirmedAt = h.saved().active.confirmedAt;
   h.advance(PROFILE_TTL_MS - 24 * 60 * 60 * 1000);
   const edit = h.store.beginEdit();
-  h.store.answer('priority', 'price', edit.revision);
+  h.store.answer('flavorIntensity', 80, edit.revision);
   assert.equal(h.store.getState().editing, true);
   assert.equal(h.store.isReady(), false);
   assert.equal(h.store.getProfile(), null);
@@ -230,20 +208,20 @@ test('audit: editing preserves the previous stored profile but blocks its use an
   assert.equal(h.saved().active.confirmedAt, originalConfirmedAt);
   const reloaded = h.reload();
   assert.equal(reloaded.load().ready, false);
-  assert.equal(reloaded.getState().answers.priority, 'price');
+  assert.equal(reloaded.getState().answers.flavorIntensity, 80);
   assert.equal(reloaded.getProfile(), null);
   h.advance(24 * 60 * 60 * 1000);
   assert.equal(h.store.isReady(), false, 'At exactly 90 days, active declarations expire despite a fresh edit');
   assert.equal(h.store.getProfile(), null);
   assert.equal(h.store.getState().started, true, 'The independently fresh draft may still be completed');
-  assert.equal(h.store.getState().answers.priority, 'price');
+  assert.equal(h.store.getState().answers.flavorIntensity, 80);
 });
 
 test('audit: seven-day edit expiry cannot resurrect a superseded active approval', () => {
   const h = localStore();
   completeStore(h);
   const edit = h.store.beginEdit();
-  h.store.answer('priority', 'price', edit.revision);
+  h.store.answer('flavorIntensity', 80, edit.revision);
   h.advance(DRAFT_TTL_MS);
   const state = h.store.getState();
   assert.equal(state.started, false);
@@ -257,7 +235,7 @@ test('audit: seven-day edit expiry cannot resurrect a superseded active approval
 test('audit: Start creates a fresh draft in one call after the previous unconfirmed draft expires', () => {
   const h = localStore();
   h.store.start();
-  h.store.answer('likedGroups', ['hotpot'], h.store.getState().revision);
+  h.store.answer('spicyLevel', 2, h.store.getState().revision);
   h.advance(DRAFT_TTL_MS);
   const fresh = h.store.start();
   assert.equal(fresh.started, true);
@@ -325,23 +303,13 @@ test('audit: malformed, future and unsupported persisted profiles cannot create 
   assert.equal(h.store.getProfile(), null);
 });
 
-test('audit: complete declarations with zero feasible choices remain a data/constraint state', () => {
-  for (const [allowed, expected] of [['grill', 'needs_information'], ['southern', 'no_feasible_candidates']]) {
-    const answers = declarations({ likedGroups: [allowed],
-      avoidedGroups: model.GROUPS.filter(group => group.id !== allowed).map(group => group.id),
-      budgetCents: 2000, maxSpicy: 0 });
-    const assessment = catalog.assessProfile(answers);
-    assert.equal(assessment.profileComplete, true);
-    assert.deepEqual(assessment.missingFields, []);
-    assert.equal(assessment.ready, false);
-    assert.equal(assessment.status, expected);
-    for (const target of ['PACKAGE', 'RESTAURANT']) assert.equal(assessment.counts[target].feasible, 0);
-    const h = localStore();
-    const draft = fillDraft(h.store, answers);
-    assert.throws(() => h.store.confirm(draft.revision), /资料不足|没有符合条件/);
-    assert.equal(h.store.isReady(), false);
-    assert.deepEqual(h.store.getState().missingFields, []);
-  }
+test('audit: a confirmed slider profile does not fabricate a feasible option under impossible meal filters', () => {
+
+  const h=localStore();completeStore(h,declarations({spicyLevel:0}));assert.equal(h.store.isReady(),true);
+  const problem=catalog.buildProblem({...model.compile(h.store.getProfile()),budgetCents:1});
+  const result=core.decide(problem,core.createSession(1));assert.equal(result.selectedId,null);assert.equal(result.feasible.length,0);
+  assert.ok(result.rejected.length>0);assert.equal(h.store.isReady(),true);
+
 });
 
 test('audit: direct service configuration cannot bypass absent onboarding confirmation', () => {
@@ -421,32 +389,16 @@ test('audit: revocation invalidates a rendered card even if the profile store ca
   assert.throws(() => service.recommend({ reroll: true }), error => error.code === 'PREFERENCES_REQUIRED');
 });
 
-test('audit: this-meal budget/spice overrides are explicit while category exclusions remain profile controlled', () => {
-  const h = localStore();
-  const answers = declarations({ avoidedGroups: ['grill'], budgetCents: 3000, maxSpicy: 1 });
-  completeStore(h, answers);
-  const service = createService({ seed: 1, source: 'qa', requireProfile: true,
-    canUseProfile: () => h.store.isReady() });
-  service.setProfile(h.store.getProfile());
-  const configured = service.configure({ options: { budgetCents: null, maxSpicy: null } });
-  assert.equal(configured.options.budgetCents, null);
-  assert.equal(configured.options.maxSpicy, null);
-  assert.deepEqual(h.store.getProfile(), answers, 'A one-meal override never changes the saved declaration');
-  assert.throws(() => service.configure({ options: { taste: null } }));
-  assert.throws(() => service.configure({ options: { taste: model.compile(declarations()).taste } }));
-  assert.deepEqual(service.getState().options.taste.avoidedGroups, ['grill']);
-  const reset = service.reset();
-  assert.equal(reset.profileReady, true);
-  assert.equal(reset.options.budgetCents, 3000);
-  assert.equal(reset.options.maxSpicy, 1);
-  assert.deepEqual(reset.options.taste.avoidedGroups, ['grill']);
-  const diagnostics = service.getDiagnostics();
-  assert.equal(diagnostics.policy.learningEnabled, false);
-  assert.equal(diagnostics.policy.activeQuestionsEnabled, false);
-  assert.equal(diagnostics.evidence.status, 'evidence_insufficient');
-  service.setProfile(null);
-  assert.equal(service.getState().profileReady, false);
-  assert.throws(() => service.recommend(), error => error.code === 'PREFERENCES_REQUIRED');
+test('audit: one-meal filters cannot mutate slider declarations or inject category personalization', () => {
+  const h=localStore(),answers=declarations({spicyLevel:0,flavorIntensity:20});completeStore(h,answers);
+  const service=createService({seed:1,source:'qa',requireProfile:true,canUseProfile:()=>h.store.isReady()});service.setProfile(h.store.getProfile());
+  const configured=service.configure({options:{budgetCents:3000,maxSpicy:1}});
+  assert.equal(configured.options.budgetCents,3000);assert.equal(configured.options.maxSpicy,1);assert.deepEqual(h.store.getProfile(),answers);
+  assert.throws(()=>service.configure({options:{taste:{version:1,likedGroups:['hotpot'],avoidedGroups:[],weight:4}}}));assert.equal(service.getState().options.taste,null);
+  const reset=service.reset();assert.equal(reset.profileReady,true);assert.equal(reset.options.budgetCents,null);assert.equal(reset.options.maxSpicy,0);
+  assert.equal(service.getDiagnostics().policy.learningEnabled,false);assert.equal(service.getDiagnostics().policy.activeQuestionsEnabled,false);
+  assert.equal(service.getDiagnostics().evidence.status,'evidence_insufficient');service.setProfile(null);
+  assert.throws(()=>service.recommend(),{code:'PREFERENCES_REQUIRED'});
 });
 
 function cancellingCatalog() {
@@ -477,35 +429,26 @@ function cancellingCatalog() {
   return module.exports;
 }
 
-test('audit: completed answers with individually varying but exactly cancelling preferences stay gated', () => {
-  const adapter = cancellingCatalog();
-  const balanced = declarations({ likedGroups: [], priority: 'balanced' });
-  // Near: price utility2/5 + distance1 =7/5. Cheap: price3/5 +
-  // distance4/5 =7/5. Equal weights cancel exactly in both target modes.
-  const tied = adapter.assessProfile(balanced);
-  assert.equal(tied.profileComplete, true);
-  assert.equal(tied.ready, false);
-  assert.equal(tied.personalizedReady, false);
-  assert.equal(tied.status, 'needs_preference');
-  for (const target of ['PACKAGE', 'RESTAURANT']) {
-    assert.equal(tied.counts[target].feasible, 2);
-    assert.equal(tied.targetReadiness[target].scoreDiscriminates, false);
-    assert.equal(tied.targetReadiness[target].constrainedSingleton, false);
+test('audit: exact score cancellation does not impersonate missing slider answers', () => {
+
+  const adapter=cancellingCatalog(),values=declarations();
+  const assessment=adapter.assessProfile(values);assert.equal(assessment.ready,true);assert.equal(assessment.personalizedReady,false);
+  for(const target of ['PACKAGE','RESTAURANT']) {
+    const problem=adapter.buildProblem({...model.compile(values),target});
+    const scores=problem.candidates.map(candidate=>core.utility(candidate,problem.request.explicit_preferences).value);
+    assert.equal(scores[0].cmp(scores[1]),0);
   }
-  const discriminated = adapter.assessProfile({ ...balanced, priority: 'price' });
-  assert.equal(discriminated.ready, true);
-  for (const target of ['PACKAGE', 'RESTAURANT']) assert.equal(discriminated.targetReadiness[target].scoreDiscriminates, true);
+
 });
 
-test('audit: a declared budget resolving the same tie to one feasible candidate is sufficient', () => {
-  const adapter = cancellingCatalog();
-  const result = adapter.assessProfile(declarations({ likedGroups: [], priority: 'balanced', budgetCents: 2000 }));
-  assert.equal(result.ready, true);
-  for (const target of ['PACKAGE', 'RESTAURANT']) {
-    assert.equal(result.counts[target].feasible, 1);
-    assert.equal(result.counts[target].rejected, 1);
-    assert.equal(result.targetReadiness[target].scoreDiscriminates, false);
-    assert.equal(result.targetReadiness[target].constrainedSingleton, true);
-    assert.ok(result.targetReadiness[target].supportedSignals.includes('budgetCents'));
+test('audit: explicit one-meal budget resolves a tie without changing the saved slider schema', () => {
+
+  const adapter=cancellingCatalog(),values=declarations();
+  for(const target of ['PACKAGE','RESTAURANT']) {
+    const problem=adapter.buildProblem({...model.compile(values),budgetCents:2000,target});
+    const result=core.decide(copy(problem),core.createSession(1));assert.equal(result.feasible.length,1);assert.equal(result.rejected.length,1);
+    assert.equal(result.selectedId,target==='PACKAGE'?'cheap-meal':'cheap');
   }
+  assert.deepEqual(values,{spicyLevel:2,flavorIntensity:50});
+
 });

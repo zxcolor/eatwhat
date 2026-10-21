@@ -4,51 +4,6 @@ module.exports = {
   "schemaVersion": 1,
   "items": [
     {
-      "itemId": "minzu-fengwei-001",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "minzu-fengwei-002",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "minzu-fengwei-003",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "minzu-fengwei-004",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "minzu-fengwei-005",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "minzu-fengwei-006",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "minzu-fengwei-007",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "minzu-fengwei-008",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "minzu-fengwei-009",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
       "itemId": "lanzhou-lamian-001",
       "defaultCandidate": true,
       "reason": "food"
@@ -89,57 +44,12 @@ module.exports = {
       "reason": "food"
     },
     {
-      "itemId": "lanzhou-lamian-009",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
       "itemId": "lanzhou-lamian-010",
       "defaultCandidate": true,
       "reason": "food"
     },
     {
       "itemId": "lanzhou-lamian-011",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "lanzhou-lamian-012",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "lanzhou-lamian-013",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "lanzhou-lamian-014",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "shandong-jianbing-001",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "shandong-jianbing-002",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "shandong-jianbing-003",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "shandong-jianbing-004",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "shandong-jianbing-005",
       "defaultCandidate": true,
       "reason": "food"
     },
@@ -192,56 +102,6 @@ module.exports = {
       "itemId": "shandong-jianbing-015",
       "defaultCandidate": true,
       "reason": "food"
-    },
-    {
-      "itemId": "shandong-jianbing-016",
-      "defaultCandidate": false,
-      "reason": "drink"
-    },
-    {
-      "itemId": "shandong-jianbing-017",
-      "defaultCandidate": false,
-      "reason": "drink"
-    },
-    {
-      "itemId": "shandong-jianbing-018",
-      "defaultCandidate": false,
-      "reason": "addon"
-    },
-    {
-      "itemId": "shandong-jianbing-019",
-      "defaultCandidate": false,
-      "reason": "addon"
-    },
-    {
-      "itemId": "shandong-jianbing-020",
-      "defaultCandidate": false,
-      "reason": "addon"
-    },
-    {
-      "itemId": "shandong-jianbing-021",
-      "defaultCandidate": false,
-      "reason": "addon"
-    },
-    {
-      "itemId": "shandong-jianbing-022",
-      "defaultCandidate": false,
-      "reason": "addon"
-    },
-    {
-      "itemId": "shandong-jianbing-023",
-      "defaultCandidate": false,
-      "reason": "addon"
-    },
-    {
-      "itemId": "shandong-jianbing-024",
-      "defaultCandidate": false,
-      "reason": "addon"
-    },
-    {
-      "itemId": "shandong-jianbing-025",
-      "defaultCandidate": false,
-      "reason": "addon"
     },
     {
       "itemId": "shishang-luroufan-001",
@@ -494,66 +354,6 @@ module.exports = {
       "reason": "food"
     },
     {
-      "itemId": "anhui-baozi-004",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "anhui-baozi-005",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "anhui-baozi-006",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "anhui-baozi-007",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "anhui-baozi-008",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "anhui-baozi-009",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "anhui-baozi-010",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "anhui-baozi-011",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "anhui-baozi-012",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "anhui-baozi-013",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "anhui-baozi-014",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "anhui-baozi-015",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
       "itemId": "mala-xiangguo-001",
       "defaultCandidate": true,
       "reason": "food"
@@ -565,16 +365,6 @@ module.exports = {
     },
     {
       "itemId": "mala-xiangguo-003",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "fujian-fengwei-001",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "fujian-fengwei-002",
       "defaultCandidate": true,
       "reason": "food"
     },
@@ -614,32 +404,7 @@ module.exports = {
       "reason": "food"
     },
     {
-      "itemId": "fujian-fengwei-010",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
       "itemId": "fujian-fengwei-011",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "fujian-fengwei-012",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "fujian-fengwei-013",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "fujian-fengwei-014",
-      "defaultCandidate": true,
-      "reason": "food"
-    },
-    {
-      "itemId": "fujian-fengwei-015",
       "defaultCandidate": true,
       "reason": "food"
     },
@@ -672,51 +437,6 @@ module.exports = {
       "itemId": "fujian-fengwei-021",
       "defaultCandidate": true,
       "reason": "food"
-    },
-    {
-      "itemId": "fujian-fengwei-022",
-      "defaultCandidate": false,
-      "reason": "addon"
-    },
-    {
-      "itemId": "fujian-fengwei-023",
-      "defaultCandidate": false,
-      "reason": "addon"
-    },
-    {
-      "itemId": "fujian-fengwei-024",
-      "defaultCandidate": false,
-      "reason": "addon"
-    },
-    {
-      "itemId": "fujian-fengwei-025",
-      "defaultCandidate": false,
-      "reason": "addon"
-    },
-    {
-      "itemId": "fujian-fengwei-026",
-      "defaultCandidate": false,
-      "reason": "addon"
-    },
-    {
-      "itemId": "fujian-fengwei-027",
-      "defaultCandidate": false,
-      "reason": "addon"
-    },
-    {
-      "itemId": "fujian-fengwei-028",
-      "defaultCandidate": false,
-      "reason": "addon"
-    },
-    {
-      "itemId": "fujian-fengwei-029",
-      "defaultCandidate": false,
-      "reason": "addon"
-    },
-    {
-      "itemId": "fujian-fengwei-030",
-      "defaultCandidate": false,
-      "reason": "addon"
     }
   ]
 };

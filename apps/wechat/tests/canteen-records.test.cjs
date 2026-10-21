@@ -40,7 +40,7 @@ function harness(enabled = false) {
   return { data, calls, storage, records, now: () => time, advance: value => { time += value; } };
 }
 
-const fixed = () => choice(itemNamed('牛肉馄饨', '民族风味'));
+const fixed = () => choice(itemNamed('鸡肉石锅拌饭', '韩式拌饭'));
 const entryAt = (time, value = fixed()) => ({ recordedAtEpochMillis: time, ...value });
 const envelope = entries => JSON.stringify({ schemaVersion: 1, entries });
 
@@ -113,8 +113,9 @@ test('every default menu food can be recorded while all excluded drinks and addi
     if (included.has(item.id)) { assert.equal(h.records.recordChoice(payload), true); accepted += 1; }
     else { assert.throws(() => h.records.recordChoice(payload), /与菜单不一致/); rejected += 1; }
   }
-  assert.equal(accepted, 124);
-  assert.equal(rejected, 19);
+  assert.equal(accepted, 87);
+  assert.equal(rejected, 0);
+  assert.throws(() => h.records.recordChoice({ ...fixed(), itemId: 'shandong-jianbing-016' }), /与菜单不一致/);
 });
 
 test('all five variable-price dishes preserve the actual chosen size, amount and original unit', () => {
@@ -130,10 +131,9 @@ test('all five variable-price dishes preserve the actual chosen size, amount and
       h.advance(1);
     }
     assert.throws(() => h.records.recordChoice(choice(item)), /与菜单不一致/);
-    const small = choice(item, item.price.variants[0].id);
-    const large = item.price.variants[1];
-    for (const corrupt of [{ variantId: 'unknown' }, { variantName: large.name }, { amountFen: large.amountFen }, { priceText: item.originalPriceText }, { unit: '份' }]) {
-      assert.throws(() => h.records.recordChoice({ ...small, ...corrupt }), /与菜单不一致/);
+    const selected = choice(item, item.price.variants[0].id);
+    for (const corrupt of [{ variantId: 'unknown' }, { variantName: '未售规格' }, { amountFen: selected.amountFen + 1 }, { priceText: '伪造价格' }, { unit: '份' }]) {
+      assert.throws(() => h.records.recordChoice({ ...selected, ...corrupt }), /与菜单不一致/);
     }
   }
 });

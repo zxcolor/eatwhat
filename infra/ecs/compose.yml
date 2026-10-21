@@ -47,6 +47,12 @@ services:
       AMAP_ENABLED: "${AMAP_ENABLED:-false}"
       AMAP_TIMEOUT_MS: "2200"
       QWEN_ENABLED: "false"
+      # MIMO_API_KEY belongs only in the existing private secrets/api.env.
+      MIMO_ENABLED: "${MIMO_ENABLED:-false}"
+      MIMO_MODEL: "${MIMO_MODEL:-mimo-v2.6-flash}"
+      MIMO_TIMEOUT_MS: "${MIMO_TIMEOUT_MS:-8000}"
+      MIMO_MAX_CALLS_PER_MINUTE: "${MIMO_MAX_CALLS_PER_MINUTE:-30}"
+      MIMO_MAX_CONCURRENCY: "${MIMO_MAX_CONCURRENCY:-4}"
       AUTH_SCHEMA_TRANSITION_MODE: "${AUTH_SCHEMA_TRANSITION_MODE:-none}"
       ACCOUNTS_ENABLED: "${ACCOUNTS_ENABLED:-false}"
       PHONE_AUTH_ENABLED: "${PHONE_AUTH_ENABLED:-false}"

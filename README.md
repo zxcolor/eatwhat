@@ -20,6 +20,7 @@
 - 用户体感只是一项请求级、主动选择且不持久化的查询条件，不读取实时天气、温度或后台位置，也不构成天气服务接入。早餐、晚餐、垂类和用户体感路径当前均强制使用确定性规则并关闭 AI；响应会回显 profile 与体感应用版本，Android 在展示前校验其与本次请求一致。该批次仍只是代码/JVM 候选，不代表设备、生产、供应商授权或天气服务闭环已经完成。
 - 单人范围由两端约束：普通推荐的 `partySize` 兼容字段只接受 `1`，已移除群组接口、页面、成员表单和部署开关。API v1 的 `groupRecommendationsEnabled` 只保留固定 `false` 的旧客户端兼容信号。
 - 配置百炼北京地域工作空间地址、API Key 与 `QWEN_ENABLED=true` 后可启用千问；失败时自动回退确定性规则。
+- 微信食堂新增独立 MiMo 决策接口，默认关闭，必须配置服务端密钥并由用户单独同意后调用；不接入 DeepSeek。2026-10-21 已通过本机 API 到 MiMo 的真实调用，完整验证与公网部署尚未完成，见 [MiMo 食堂接入说明](./docs/MIMO_CANTEEN_INTEGRATION.md)。
 - Android 工程已用 JDK 17、SDK 36、Gradle 8.13 完成 buildSrc/App JVM 测试、Lint、Debug、AndroidTest 与内部 Alpha 构建；模拟器验收结果和当前 APK SHA-256 以验证报告为准。仓库内 `.tools` 仅为本机忽略目录，不会提交到版本库。
 - 登录已在不使用真实供应商凭据的设备内合成 API 夹具中验证手机号登录、邮箱绑定、退出、邮箱登录和再次退出；微信/QQ AppID 缺失时保持 fail closed。高德的 Android 合成展示边界与 ECS 真实 Web Service 技术链路均已验证：云端地点搜索和推荐明确返回 `AMAP/LIVE`、`fitScore=null`、GCJ-02 结果且分享关闭；这不等于商业授权、App 备案或公开发布已经获批。
 - 前后端已按独立部署边界拆分：Android 只持有一个环境对应的 API 基址和公开 v1 契约，不包含数据库或供应商 Secret。普通 Debug 与内部 Alpha 均连接 `https://api.eatwhat.pro/` 的同一 API/PostgreSQL 实例，不复制第二套 Debug 服务、端口、域名或数据库；Debug 仍是独立、可调试且不可公开发布的客户端包。只有不可分发的 `fixture` 自动化测试构建固定使用设备/ADB 可达的 `127.0.0.1:3001` 隔离接口。API 的 `serviceCapabilities` 分别声明推荐、地点搜索和服务端独立餐厅关键词搜索是否可用；Android 1.0 只消费推荐与地点搜索能力；已退休的群组兼容字段固定为 `false`，Android 继续忽略 `placeSearchEnabled`。2026-08-23 的历史部署记录对应 release `20260823T071142Z-nationwide`（不代表本轮已核实的生产版本），API 只监听 `127.0.0.1:13001`，数据库只在内部 Docker 网络开放；公网子域已使用独立 DNS、Let's Encrypt 证书和 API vhost 对外提供 v1 API。全国版候选的隔离验收、数据库备份、动态激活和失败自动回退门禁均已通过。

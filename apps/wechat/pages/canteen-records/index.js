@@ -1,7 +1,4 @@
 const records = require('../../lib/canteen-records');
-const menu = require('../../data/canteen-menu');
-const items = new Map(menu.items.map(item => [item.id, item]));
-const stalls = new Map(menu.stalls.map(stall => [stall.id, stall]));
 
 function timeLabel(value) {
   const date = new Date(value);
@@ -29,7 +26,7 @@ Page({
     try {
       const enabled = records.isEnabled();
       const entries = records.list().map((entry, index) => ({
-        id: index, name: items.get(entry.itemId).name, stallName: stalls.get(entry.stallId).name,
+        id: index, ...records.describeChoice(entry),
         time: timeLabel(entry.recordedAtEpochMillis), priceText: entry.priceText,
         variantName: entry.variantName, weighted: entry.priceKind === 'weight',
       }));

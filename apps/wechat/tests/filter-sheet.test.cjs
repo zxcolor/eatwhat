@@ -8,7 +8,7 @@ const filters = require('../lib/filter-view');
 const clone = value => JSON.parse(JSON.stringify(value));
 function service() {
   const value = createService({ seed: 19, source: 'qa' });
-  value.setProfile({ likedGroups: ['hotpot'], avoidedGroups: ['drinks'], budgetCents: null, maxSpicy: null, priority: 'balanced' });
+  value.setProfile({ spicyLevel: 2, flavorIntensity: 50 });
   return value;
 }
 function harness(options = {}) {

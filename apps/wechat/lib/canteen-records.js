@@ -2,6 +2,7 @@
 // They never share the nearby-restaurant history schema or account APIs.
 const menu = require('../data/canteen-menu');
 const policy = require('../data/canteen-policy');
+const historyCatalogs = require('../data/canteen-history-catalogs');
 
 const KEY = 'eatwhat.wechat.canteen-history.v1';
 const ENABLED_KEY = 'eatwhat.wechat.canteen-history.enabled.v1';
@@ -9,8 +10,18 @@ const RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 const MAX_ENTRIES = 30;
 const CHOICE_FIELDS = ['menuVersion', 'itemId', 'stallId', 'variantId', 'variantName', 'priceKind', 'amountFen', 'unit', 'priceText'];
 const ENTRY_FIELDS = ['recordedAtEpochMillis', ...CHOICE_FIELDS];
-const items = new Map(menu.items.map(item => [item.id, item]));
-const candidates = new Set(policy.items.filter(item => item.defaultCandidate === true).map(item => item.itemId));
+function choiceCatalog(source, defaultCandidateIds) {
+  return {
+    items: new Map(source.items.map(item => [item.id, item])),
+    stalls: new Map(source.stalls.map(stall => [stall.id, stall])),
+    candidates: new Set(defaultCandidateIds),
+  };
+}
+// Bundled public menus validate old receipts without adding retired dishes
+// to the current decision pool. The current menu owns its version exclusively.
+const catalogs = new Map(historyCatalogs.catalogs.map(source => [source.menu.version,
+  choiceCatalog(source.menu, source.defaultCandidateIds)]));
+catalogs.set(menu.version, choiceCatalog(menu, policy.items.filter(item => item.defaultCandidate === true).map(item => item.itemId)));
 // biome-ignore lint/suspicious/noPrototypeBuiltins: Keep validation working in WeChat runtimes without ES2022 Object.hasOwn.
 const hasOwn = (value, field) => Object.prototype.hasOwnProperty.call(value, field);
 
@@ -20,10 +31,14 @@ function exact(value, fields) {
 }
 
 function validChoice(value, recorded = false) {
-  if (!exact(value, recorded ? ENTRY_FIELDS : CHOICE_FIELDS) || value.menuVersion !== menu.version) return false;
+  if (!exact(value, recorded ? ENTRY_FIELDS : CHOICE_FIELDS)) return false;
+  if (!recorded && value.menuVersion !== menu.version) return false;
+  const catalog = catalogs.get(value.menuVersion);
+  if (!catalog) return false;
   if (recorded && (!Number.isSafeInteger(value.recordedAtEpochMillis) || value.recordedAtEpochMillis <= 0)) return false;
-  const item = items.get(value.itemId);
-  if (!item || !candidates.has(item.id) || value.stallId !== item.stallId || value.priceKind !== item.price.kind) return false;
+  const item = catalog.items.get(value.itemId);
+  if (!item || !catalog.candidates.has(item.id) || !catalog.stalls.has(value.stallId) ||
+    value.stallId !== item.stallId || value.priceKind !== item.price.kind) return false;
   if (item.price.kind === 'weight') {
     return value.variantId === null && value.variantName === null && value.amountFen === null && value.unit === null && value.priceText === item.originalPriceText;
   }
@@ -36,6 +51,12 @@ function validChoice(value, recorded = false) {
   const variant = item.price.variants.find(option => option.id === value.variantId);
   return !!variant && value.variantName === variant.name && value.amountFen === variant.amountFen &&
     value.unit === variant.unit && value.priceText === variant.originalPriceText;
+}
+
+function describeChoice(entry) {
+  if (!validChoice(entry, true)) throw new Error('食堂选择记录与对应版本菜单不一致。');
+  const catalog = catalogs.get(entry.menuVersion);
+  return { name: catalog.items.get(entry.itemId).name, stallName: catalog.stalls.get(entry.stallId).name };
 }
 
 function createCanteenRecords(options = {}) {
@@ -122,7 +143,7 @@ function createCanteenRecords(options = {}) {
     return true;
   }
 
-  return { isEnabled, setEnabled, list, prune: list, recordChoice, clear, withdraw: () => disable(true), getCleanupError: () => cleanupError };
+  return { isEnabled, setEnabled, list, prune: list, recordChoice, describeChoice, clear, withdraw: () => disable(true), getCleanupError: () => cleanupError };
 }
 
 module.exports = { ...createCanteenRecords(), createCanteenRecords, KEY, ENABLED_KEY, RETENTION_MS, MAX_ENTRIES };

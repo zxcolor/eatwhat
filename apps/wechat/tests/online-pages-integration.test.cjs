@@ -121,7 +121,7 @@ function harness(options = {}) {
   // Existing online flows begin with explicitly confirmed synthetic preferences.
   // Use the real storage/model APIs so App.onLaunch must restore a valid record.
   tasteProfile.start();
-  for (const [field, value] of Object.entries({ likedGroups: ['noodles'], avoidedGroups: [], budgetCents: null, maxSpicy: null, priority: 'balanced' })) {
+  for (const [field, value] of Object.entries({ spicyLevel: 2, flavorIntensity: 50 })) {
     tasteProfile.answer(field, value, tasteProfile.getState().revision);
   }
   tasteProfile.confirm(tasteProfile.getState().revision);

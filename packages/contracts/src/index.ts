@@ -1,4 +1,6 @@
 import { z } from "zod";
+export * from "./canteen-decision.js";
+export { CANTEEN_SERVER_CATALOG } from "./canteen-catalog.js";
 
 // Public HTTP compatibility handshake. Clients may send the same header as a
 // non-authoritative hint; the server always emits its own current value.

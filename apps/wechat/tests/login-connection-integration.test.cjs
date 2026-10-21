@@ -99,7 +99,7 @@ function harness(t, options = {}) {
   // This suite checks account connectivity after explicit local onboarding.
   // A real record is created and then restored by App.onLaunch below.
   tasteProfile.start();
-  for (const [field, value] of Object.entries({ likedGroups: ['noodles'], avoidedGroups: [], budgetCents: null, maxSpicy: null, priority: 'balanced' })) {
+  for (const [field, value] of Object.entries({ spicyLevel: 2, flavorIntensity: 50 })) {
     tasteProfile.answer(field, value, tasteProfile.getState().revision);
   }
   tasteProfile.confirm(tasteProfile.getState().revision);

@@ -115,6 +115,10 @@ $script:RequiredMappings = @(
         BundleRelative = 'scripts/update-amap-secrets.sh'
     },
     [pscustomobject]@{
+        SourceRelative = 'infra/ecs/scripts/update-mimo-secrets.sh'
+        BundleRelative = 'scripts/update-mimo-secrets.sh'
+    },
+    [pscustomobject]@{
         SourceRelative = 'infra/ecs/scripts/update-auth-secrets.sh'
         BundleRelative = 'scripts/update-auth-secrets.sh'
     },

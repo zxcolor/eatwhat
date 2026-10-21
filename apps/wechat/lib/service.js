@@ -1,5 +1,5 @@
 // This module owns transient API state. It deliberately never calls a storage API.
-const VERSION = '0.1.20-alpha';
+const VERSION = '0.1.23-alpha';
 const API_BASE = 'https://api.eatwhat.pro';
 const CONTRACT_HEADER = 'X-ChiShenMe-Contract-Version';
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;

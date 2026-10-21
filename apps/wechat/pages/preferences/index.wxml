@@ -1,69 +1,9 @@
-<view class="page preference-page {{started ? 'preference-wizard' : 'preference-intro'}} {{themeClass}}">
-  <block wx:if="{{!started}}">
-    <view class="intro-mark">吃什么 · 口味偏好</view>
-    <view class="preference-title intro-title">先认识你的口味</view>
-    <view class="preference-subtitle"><view>你来告诉我喜欢什么，下一顿由我替你决定。</view><view class="intro-caption">4 步选择，最后由你确认。</view></view>
-    <view class="intro-steps">
-      <view class="intro-step"><text class="intro-number">01</text><view><view class="intro-label">常想吃什么</view><view class="small-copy">选喜欢的餐厅类型，也可以明确暂无偏好</view></view></view>
-      <view class="intro-step"><text class="intro-number">02</text><view><view class="intro-label">哪些想避开</view><view class="small-copy">告诉我不想出现在候选中的类型</view></view></view>
-      <view class="intro-step"><text class="intro-number">03</text><view><view class="intro-label">预算与辣度</view><view class="small-copy">分别确认平时的一餐范围</view></view></view>
-      <view class="intro-step"><text class="intro-number">04</text><view><view class="intro-label">决定时的取舍</view><view class="small-copy">选更看重的方面，再核对整份偏好</view></view></view>
-    </view>
-    <view class="local-note">选择保存在这台设备，可随时修改；当前使用虚拟餐厅目录。</view>
-    <view class="error" wx:if="{{error}}" role="alert">{{error}}</view>
-    <button class="preference-primary" bindtap="start" hover-class="preference-primary-pressed">{{editing ? '重新打开口味偏好' : '开始选择并保存到本机'}}</button>
-    <button class="privacy-link" bindtap="openCanteen">直接去食堂吃什么 ›</button>
-    <button class="privacy-link" bindtap="privacy">隐私说明</button>
-  </block>
-  <block wx:else>
-    <view class="progress-heading"><text>{{editing ? '调整口味偏好' : '我的口味偏好'}}</text><text class="progress-count">{{step === 5 ? '最后确认' : progressStep + ' / 4'}}</text></view>
-    <view class="progress-steps"><view wx:for="{{steps}}" wx:key="number" class="progress-step {{item.complete ? 'complete' : ''}} {{item.current ? 'current' : ''}}"><view class="step-number">{{item.current ? item.number : item.complete ? '✓' : item.number}}</view><text class="step-label">{{item.number === 1 ? '想吃' : item.number === 2 ? '避开' : item.number === 3 ? '预算辣度' : '取舍'}}</text></view></view>
-    <block wx:if="{{step === 1 || step === 2}}">
-      <view class="preference-title">{{step === 1 ? '平时更想吃什么？' : '哪些类型想先避开？'}}</view>
-      <view class="preference-subtitle">{{step === 1 ? '选常想吃的餐厅类型，可以多选。' : '这些类型会从本次候选中排除，可以多选。'}}</view>
-      <view class="current-choice {{canNext ? 'has-choice' : ''}}" aria-live="polite"><view class="current-choice-label">{{step === 1 ? '常想吃的类型' : '想避开的类型'}}<text class="multiple-label">可多选</text></view><view class="current-choice-value">{{step === 1 ? summary[0].value : summary[1].value}}</view></view>
-      <view class="group-options">
-        <button wx:for="{{groups}}" wx:key="id" class="group-option {{item.selected ? 'selected' : ''}}" data-id="{{item.id}}" data-revision="{{revision}}" bindtap="toggleGroup" hover-class="option-pressed" aria-label="{{item.label}}{{item.selected ? '，已选' : '，未选'}}"><text class="group-label">{{item.label}}</text><view class="choice-mark" aria-hidden="true"><text class="choice-plus">+</text><text class="selection-check">✓</text></view></button>
-      </view>
-      <button class="none-option {{(step === 1 ? likedNone : avoidedNone) ? 'selected' : ''}}" data-revision="{{revision}}" bindtap="chooseNone" hover-class="option-pressed"><text>{{step === 1 ? '暂时没有特别偏好' : '没有要避开的类型'}}</text><text class="selection-check" aria-hidden="true">✓</text></button>
-      <view class="small-copy scope-note">上方类型选中后可再点取消。按餐厅类型选择，具体菜品配料仍未知。</view>
-    </block>
-    <block wx:elif="{{step === 3}}">
-      <view class="preference-title">一顿饭，怎样更合适？</view>
-      <view class="preference-subtitle">先记住平时的范围，每顿仍可再调整。</view>
-      <view class="option-section"><view class="option-section-heading"><view class="option-heading">通常一顿的预算</view><text class="section-selection">{{summary[2].value}}</text></view><view class="compact-options"><button wx:for="{{budgets}}" wx:key="index" class="compact-option {{item.selected ? 'selected' : ''}}" data-field="budgetCents" data-index="{{item.index}}" data-revision="{{revision}}" bindtap="selectOption" hover-class="option-pressed" aria-label="{{item.label}}{{item.selected ? '，已选' : '，未选'}}"><text>{{item.label}}</text><text class="selection-check" aria-hidden="true">✓</text></button></view></view>
-      <view class="option-section"><view class="option-section-heading"><view class="option-heading">能接受的辣度</view><text class="section-selection">{{summary[3].value}}</text></view><view class="compact-options"><button wx:for="{{spicyOptions}}" wx:key="index" class="compact-option {{item.selected ? 'selected' : ''}}" data-field="maxSpicy" data-index="{{item.index}}" data-revision="{{revision}}" bindtap="selectOption" hover-class="option-pressed" aria-label="{{item.label}}{{item.selected ? '，已选' : '，未选'}}"><text>{{item.label}}</text><text class="selection-check" aria-hidden="true">✓</text></button></view></view>
-      <view class="small-copy scope-note">选择不限也可以，请分别确认这两项。</view>
-    </block>
-    <block wx:elif="{{step === 4}}">
-      <view class="preference-title">决定时，更看重什么？</view>
-      <view class="preference-subtitle">符合预算与避开条件后，再按你的取舍决定。</view>
-      <view class="priority-options"><button wx:for="{{priorities}}" wx:key="id" class="priority-option {{item.selected ? 'selected' : ''}}" data-id="{{item.id}}" data-revision="{{revision}}" bindtap="selectPriority" hover-class="option-pressed" aria-label="{{item.label}}{{item.selected ? '，已选' : '，未选'}}"><view class="priority-copy"><view class="option-heading">{{item.label}}</view><view class="small-copy">{{item.description}}</view></view><view class="priority-check" aria-hidden="true"><text class="selection-check">✓</text></view></button></view>
-    </block>
-    <block wx:else>
-      <view class="preference-title">最后，核对一下</view>
-      <view class="preference-subtitle">点任一项可以修改，确认后再开始决定。</view>
-      <view class="readiness {{ready ? 'ready' : 'needs-adjustment'}}" aria-live="polite"><view class="readiness-title"><text>{{ready ? '这份偏好可以开始决定' : '还需要调整这份偏好'}}</text><text class="ready-check" aria-hidden="true">✓</text></view><view class="small-copy">{{readinessMessage}}</view></view>
-      <view class="preference-pass">
-        <view class="pass-heading"><text>我的口味清单</text><text class="pass-status">{{editing ? '待保存修改' : '待你确认'}}</text></view>
-        <view class="summary-list"><button wx:for="{{summary}}" wx:key="label" class="summary-row" hover-class="summary-row-pressed" data-step="{{item.step}}" data-revision="{{revision}}" bindtap="editStep" aria-label="修改{{item.label}}"><view class="summary-copy"><view class="summary-label">{{item.label}}</view><view class="summary-value">{{item.value}}</view></view><text class="summary-edit">修改 ›</text></button></view>
-      </view>
-      <view class="small-copy scope-note">确认后的偏好在本机保留 90 天，未完成选择保留 7 天。</view>
-    </block>
-    <view class="error" wx:if="{{error}}" role="alert">{{error}}</view>
-    <view class="preference-footnote"><view class="local-note">选择保存在这台设备，可随时修改；当前使用虚拟餐厅目录。</view><button class="privacy-link" bindtap="privacy" disabled="{{busy}}">隐私说明</button></view>
-    <view class="preference-actions {{step === 5 ? 'review-actions' : ''}}">
-      <view wx:if="{{error}}" class="action-context action-error" aria-live="polite">{{error}}</view>
-      <view wx:elif="{{step === 1}}" class="action-context" aria-live="polite">{{canNext ? '已选：' + summary[0].value : '选择想吃的类型，或明确选择暂无偏好'}}</view>
-      <view wx:elif="{{step === 2}}" class="action-context" aria-live="polite">{{canNext ? '已选：' + summary[1].value : '选择想避开的类型，或明确选择没有'}}</view>
-      <view wx:elif="{{step === 3}}" class="action-context" aria-live="polite">{{canNext ? summary[2].value + ' · ' + summary[3].value : '请分别确认预算与辣度'}}</view>
-      <view wx:elif="{{step === 4}}" class="action-context" aria-live="polite">{{canNext ? '更看重：' + summary[4].value : '请选择你更看重的一项'}}</view>
-      <view wx:else class="action-context" aria-live="polite">{{ready ? '确认后，才会按这份偏好开始决定' : '请按上方说明调整偏好'}}</view>
-      <view class="action-buttons">
-        <button wx:if="{{step > 1}}" class="preference-back" data-revision="{{revision}}" bindtap="previous" disabled="{{busy}}" hover-class="option-pressed">上一步</button>
-        <button wx:if="{{step !== 5}}" class="preference-primary" data-revision="{{revision}}" bindtap="next" disabled="{{!canNext || busy}}" hover-class="preference-primary-pressed">{{step === 4 ? '查看我的偏好' : '下一步'}}</button>
-        <button wx:else class="preference-primary" hover-class="preference-confirm-pressed" data-revision="{{revision}}" bindtap="finish" disabled="{{!ready || busy}}" loading="{{busy}}">{{editing ? '保存偏好，返回首页' : '按我的偏好开始决定'}}</button>
-      </view>
-    </view>
-  </block>
+<view class="page preference-page {{themeClass}} {{reducedMotion ? 'reduce-motion' : ''}}">
+  <view class="preference-title">请选择你的口味</view>
+  <view class="preference-sliders">
+    <taste-slider field="spicyLevel" label="" value="{{spicyValue}}" revision="{{revision}}" min="0" max="6" step="1" labels="{{spicyLevels}}" default-value="{{defaultSpicy}}" disabled="{{busy}}" reduced-motion="{{reducedMotion}}" theme-class="{{themeClass}}" bind:input="onSliderInput" bind:commit="onSliderCommit" bind:reset="onSliderReset" bind:dragstate="onSliderDragState"/>
+    <taste-slider field="flavorIntensity" label="口味轻重 · 0轻—100重" value="{{intensityValue}}" revision="{{revision}}" min="0" max="100" step="1" default-value="{{defaultIntensity}}" disabled="{{busy}}" reduced-motion="{{reducedMotion}}" theme-class="{{themeClass}}" bind:input="onSliderInput" bind:commit="onSliderCommit" bind:reset="onSliderReset" bind:dragstate="onSliderDragState"/>
+  </view>
+  <view wx:if="{{error}}" class="preference-error" role="alert">{{error}}</view>
+  <button wx:if="{{showEnter}}" class="enter-button" bindtap="finish" data-revision="{{revision}}" disabled="{{busy || dragging}}" loading="{{busy}}" hover-class="enter-button-pressed">进入首页</button>
 </view>

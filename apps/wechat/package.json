@@ -1,6 +1,6 @@
 {
   "name": "@eatwhat/wechat",
-  "version": "0.1.20-alpha",
+  "version": "0.1.23-alpha",
   "private": true,
   "description": "Fresh native WeChat client for EatWhat, created in WeChat DevTools.",
   "scripts": {

@@ -12,6 +12,14 @@
         "type": "file"
       },
       {
+        "value": "data/canteen-taste-policy.json",
+        "type": "file"
+      },
+      {
+        "value": "data/canteen-history-catalogs.json",
+        "type": "file"
+      },
+      {
         "value": "data/virtual-catalog.json",
         "type": "file"
       },

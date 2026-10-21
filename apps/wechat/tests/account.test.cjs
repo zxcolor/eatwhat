@@ -311,6 +311,7 @@ function loadPage(relative, context) {
   let definition
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', relative), 'utf8'), {
     Page(value) { definition = value }, require(name) {
+      if (name.endsWith('/canteen-ai')) return { preference: () => 'disabled' }
       if (name.endsWith('/taste-profile')) return { getState: () => ({ ready: true, started: false }) }
       return name.endsWith('/account') ? context.account : context.service
     },

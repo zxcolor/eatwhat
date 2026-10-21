@@ -22,6 +22,8 @@ import {
 	AuthTokenResponseSchema,
 	BindIdentityRequestSchema,
 	BindIdentityResponseSchema,
+	CanteenDecisionRequestSchema,
+	CanteenDecisionResponseSchema,
 	BindingIdPathSchema,
 	CONTRACT_VERSION_HEADER,
 	CreatePrivateFeedbackRequestSchema,
@@ -479,6 +481,11 @@ describe("OpenAPI v1", () => {
 				],
 			},
 			{ path: "/v1/config", method: "get", statuses: ["200", "500"] },
+			{
+				path: "/v1/canteen/decisions",
+				method: "post",
+				statuses: ["200", "400", "409", "413", "415", "429", "500"],
+			},
 			{
 				path: "/v1/location-city",
 				method: "post",
@@ -1103,6 +1110,8 @@ describe("OpenAPI v1", () => {
 
 	it("keeps Zod request and response constraints in sync", () => {
 		const comparisons = [
+			["CanteenDecisionRequest", CanteenDecisionRequestSchema, "input"],
+			["CanteenDecisionResponse", CanteenDecisionResponseSchema, "output"],
 			["RecommendationTarget", RecommendationTargetSchema, "input"],
 			["WeatherContextRequest", WeatherContextRequestSchema, "input"],
 			["RecommendationContext", RecommendationContextSchema, "input"],

@@ -1,5 +1,7 @@
-const SCHEMA_VERSION = 1;
-const POLICY_VERSION = 'explicit-store-preferences-v1';
+const SCHEMA_VERSION = 2;
+const POLICY_VERSION = 'explicit-taste-sliders-v2';
+const LEGACY_TASTE_VERSION = 1;
+const LEGACY_POLICY_VERSION = 'explicit-store-preferences-v1';
 
 function freeze(value) {
   if (value && typeof value === 'object' && !Object.isFrozen(value)) {
@@ -29,7 +31,12 @@ const GROUPS = freeze([
   { id: 'dessert', label: '甜品烘焙', description: '冰淇淋、面包蛋糕及甜品店', categories: ['冰淇淋', '面包蛋糕', '甜品'] },
   { id: 'drinks', label: '饮品咖啡', description: '奶茶果汁、咖啡及酸奶店', categories: ['奶茶果汁', '咖啡', '酸奶'] },
 ]);
-const FIELDS = freeze(['likedGroups', 'avoidedGroups', 'budgetCents', 'maxSpicy', 'priority']);
+const FIELDS = freeze(['spicyLevel', 'flavorIntensity']);
+const SPICY_LEVELS = freeze(['不辣', '微微辣', '微辣', '中辣', '麻辣', '特辣', '特辣Ultra']);
+const DEFAULT_SPICY_LEVEL = 0;
+const DEFAULT_FLAVOR_INTENSITY = 50;
+// Retained only for callers of the legacy category adapter. These are not
+// accepted fields or defaults of the new two-slider answer schema.
 const BUDGET_OPTIONS = freeze([
   { value: null, label: '不限预算' }, { value: 2000, label: '20 元内' },
   { value: 3000, label: '30 元内' }, { value: 4000, label: '40 元内' }, { value: 6000, label: '60 元内' },
@@ -44,12 +51,6 @@ const PRIORITIES = freeze([
   { id: 'price', label: '价格优先', description: '更在意少花一些钱' },
   { id: 'distance', label: '距离优先', description: '更在意离当前虚拟地点近一些' },
 ]);
-const WEIGHTS = freeze({
-  balanced: { taste: 4, price: 2, distance: 2, main: 1 },
-  taste: { taste: 6, price: 1, distance: 1, main: 1 },
-  price: { taste: 2, price: 6, distance: 1, main: 1 },
-  distance: { taste: 2, price: 1, distance: 6, main: 1 },
-});
 const ids = new Set(GROUPS.map(group => group.id));
 
 function invalid(message) {
@@ -75,48 +76,65 @@ function normalizeAnswers(input = {}) {
   const answers = {};
   for (const key of Object.keys(input)) {
     const value = input[key];
-    if (key === 'likedGroups' || key === 'avoidedGroups') answers[key] = groupList(value);
-    else if (key === 'budgetCents') {
-      if (!BUDGET_OPTIONS.some(option => option.value === value)) invalid('请选择有效的预算范围。');
-      answers[key] = value;
-    } else if (key === 'maxSpicy') {
-      if (!SPICY_OPTIONS.some(option => option.value === value)) invalid('请选择有效的辣度范围。');
-      answers[key] = value;
-    } else {
-      if (!PRIORITIES.some(option => option.id === value)) invalid('请选择决定时最在意的方面。');
-      answers[key] = value;
+    if (key === 'spicyLevel') {
+      if (!Number.isInteger(value) || value < 0 || value >= SPICY_LEVELS.length) invalid('请选择有效的辣度档位。');
+    } else if (!Number.isInteger(value) || value < 0 || value > 100) {
+      invalid('口味浓淡应为 0 到 100 的整数。');
     }
+    answers[key] = value;
   }
-  validateGroups(answers);
   return answers;
 }
 function missingFields(input) {
   const answers = normalizeAnswers(input);
   return FIELDS.filter(key => !Object.keys(answers).includes(key));
 }
+function assessAnswers(input = {}) {
+  const answers = normalizeAnswers(input);
+  const missing = missingFields(answers);
+  const complete = missing.length === 0;
+  // Completion makes the declaration confirmable, not a claim that existing
+  // menu facts can distinguish these seven levels or flavor intensity.
+  return {
+    profileComplete: complete,
+    personalizedReady: false,
+    ready: complete,
+    status: complete ? 'ready' : 'incomplete',
+    missingFields: missing,
+    signals: [],
+    counts: {},
+    limitations: [
+      '当前虚拟目录仅能把“不辣”对应到已有的明确不辣记录。',
+      '七档辣度与口味浓淡会完整保存；真实食堂尚无对应菜品属性，暂不据此精细匹配。',
+    ],
+    message: complete ? '口味已填写，确认后即可进入。' : '请分别选择辣度与口味浓淡。',
+  };
+}
 function compile(input) {
   const answers = normalizeAnswers(input);
   if (missingFields(answers).length) invalid('请先完成每一项偏好选择。');
-  const selected = WEIGHTS[answers.priority];
+  // Compatibility defaults are product rules, not inferred user preferences.
+  // The virtual catalog has no justified seven-level or flavor-intensity map.
   return {
-    budgetCents: answers.budgetCents,
-    maxSpicy: answers.maxSpicy,
-    weights: { price: selected.price, distance: selected.distance, main: selected.main },
-    taste: { version: SCHEMA_VERSION, likedGroups: [...answers.likedGroups], avoidedGroups: [...answers.avoidedGroups],
-      weight: answers.likedGroups.length ? selected.taste : 0 },
+    budgetCents: null,
+    maxSpicy: answers.spicyLevel === 0 ? 0 : null,
+    weights: { price: 1, distance: 1, main: 1 },
+    taste: null,
   };
 }
 function normalizeTaste(input) {
   if (input === null) return null;
   if (!object(input) || Object.keys(input).sort().join(',') !== 'avoidedGroups,likedGroups,version,weight'
-    || input.version !== SCHEMA_VERSION || typeof input.weight !== 'number'
+    || input.version !== LEGACY_TASTE_VERSION || typeof input.weight !== 'number'
     || !Number.isFinite(input.weight) || input.weight < 0 || input.weight > 1000000) invalid('偏好模型格式无效。');
-  const result = { version: SCHEMA_VERSION, likedGroups: groupList(input.likedGroups),
+  const result = { version: LEGACY_TASTE_VERSION, likedGroups: groupList(input.likedGroups),
     avoidedGroups: groupList(input.avoidedGroups), weight: input.weight };
   validateGroups(result);
   if ((result.likedGroups.length === 0) !== (result.weight === 0)) invalid('偏好权重与喜欢的类型不一致。');
   return result;
 }
 
-module.exports = { SCHEMA_VERSION, POLICY_VERSION, FIELDS, GROUPS, BUDGET_OPTIONS, SPICY_OPTIONS,
-  PRIORITIES, normalizeAnswers, missingFields, compile, normalizeTaste };
+module.exports = { SCHEMA_VERSION, POLICY_VERSION, LEGACY_TASTE_VERSION, LEGACY_POLICY_VERSION,
+  FIELDS, SPICY_LEVELS, DEFAULT_SPICY_LEVEL, DEFAULT_FLAVOR_INTENSITY,
+  GROUPS, BUDGET_OPTIONS, SPICY_OPTIONS, PRIORITIES,
+  normalizeAnswers, missingFields, assessAnswers, compile, normalizeTaste };
