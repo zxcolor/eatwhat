@@ -35,11 +35,11 @@ MIMO_MAX_CONCURRENCY=4
 
 不要把真实密钥发到聊天、提交 Git 或写进小程序。`scripts/start-api-local.ps1` 已纳入 MiMo 白名单，只有启用时才把密钥注入 API 进程；构建进程不接收它。
 
-本机填写密钥不等于公网服务已启用。小程序仍访问 `https://api.eatwhat.pro`，因此后续需要将本次服务端代码及受控配置部署到该服务，才会由这套小程序实际调用 MiMo。2026-10-21 已启动本机 API 并完成真实 MiMo 调用；公网接口尚未部署，未上传小程序。
+本机填写密钥不等于公网服务已启用。小程序访问 `https://api.eatwhat.pro`，服务端代码和受控配置必须部署到该服务。已完成本机 API 和生产同网络内候选镜像的真实 MiMo 调用，公网激活与小程序运行时结果以本次发布 PR 的最终记录为准。微信平台上传、体验版设置与真机验收分别记录。
 
 ## 部署与回滚
 
-ECS 的非秘密开关在 `deployment.env`，密钥仅放入既有 root-only `secrets/api.env`。Compose 只把该文件交给公开 API。预检保留既有严格密钥门禁，增加 MiMo 精确字段及离线配置校验；未实际执行预检。默认关闭，未设置开关的旧部署配置仍视为关闭。
+ECS 的非秘密开关在 `deployment.env`，密钥仅放入既有 root-only `secrets/api.env`。Compose 只把该文件交给公开 API。预检保留既有严格密钥门禁，增加 MiMo 精确字段及离线配置校验。默认关闭，未设置开关的旧部署配置仍视为关闭。
 
 从尚未激活的候选 release 使用 `scripts/update-mimo-secrets.sh --enable --key-file /root/private/mimo-key` 更新配置；密钥输入须为 root:root、0600 的单行文件。该入口持有既有 mutation 锁，验证 bundle 摘要，原子替换环境文件并执行严格预检；失败时恢复原文件，不重启服务。禁用使用 `--disable`，保留未使用的密钥以便恢复。激活继续走既有备份、备份校验与 `activate-candidate-release.sh`；准备同一新镜像、MiMo 关闭的独立恢复候选，避免旧脚本不识别新增配置字段。
 
@@ -53,4 +53,10 @@ ECS 的非秘密开关在 `deployment.env`，密钥仅放入既有 root-only `se
 
 2026-10-21 20:56（北京时间），使用合成的辣度 2、口味轻重 50 和当前公开菜单请求本机 `POST /v1/canteen/decisions`：HTTP 200，`source=MIMO`，`model=mimo-v2.6-flash`，`fallbackReason=null`，返回当前菜单中的 `hanshi-banfan-014`（鸡肉石锅拌饭），约 3.8 秒。该结果仅证明本机实际 API 到 MiMo 的调用和候选 ID 校验成功，不代表真实用户效果或公网接通。
 
-同轮公网读取：`/health/ready` 返回 200，`/v1/canteen/decisions` 返回 404。未运行完整 `verify.ps1`、单测、lint、模拟器验证或 GitHub CI；未提交、推送、合并或部署。实际密钥只留在被忽略的本机环境文件中，不出现在证据文件中。
+启用前公网基线：`/health/ready` 返回 200，`/v1/canteen/decisions` 返回 404。随后在生产使用的 edge 网络内运行只接收 MiMo 配置的隔离候选容器，真实返回 `source=MIMO`、`fallbackReason=null`，耗时约 5.7 秒；没有改动当时正在服务的 API 或数据库。
+
+2026-10-21，功能提交 `7789f6401fee74e50fa7dd94b94af365445adc8c` 通过完整 `./scripts/verify.ps1 -AlphaApiBaseUrl 'https://api.eatwhat.pro/'`：Node lint、类型检查、测试、构建、部署包门禁、Android Debug 单测/lint/构建、Release Manifest、Fixture/AndroidTest、Alpha 与 APK 端点/内容/签名校验均通过。Node 测试为 1877 项通过，13 项既有专用 PostgreSQL 集成测试因未配置专用测试库而跳过；其中微信小程序 516 项、API 1029 项、共享契约 106 项，新增 MiMo 单元用例 17 项通过。
+
+`scripts/test-mimo-secrets.sh` 在只读根文件系统、无网络的临时 Linux 容器中通过启用、关闭、无效格式、错误权限、链接输入、预检失败恢复、并发锁和活动候选拒绝检查。部署包构建与完整性检查通过。首次检查发现的契约文档遗漏、测试宿主旧问卷假设及本机工具路径问题均已修复，没有删除门禁或放宽业务断言。
+
+本次交付按明确要求不运行 GitHub Actions；推送和合并使用 `[skip ci]`，不把跳过报告为 CI 通过，也不修改工作流或分支保护。实际密钥只存在本机被忽略的配置和服务器受控文件/进程中，不进入源码、客户端、镜像构建环境或验证输出。独立审批、微信平台上传和真机验收不由上述检查替代。
