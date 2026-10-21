@@ -282,8 +282,11 @@ alias，普通降级必须失败；此时关闭微信、保留当前数据库及
 迁移、release 切换或真实高德/登录开放前先运行：
 
 ```bash
+cd /opt/chi-shen-me/current/deploy
 scripts/backup-database.sh
 ```
+
+备份入口只接受当前活动 release。必须在修改共享 Secret 之前完成备份和校验；候选版本新增的环境字段可能不被旧活动版本的严格预检识别。不要通过更改 `current`、复制脚本或放宽环境白名单绕过这一条件。
 
 每份备份原子发布到：
 
@@ -306,9 +309,9 @@ scripts/verify-database-backup.sh \
 
 以下顺序不可交换：
 
-1. 在候选 release 中用 `update-amap-secrets.sh` 从 root:root、`0600` 的输入文件原子写入高德 Key 和签名私钥，并确认 ECS IP 白名单；
-2. 确认脚本自动执行的严格预检成功，且没有输出任何 Secret；
-3. 从同一候选 release 运行 `backup-database.sh`，再用 `verify-database-backup.sh` 校验刚生成的备份；
+1. 从当前活动 release 的 `current/deploy` 运行 `backup-database.sh`，再用 `verify-database-backup.sh` 校验刚生成的备份；此时保留活动版本可识别的共享 Secret 结构；
+2. 在未激活的候选 release 中使用受控更新器准备所需配置，例如 `update-amap-secrets.sh` 或 `update-mimo-secrets.sh`；输入文件必须为 root:root、`0600`，高德仍须确认 ECS IP 白名单；
+3. 确认候选的严格预检与兼容恢复版本检查成功，且没有输出任何 Secret；新增字段不兼容旧预检时，先准备能识别该字段且关闭新增能力的恢复候选；
 4. 仍在候选 release 中运行唯一允许的 API 激活脚本：
 
    ```bash

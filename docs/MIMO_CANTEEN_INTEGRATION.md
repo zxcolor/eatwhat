@@ -41,7 +41,9 @@ MIMO_MAX_CONCURRENCY=4
 
 ECS 的非秘密开关在 `deployment.env`，密钥仅放入既有 root-only `secrets/api.env`。Compose 只把该文件交给公开 API。预检保留既有严格密钥门禁，增加 MiMo 精确字段及离线配置校验。默认关闭，未设置开关的旧部署配置仍视为关闭。
 
-从尚未激活的候选 release 使用 `scripts/update-mimo-secrets.sh --enable --key-file /root/private/mimo-key` 更新配置；密钥输入须为 root:root、0600 的单行文件。该入口持有既有 mutation 锁，验证 bundle 摘要，原子替换环境文件并执行严格预检；失败时恢复原文件，不重启服务。禁用使用 `--disable`，保留未使用的密钥以便恢复。激活继续走既有备份、备份校验与 `activate-candidate-release.sh`；准备同一新镜像、MiMo 关闭的独立恢复候选，避免旧脚本不识别新增配置字段。
+首次启用前，先从 `/opt/chi-shen-me/current/deploy` 完成活动版本的数据库备份与备份校验，再改变共享 Secret。备份脚本明确拒绝候选目录；提前加入 `MIMO_API_KEY` 会使不认识该字段的旧活动预检无法通过。
+
+备份校验成功后，从尚未激活的候选 release 使用 `scripts/update-mimo-secrets.sh --enable --key-file /root/private/mimo-key` 更新配置；密钥输入须为 root:root、0600 的单行文件。该入口持有既有 mutation 锁，验证 bundle 摘要，原子替换环境文件并执行严格预检；失败时恢复原文件，不重启服务。禁用使用 `--disable`，保留未使用的密钥以便恢复。准备同一新镜像、MiMo 关闭的独立恢复候选，再走 `activate-candidate-release.sh --rollback-release <恢复候选>`；不修改活动 release 或放宽旧预检。
 
 每个客户端 IP 每分钟最多 12 次食堂接口请求。每 API 进程默认最多 30 次模型调用/分钟、4 个并发，超时 8 秒；这些是单实例限制，不是跨实例或跨重启的财务预算。还应在供应商控制台设置账户消费额度。禁用 `MIMO_ENABLED` 或在小程序设置关闭 MiMo即可回到规则路径。回退到旧部署脚本前须处理其不识别的新环境字段，不能直接混用新 Secret 文件和旧脚本。
 
