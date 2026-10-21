@@ -98,7 +98,7 @@ test('support feedback requires its accepted HTTP status rather than any success
 
 test('no network before consent, including account transport and config', async () => {
   const { service: s, calls } = harness();
-  assert.equal(s.VERSION, '0.1.11-alpha');
+  assert.equal(s.VERSION, '0.1.19-alpha');
   assert.equal(s.state.status, 'idle');
   await assert.rejects(s.request('/v1/auth/identities'), { code: 'CONSENT_REQUIRED' });
   await assert.rejects(s.refreshConfig(), { code: 'CONSENT_REQUIRED' });
@@ -143,6 +143,55 @@ test('missing, duplicate and incompatible contract headers fail closed; errors h
   await assert.rejects(promise, error => error.code === 'HTTP_503' && !error.message.includes('SECRET'));
   global.wx.request = () => { const error = new Error('SECRET_NATIVE_DETAIL'); error.code = 'ENET'; throw error; };
   await assert.rejects(s.request('/v1/config'), error => error.code === 'NETWORK_UNAVAILABLE' && !error.message.includes('SECRET'));
+});
+
+test('transport failures expose fixed safe categories without raw error details', async () => {
+  const cases = [
+    ['request:fail URL NOT IN DOMAIN LIST', 'NETWORK_DOMAIN_NOT_ALLOWED', '服务器域名尚未生效，请重新进入小程序后重试。'],
+    ['request:fail timeout', 'NETWORK_TIMEOUT', '连接服务器超时，请检查网络后重试。'],
+    ['request:fail TIMED OUT', 'NETWORK_TIMEOUT', '连接服务器超时，请检查网络后重试。'],
+    ['request:fail SSL handshake error', 'NETWORK_TLS_ERROR', '安全连接校验失败，请检查网络或稍后重试。'],
+    ['request:fail TLS connection error', 'NETWORK_TLS_ERROR', '安全连接校验失败，请检查网络或稍后重试。'],
+    ['request:fail Certificate invalid', 'NETWORK_TLS_ERROR', '安全连接校验失败，请检查网络或稍后重试。'],
+    ['request:fail connection refused', 'NETWORK_ERROR', '网络连接失败，请检查网络后重试。'],
+    [undefined, 'NETWORK_ERROR', '网络连接失败，请检查网络后重试。'],
+    [42, 'NETWORK_ERROR', '网络连接失败，请检查网络后重试。'],
+  ];
+  for (const [raw, code, message] of cases) {
+    const { service: s, calls } = harness();
+    s.setConsent(true);
+    const pending = s.refreshConfig();
+    calls[0].options.fail({ errMsg: typeof raw === 'string' ? `${raw} https://synthetic.invalid/?credential=PRIVATE_TEST_SECRET` : raw, detail: 'PRIVATE_TEST_SECRET' });
+    await assert.rejects(pending, error => {
+      assert.equal(error.code, code);
+      assert.equal(error.message, message);
+      assert.doesNotMatch(JSON.stringify(error) + error.message, /PRIVATE_TEST|synthetic\.invalid/);
+      return true;
+    });
+    assert.equal(s.state.error, message);
+    assert.equal(s.state.status, 'error');
+    assert.equal(s.state.config, null);
+  }
+});
+
+test('cancellation and privacy withdrawal take priority over late classified transport failures', async () => {
+  for (const withdraw of [false, true]) {
+    for (const raw of ['url not in domain list', 'timeout', 'ssl certificate error']) {
+      const { service: s, calls } = harness();
+      s.setConsent(true);
+      const pending = s.refreshConfig();
+      const rejected = assert.rejects(pending, { code: 'CANCELLED' });
+      if (withdraw) s.setConsent(false); else s.invalidate();
+      let inspected = false;
+      calls[0].options.fail({ get errMsg() { inspected = true; return `${raw} PRIVATE_TEST_SECRET`; } });
+      await rejected;
+      assert.equal(calls[0].aborted, true);
+      assert.equal(inspected, false);
+      assert.equal(s.state.error, '');
+      assert.equal(s.state.status, 'idle');
+      assert.equal(s.state.config, null);
+    }
+  }
 });
 
 test('withdrawal aborts and rejects in-flight operations, ignores late responses and clears sensitive state', async () => {
@@ -197,7 +246,7 @@ test('new configuration wins races; failure cannot retain old capabilities or re
 
 test('minimum supported mini-program version is authoritative and malformed versions fail closed', async () => {
   const { service: s, ready } = harness();
-  await assert.rejects(ready(config({ minimumSupportedVersions: { android: '0.1.3', miniprogram: '0.1.12' } })), { code: 'UPDATE_REQUIRED' });
+  await assert.rejects(ready(config({ minimumSupportedVersions: { android: '0.1.3', miniprogram: '0.1.19' } })), { code: 'UPDATE_REQUIRED' });
   assert.equal(s.state.status, 'update-required');
   assert.equal(s.state.config, null);
   const next = harness();

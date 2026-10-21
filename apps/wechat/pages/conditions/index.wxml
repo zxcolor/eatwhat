@@ -1,33 +1,19 @@
-<view class="page {{themeClass}}">
-  <view class="title">这一餐，怎么选</view><view class="subtitle">只为你一个人，选出最多 3 个用餐候选。</view>
-  <view class="card" bindtap="location"><view class="label">出发地点</view><view class="row location-row"><text>{{locationLabel}}</text><text class="muted">更换 ›</text></view></view>
-  <view class="card"><view class="section-title">快捷场景</view><view class="chips"><button class="chip" data-value="IN_A_HURRY" bindtap="scenario">赶时间</button><button class="chip" data-value="WORKDAY_LUNCH" bindtap="scenario">工作午餐</button><button class="chip" data-value="BUSINESS_TRIP" bindtap="scenario">出差</button></view></view>
-  <view class="card">
-    <view class="section-title">决定方式</view>
-    <view class="chips"><button wx:for="{{options.decisionMode}}" wx:key="value" class="chip {{item.selected ? 'selected' : ''}}" data-key="decisionMode" data-index="{{item.index}}" bindtap="select">{{item.label}}</button></view>
-    <view class="section-title">哪一餐</view>
-    <view class="chips"><button wx:for="{{options.mealPeriod}}" wx:key="value" class="chip {{item.selected ? 'selected' : ''}}" data-key="mealPeriod" data-index="{{item.index}}" bindtap="select">{{item.label}}</button></view>
-    <view wx:if="{{options.target.length > 1 || filters.target !== 'MEAL'}}">
-      <view class="section-title">想决定什么</view>
-      <view class="chips"><button wx:for="{{options.target}}" wx:key="value" class="chip {{item.selected ? 'selected' : ''}}" data-key="target" data-index="{{item.index}}" bindtap="select">{{item.label}}</button></view>
-    </view>
-    <view wx:if="{{showWeather}}">
-      <view class="section-title">手动体感</view><view class="muted">只使用你本次主动选择的体感。</view>
-      <view class="chips"><button wx:for="{{options.weather}}" wx:key="value" class="chip {{item.selected ? 'selected' : ''}}" data-key="weather" data-index="{{item.index}}" bindtap="select">{{item.label}}</button></view>
-    </view>
+<view wx:if="{{preferenceReady}}" class="page decision-page conditions-page {{themeClass}}">
+  <view class="virtual-badge">虚拟体验</view>
+  <view class="title">这顿的条件</view><view class="subtitle">预算、距离和口味，留下你在意的。</view>
+  <button class="card origin-card" bindtap="location"><view class="origin-symbol">↗</view><view class="origin-content"><view class="origin-caption">虚拟出发点</view><view class="label">{{locationLabel}}</view></view><text class="origin-change">更换 ›</text></button>
+  <view class="form-section-caption">01 · 这次想选什么</view>
+  <view class="card target-card"><view class="chips target-chips"><button class="chip {{target === 'PACKAGE' ? 'selected' : ''}}" data-target="PACKAGE" bindtap="target">一份套餐</button><button class="chip {{target === 'RESTAURANT' ? 'selected' : ''}}" data-target="RESTAURANT" bindtap="target">一家餐厅</button></view></view>
+  <view class="form-section-caption">02 · 基本条件</view>
+  <view class="card limits-card">
+    <view class="form-field"><view class="section-title">总价预算</view><view class="chips"><button wx:for="{{choices.budgetCents}}" wx:key="index" class="chip {{item.selected ? 'selected' : ''}}" data-key="budgetCents" data-index="{{item.index}}" bindtap="select">{{item.label}}</button></view></view>
+    <view class="form-field"><view class="section-title">虚拟距离</view><view class="field-caption">仅用于场景内比较，不是现实路程</view><view class="chips"><button wx:for="{{choices.maxDistanceUnits}}" wx:key="index" class="chip {{item.selected ? 'selected' : ''}}" data-key="maxDistanceUnits" data-index="{{item.index}}" bindtap="select">{{item.label}}</button></view></view>
+    <view class="form-field"><view class="section-title">辣度</view><view class="chips"><button wx:for="{{choices.maxSpicy}}" wx:key="index" class="chip {{item.selected ? 'selected' : ''}}" data-key="maxSpicy" data-index="{{item.index}}" bindtap="select">{{item.label}}</button></view></view>
+    <view class="row toggle-row"><view><view class="label">只选模拟素食</view><view class="muted">依据虚拟场景中的模拟属性</view></view><switch checked="{{vegetarianOnly}}" data-key="vegetarianOnly" bindchange="toggle" color="#b94a29"/></view>
+    <view wx:if="{{target === 'PACKAGE'}}" class="row toggle-row"><view><view class="label">优先模拟正餐</view><view class="muted">依据模拟用餐类型，具体配料和分量未知</view></view><switch checked="{{preferMain}}" data-key="preferMain" bindchange="toggle" color="#b94a29"/></view>
   </view>
-  <view wx:if="{{filters.decisionMode === 'QUICK'}}" class="card"><view class="section-title">当前条件</view><view class="summary">{{summary}}</view><view class="muted">想改预算或出行方式，可以切换「按条件选」。</view></view>
-  <view wx:else class="card">
-    <view class="section-title">人均预算</view><view class="chips"><button wx:for="{{options.budgetMaxYuan}}" wx:key="index" class="chip {{item.selected ? 'selected' : ''}}" data-key="budgetMaxYuan" data-index="{{item.index}}" bindtap="select">{{item.label}}</button></view>
-    <view class="section-title">一共可用多久</view><view class="chips"><button wx:for="{{options.availableMinutes}}" wx:key="value" class="chip {{item.selected ? 'selected' : ''}}" data-key="availableMinutes" data-index="{{item.index}}" bindtap="select">{{item.label}}</button></view>
-    <view class="section-title">交通方式</view><view class="chips"><button wx:for="{{options.travelMode}}" wx:key="value" class="chip {{item.selected ? 'selected' : ''}}" data-key="travelMode" data-index="{{item.index}}" bindtap="select">{{item.label}}</button></view>
-    <view class="section-title">最远距离</view><view class="chips"><button wx:for="{{options.radiusMeters}}" wx:key="value" class="chip {{item.selected ? 'selected' : ''}}" data-key="radiusMeters" data-index="{{item.index}}" bindtap="select">{{item.label}}</button></view>
-    <block wx:if="{{softPreferences}}"><view class="section-title">探索偏好</view><view class="chips"><button wx:for="{{options.explorationMode}}" wx:key="value" class="chip {{item.selected ? 'selected' : ''}}" data-key="explorationMode" data-index="{{item.index}}" bindtap="select">{{item.label}}</button></view><view class="section-title">更想吃</view><view class="chips"><button wx:for="{{preferredCuisines}}" wx:key="name" class="chip {{item.selected ? 'selected' : ''}}" data-name="{{item.name}}" data-preferred="yes" bindtap="toggleCuisine">{{item.name}}</button></view></block>
-    <view class="section-title">这次不吃</view><view class="chips"><button wx:for="{{cuisines}}" wx:key="name" class="chip {{item.selected ? 'selected' : ''}}" data-name="{{item.name}}" bindtap="toggleCuisine">{{item.name}}</button></view>
-    <block wx:if="{{softPreferences}}"><view class="section-title">偏好权重</view><view wx:for="{{preferences}}" wx:key="key"><view class="row"><text>{{item.label}}</text><text class="muted">{{item.value}}</text></view><slider min="0" max="100" step="5" value="{{item.value}}" data-key="{{item.key}}" bindchange="preference" activeColor="#345a45" /></view></block>
-    <view wx:if="{{aiAvailable}}" class="row"><text>辅助说明</text><switch checked="{{filters.aiAssistanceEnabled}}" bindchange="ai" color="#345a45" /></view>
-  </view>
-  <view wx:if="{{error || selectionError}}" class="error">{{error || selectionError}}</view>
-  <view wx:if="{{!canRecommend}}" class="card"><view class="muted">云端服务尚未连接或当前未开放推荐。</view><button class="secondary" bindtap="refresh" loading="{{connecting}}" disabled="{{connecting}}">重新连接</button></view>
-  <button class="primary" bindtap="submit">{{hasLocation ? '帮我决定' : '先选择地点'}}</button>
+  <view class="form-section-caption">03 · 这次更在意什么</view>
+  <view class="card priorities-card"><view class="field-caption">越向右，比较候选时越看重这一项。</view><view wx:for="{{priorities}}" wx:key="key" class="priority"><view class="row"><text>{{item.label}}</text><text class="priority-value">{{item.value === 0 ? '不参考' : item.value === 6 ? '很在意' : item.value + ' / 6'}}</text></view><slider min="0" max="6" step="1" value="{{item.value}}" data-key="{{item.key}}" bindchange="priority" activeColor="#b94a29" block-size="20"/><view class="priority-scale"><text>不参考</text><text>很在意</text></view></view></view>
+  <view class="virtual-note">条件变化后开始新一轮。未知信息会单独说明，虚拟距离不对应现实路线。</view>
+  <view class="conditions-footer"><view wx:if="{{error}}" class="error">{{error}}</view><view class="footer-note">仅用于本次选择，不会改写口味偏好</view><button class="primary" bindtap="submit">按这些条件决定</button></view>
 </view>

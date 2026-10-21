@@ -1,4 +1,9 @@
 {
   "navigationBarTitleText": "吃什么",
-  "usingComponents": {}
+  "navigationBarBackgroundColor": "#F7F6F2",
+  "backgroundColor": "#F7F6F2",
+  "usingComponents": {
+    "decision-sheet": "/components/decision-sheet/index",
+    "filter-sheet": "/components/filter-sheet/index"
+  }
 }

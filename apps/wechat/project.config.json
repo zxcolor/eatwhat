@@ -4,6 +4,10 @@
   "packOptions": {
     "ignore": [
       {
+        "value": "data/virtual-catalog.json",
+        "type": "file"
+      },
+      {
         "value": "tests",
         "type": "folder"
       },
@@ -17,6 +21,18 @@
       },
       {
         "value": "PARITY.md",
+        "type": "file"
+      },
+      {
+        "value": "DECISION_RESEARCH.md",
+        "type": "file"
+      },
+      {
+        "value": "UI_UPGRADE_019.md",
+        "type": "file"
+      },
+      {
+        "value": "project.private.config.json",
         "type": "file"
       },
       {

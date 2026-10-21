@@ -16,7 +16,10 @@ function fixture(consent = false, faults = {}) {
   };
   let app;
   vm.runInNewContext(source, {
+    setTimeout, clearTimeout,
     require(name) {
+      if (name.endsWith('/decision/service')) return { reset() { calls.push(['clear-virtual']); }, setProfile(value) { calls.push([value === null ? 'clear-virtual' : 'set-profile']); } };
+      if (name.endsWith('/taste-profile')) return { load() {}, getProfile: () => null, isReady: () => false, clear() { calls.push(['clear-taste']); } };
       if (name.endsWith('/service')) return service;
       if (name.endsWith('/account')) return { clear() { calls.push(['clear-account']); }, suspend() { calls.push(['suspend-account']); } };
       if (name.endsWith('/nearby')) return { state: {}, subscribe() {}, open() { calls.push(['nearby-open']); }, stop() { calls.push(['nearby-stop']); }, withdraw() { calls.push(['nearby-withdraw']); }, syncCapabilities() { calls.push(['nearby-sync']); } };
@@ -31,7 +34,7 @@ function fixture(consent = false, faults = {}) {
       setStorageSync: (key, value) => { if (faults.write) throw new Error('storage error'); storage.set(key, value); },
       removeStorageSync: key => { if (faults.remove) throw new Error('storage error'); storage.delete(key); },
       getAppBaseInfo: () => ({ theme: 'light' }), onThemeChange() {},
-      reLaunch(options) { calls.push(['navigate', options.url]); },
+      reLaunch(options) { calls.push(['navigate', options.url]); options.success?.({}); options.complete?.({}); },
       showToast(options) { calls.push(['toast', options.title]); }
     }
   });
@@ -41,6 +44,11 @@ test('a fresh launch never requests network or signs in without consent', () => 
   const { app, calls } = fixture();
   app.onLaunch(); app.onShow();
   assert.equal(calls.filter(call => call[0] === 'config').length, 0);
+});
+test('virtual home does not fetch online configuration or collect nearby data even with previous consent', () => {
+  const { app, calls } = fixture(true);
+  app.onLaunch(); app.onShow();
+  assert.equal(calls.some(call => call[0] === 'config' || call[0] === 'nearby-open'), false);
 });
 test('accepted consent enables configuration, withdrawal removes consent and private state', async () => {
   const { app, calls, storage, state } = fixture();
@@ -54,6 +62,8 @@ test('accepted consent enables configuration, withdrawal removes consent and pri
   assert.ok(calls.some(call => call[0] === 'clear-account'));
   assert.ok(calls.some(call => call[0] === 'clear-local'));
   assert.ok(calls.some(call => call[0] === 'nearby-withdraw'));
+  assert.ok(calls.some(call => call[0] === 'clear-virtual'));
+  assert.ok(calls.some(call => call[0] === 'clear-taste'));
 });
 test('backgrounding suspends account secrets and cancels private in-flight state', () => {
   const { app, calls } = fixture(true);

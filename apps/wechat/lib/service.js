@@ -1,5 +1,5 @@
 // This module owns transient API state. It deliberately never calls a storage API.
-const VERSION = '0.1.11-alpha';
+const VERSION = '0.1.19-alpha';
 const API_BASE = 'https://api.eatwhat.pro';
 const CONTRACT_HEADER = 'X-ChiShenMe-Contract-Version';
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
@@ -45,6 +45,13 @@ function failure(message, code, statusCode) {
 }
 function cancelled() { return failure('本次操作已取消，请重新操作。', 'CANCELLED'); }
 function invalidResponse() { return failure('服务返回的信息不完整，请稍后重试。', 'INVALID_RESPONSE'); }
+function transportFailure(error) {
+  const message = typeof error?.errMsg === 'string' ? error.errMsg : '';
+  if (/url not in domain list/i.test(message)) return failure('服务器域名尚未生效，请重新进入小程序后重试。', 'NETWORK_DOMAIN_NOT_ALLOWED');
+  if (/timeout|timed out/i.test(message)) return failure('连接服务器超时，请检查网络后重试。', 'NETWORK_TIMEOUT');
+  if (/ssl|tls|certificate/i.test(message)) return failure('安全连接校验失败，请检查网络或稍后重试。', 'NETWORK_TLS_ERROR');
+  return failure('网络连接失败，请检查网络后重试。', 'NETWORK_ERROR');
+}
 function assert(test, message, code) { if (!test) throw failure(message || '服务返回的信息不完整，请稍后重试。', code || 'INVALID_RESPONSE'); }
 function object(value) { return !!value && typeof value === 'object' && !Array.isArray(value); }
 function text(value, min, max) { return typeof value === 'string' && value.trim().length >= min && value.length <= max; }
@@ -180,7 +187,7 @@ function executeRequest(path, options, binary) {
             } else entry.finish(null, response.data);
           } catch (error) { entry.finish(safeFailures.has(error) ? error : invalidResponse()); }
         },
-        fail() { entry.finish(epoch !== state.epoch || !state.consent ? cancelled() : failure('网络连接失败，请检查网络后重试。', 'NETWORK_ERROR')); },
+        fail(error) { entry.finish(epoch !== state.epoch || !state.consent ? cancelled() : transportFailure(error)); },
       });
     } catch (error) { entry.finish(safeFailures.has(error) ? error : failure('网络服务暂不可用。', 'NETWORK_UNAVAILABLE')); }
   }).then(value => { active(epoch); return value; });

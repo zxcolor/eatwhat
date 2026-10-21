@@ -310,7 +310,10 @@ test('configuration refresh invalidates the previous in-memory session', async (
 function loadPage(relative, context) {
   let definition
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', relative), 'utf8'), {
-    Page(value) { definition = value }, require(name) { return name.endsWith('/account') ? context.account : context.service },
+    Page(value) { definition = value }, require(name) {
+      if (name.endsWith('/taste-profile')) return { getState: () => ({ ready: true, started: false }) }
+      return name.endsWith('/account') ? context.account : context.service
+    },
     getApp() { return context.app }, wx: context.wx, setInterval() { return 1 }, clearInterval() {},
   })
   definition.data = JSON.parse(JSON.stringify(definition.data))
