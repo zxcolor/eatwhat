@@ -4,6 +4,14 @@
   "packOptions": {
     "ignore": [
       {
+        "value": "data/canteen-menu.json",
+        "type": "file"
+      },
+      {
+        "value": "data/canteen-policy.json",
+        "type": "file"
+      },
+      {
         "value": "data/virtual-catalog.json",
         "type": "file"
       },

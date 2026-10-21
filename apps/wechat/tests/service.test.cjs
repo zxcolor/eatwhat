@@ -98,7 +98,7 @@ test('support feedback requires its accepted HTTP status rather than any success
 
 test('no network before consent, including account transport and config', async () => {
   const { service: s, calls } = harness();
-  assert.equal(s.VERSION, '0.1.19-alpha');
+  assert.equal(s.VERSION, require('../package.json').version);
   assert.equal(s.state.status, 'idle');
   await assert.rejects(s.request('/v1/auth/identities'), { code: 'CONSENT_REQUIRED' });
   await assert.rejects(s.refreshConfig(), { code: 'CONSENT_REQUIRED' });
@@ -246,7 +246,10 @@ test('new configuration wins races; failure cannot retain old capabilities or re
 
 test('minimum supported mini-program version is authoritative and malformed versions fail closed', async () => {
   const { service: s, ready } = harness();
-  await assert.rejects(ready(config({ minimumSupportedVersions: { android: '0.1.3', miniprogram: '0.1.19' } })), { code: 'UPDATE_REQUIRED' });
+  const current = /^(\d+)\.(\d+)\.(\d+)(?:-[A-Za-z0-9.-]+)?$/.exec(s.VERSION);
+  assert.ok(current, 'The client version must contain numeric major, minor and patch components');
+  const higherVersion = `${Number(current[1])}.${Number(current[2])}.${Number(current[3]) + 1}`;
+  await assert.rejects(ready(config({ minimumSupportedVersions: { android: '0.1.3', miniprogram: higherVersion } })), { code: 'UPDATE_REQUIRED' });
   assert.equal(s.state.status, 'update-required');
   assert.equal(s.state.config, null);
   const next = harness();

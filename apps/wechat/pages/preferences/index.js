@@ -242,4 +242,9 @@ Page({
     } catch (error) { this.showError(error); }
   },
   privacy() { if (this._active && !this._finishing) wx.navigateTo({ url: '/pages/privacy/index' }); },
+  openCanteen() {
+    if (!this._active || this._finishing) return;
+    this.cancelHomeRedirect();
+    wx.navigateTo({ url: '/pages/canteen/index' });
+  },
 });

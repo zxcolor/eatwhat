@@ -65,11 +65,16 @@ Page({
   async retry() { await getApp().checkService(); this.syncState(); },
   privacy() { wx.navigateTo({url:'/pages/privacy/index'}); },
   async open(event) {
-    if (!this._active || !getApp().ensureTasteProfile()) return;
+    if (!this._active) return;
     const page = event.currentTarget.dataset.page;
+    if (['canteen','canteen-records'].includes(page)) {
+      this.closeDecision(); this.closeFilter();
+      return wx.navigateTo({url:`/pages/${page}/index`});
+    }
+    if (!getApp().ensureTasteProfile()) return;
     if (page === 'preferences') return wx.navigateTo({url:'/pages/preferences/index?edit=1'});
-    if (!['account','settings','conditions','location','saved','local-records','nearby','support'].includes(page)) return;
-    if (!['settings','conditions','location'].includes(page) && !service.state.consent) {
+    if (!['account','settings','conditions','location','saved','local-records','nearby','support','canteen','canteen-records'].includes(page)) return;
+    if (!['settings','conditions','location','canteen','canteen-records'].includes(page) && !service.state.consent) {
       this.setData({tab:2});
       wx.showToast({title:'请先阅读并同意隐私说明',icon:'none'});
       return;

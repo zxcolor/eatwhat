@@ -1,0 +1,33 @@
+<view class="page canteen-page {{themeClass}} {{reducedMotion ? 'reduce-motion' : ''}}">
+  <view class="canteen-eyebrow">一间食堂，也有很多选择</view>
+  <view class="title">食堂吃什么</view>
+  <view class="subtitle">一道菜，一个档口。把这一餐交给我。</view>
+  <view class="card filter-card">
+    <button class="filter-heading" bindtap="toggleFilters" aria-expanded="{{filtersOpen}}"><view><text class="filter-title">这次想怎么吃</text><text class="filter-summary">{{filterSummary}}</text></view><text class="filter-action">{{filtersOpen ? '收起 −' : '调整 +'}}</text></button>
+    <view wx:if="{{filtersOpen}}" class="filter-fields">
+      <view class="label">预算上限</view><view class="budget-field"><input type="digit" value="{{budgetText}}" maxlength="10" placeholder="不限" bindinput="inputBudget" aria-label="预算上限，单位元，留空不限"/><text>元</text></view>
+      <view class="label category-label">菜品分类</view><picker mode="selector" range="{{categories}}" value="{{categoryIndex}}" bindchange="changeCategory"><view class="category-field">{{categories[categoryIndex]}}<text aria-hidden="true">⌄</text></view></picker>
+      <button class="filter-clear" bindtap="clearFilters">清除筛选</button>
+    </view>
+    <view wx:if="{{filterError}}" class="error" role="alert">{{filterError}}</view>
+    <view wx:if="{{weightedExcludedCount}}" class="budget-note">已排除 {{weightedExcludedCount}} 个称重菜品：未选重量，无法保证总价不超预算。</view>
+  </view>
+  <view wx:if="{{error}}" class="error" role="alert">{{error}}</view>
+  <view wx:if="{{status === 'empty'}}" class="card empty-state"><view class="empty-mark">—</view><view class="empty-title">当前条件没有匹配的菜品</view><view class="muted">试试调整预算或分类；条件不会自动放宽。</view><button class="secondary" bindtap="openFilters">调整条件</button><button class="text-action" bindtap="clearFilters">清除筛选</button></view>
+  <view wx:elif="{{status === 'invalid'}}" class="card empty-state"><view class="empty-title">先完成预算输入</view><view class="muted">输入有效金额，或清空预算后再决定。</view></view>
+  <view wx:elif="{{!cards.length}}" class="card ready-card"><view class="dish-placeholder" aria-hidden="true"><image src="/assets/meal-placeholder.svg" mode="aspectFit"/></view><view class="ready-title">这餐，还没想好？</view><view class="muted">{{totalCount}} 道可选，直接决定。</view><button class="primary" bindtap="next" data-revision="{{revision}}" disabled="{{busy}}">帮我决定</button></view>
+  <view wx:for="{{cards}}" wx:key="id" class="card choice-card {{confirmed ? 'choice-confirmed' : ''}}">
+    <view class="choice-heading"><view class="dish-icon" aria-hidden="true"><image src="/assets/meal-placeholder.svg" mode="aspectFit"/></view><text class="choice-kicker">{{confirmed ? '这一餐的选择' : '这次，就试试'}}</text></view>
+    <view class="dish-name">{{item.name}}</view><view class="stall-name">{{item.stallName}}</view><view class="dish-category">{{item.category}}</view>
+    <view class="price-label">{{item.priceLabel}}</view>
+    <view wx:if="{{item.priceKind === 'weight'}}" class="weight-copy"><view>{{item.originalPriceText}}</view><view class="muted">“均价14”为清单参考值，实付按所选重量计算。</view></view>
+    <view wx:if="{{item.priceKind === 'variants'}}" class="variant-list"><button wx:for="{{item.variants}}" wx:for-item="variant" wx:key="id" class="variant {{variant.selected ? 'selected' : ''}}" data-id="{{variant.id}}" data-revision="{{revision}}" bindtap="selectVariant" disabled="{{!variant.allowed || confirmed || busy}}" aria-label="{{variant.originalPriceText}}，{{variant.budgetLabel || '可选'}}{{variant.selected ? '，已选' : ''}}"><text class="variant-price">{{variant.originalPriceText}}</text><text wx:if="{{variant.budgetLabel}}" class="variant-hint">{{variant.budgetLabel}}</text><text wx:if="{{variant.selected}}" class="variant-check" aria-hidden="true">✓</text></button></view>
+    <view wx:for="{{item.notes}}" wx:for-item="note" wx:key="*this" class="muted">{{note}}</view>
+    <view wx:if="{{confirmed}}" class="confirmation" aria-live="polite"><text aria-hidden="true">✓</text> {{confirmationText}}</view>
+    <view class="choice-actions"><button class="primary" bindtap="confirm" data-revision="{{revision}}" disabled="{{busy || confirmed || !item.canConfirm}}">{{confirmed ? '已选定' : '就吃这个'}}</button><button class="secondary" bindtap="next" data-revision="{{revision}}" disabled="{{busy || !remainingCount}}">换一个</button></view>
+    <view wx:if="{{item.priceKind === 'variants' && !item.canConfirm}}" class="action-note">先选择一个可用规格，再确认。</view>
+    <view wx:if="{{remainingCount}}" class="action-note">已看 {{seenCount}} 道 · 还有 {{remainingCount}} 道可换</view>
+  </view>
+  <view wx:if="{{cards.length && !remainingCount}}" class="round-end"><view class="label">{{totalCount === 1 ? '当前条件只有这一个菜品，没有其他可换结果。' : '这一轮都看过了'}}</view><view class="muted">确认这道，或重新开始一轮。</view><button class="secondary" bindtap="restart" data-revision="{{revision}}" disabled="{{busy}}">重新开始</button></view>
+  <view class="remember-section"><view class="remember-row"><view><view class="remember-title">在本机记住选择</view><view class="remember-hint">开启后保存确认的菜品、规格、标价与时间，最多 30 条、90 天；关闭即清除，不上传。</view></view><switch checked="{{recordsEnabled}}" color="#b94a29" bindchange="changeRemember" aria-label="在本机记住选择，关闭即清除记录"/></view><view wx:if="{{recordError}}" class="error" role="alert">{{recordError}}<button wx:if="{{cleanupNeeded}}" class="text-action" bindtap="retryCleanup">关闭记录并重试清理</button><button wx:else class="text-action" bindtap="readStorageChoice">重新读取设置</button></view><button class="text-action" bindtap="openRecords">查看食堂选择记录 ›</button></view>
+</view>

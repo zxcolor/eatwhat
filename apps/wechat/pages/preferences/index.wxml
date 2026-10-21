@@ -12,6 +12,7 @@
     <view class="local-note">选择保存在这台设备，可随时修改；当前使用虚拟餐厅目录。</view>
     <view class="error" wx:if="{{error}}" role="alert">{{error}}</view>
     <button class="preference-primary" bindtap="start" hover-class="preference-primary-pressed">{{editing ? '重新打开口味偏好' : '开始选择并保存到本机'}}</button>
+    <button class="privacy-link" bindtap="openCanteen">直接去食堂吃什么 ›</button>
     <button class="privacy-link" bindtap="privacy">隐私说明</button>
   </block>
   <block wx:else>

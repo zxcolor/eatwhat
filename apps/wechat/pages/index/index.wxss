@@ -10,6 +10,9 @@
 .home-title { font-size:30px; line-height:40px; font-weight:700; letter-spacing:-.5px; }
 button.location { width:100%; display:flex; align-items:center; justify-content:flex-start; gap:9px; background:transparent; color:var(--muted); padding:0; min-height:44px; text-align:left; margin:0; font-size:14px; }
 .location-icon { width:20px; height:20px; }
+button.canteen-entry { width:100%; display:flex; align-items:center; gap:13px; padding:18px 16px; margin:14px 0 18px; text-align:left; background:var(--accent-soft); border:1px solid var(--line); border-radius:22px; color:var(--text); }
+.canteen-entry-mark { width:42px; height:42px; flex-shrink:0; display:flex; align-items:center; justify-content:center; background:var(--card); border-radius:15px; color:var(--accent); font-size:20px; font-weight:600; }
+.canteen-entry-copy { flex:1; min-width:0; }.canteen-entry-copy text { display:block; }.canteen-entry-title { font-size:18px; font-weight:600; line-height:26px; }.canteen-entry-hint { margin-top:3px; font-size:12px; line-height:20px; color:var(--muted); }.canteen-entry-arrow { flex-shrink:0; color:var(--accent); font-size:23px; }
 .location-current { max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; color:var(--muted); padding-left:10px; border-left:1px solid var(--line); }
 .chevron { width:12px; height:12px; flex-shrink:0; margin-left:0; }
 button.decision-card { position:relative; overflow:hidden; width:100%; min-height:190px; border:1px solid var(--line); border-radius:28px; padding:16px 20px 18px; display:flex; align-items:center; flex-direction:column; background:var(--card); color:var(--text); box-shadow:0 6px 22px rgba(53,44,40,.04); transition:transform 150ms cubic-bezier(.23,1,.32,1),background-color 150ms ease,box-shadow 150ms ease; }

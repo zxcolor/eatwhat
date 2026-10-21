@@ -2,6 +2,8 @@
   "pages": [
     "pages/preferences/index",
     "pages/index/index",
+    "pages/canteen/index",
+    "pages/canteen-records/index",
     "pages/location/index",
     "pages/conditions/index",
     "pages/results/index",

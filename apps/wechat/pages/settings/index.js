@@ -37,7 +37,7 @@ Page({
       success: result => { if (result.confirm && this._active && generation === this._generation) getApp().clearTasteProfile() } })
   },
   retryCleanup() { if (this._active && getApp().globalData.localDataError) getApp().withdrawConsent() },
-  open(event) { const page = event.currentTarget.dataset.page; if (['support', 'local-records', 'nearby'].includes(page)) wx.navigateTo({ url: `/pages/${page}/index` }) },
+  open(event) { const page = event.currentTarget.dataset.page; if (['support', 'local-records', 'nearby', 'canteen-records'].includes(page)) wx.navigateTo({ url: `/pages/${page}/index` }) },
   async refreshService() {
     if (!this._active || this.data.busy || !service.state.consent) return
     const generation = this._generation
@@ -52,7 +52,7 @@ Page({
     const generation = this._generation
     wx.showModal({
       title: '撤回隐私同意',
-      content: '将停止服务请求，清除本次登录、位置、推荐结果，以及本机口味偏好、决策摘要和附近缓存。撤回同意不会注销服务端账号。',
+      content: '将停止服务请求，清除本次登录、位置、推荐结果，以及本机口味偏好、决策摘要、食堂选择记录与启用选择、附近缓存。撤回同意不会注销服务端账号。',
       confirmText: '撤回同意',
       success: (result) => {
         if (!result.confirm || !this._active || generation !== this._generation) return

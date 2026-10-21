@@ -32,6 +32,7 @@
     <view class="setting-hint">你的口味偏好仅保存在这台设备。</view>
   </view>
   <view class="card"><view class="section-title">本机数据</view><button class="settings-row" hover-class="utility-pressed" data-page="local-records" bindtap="open"><text>最近决策与清理</text><text class="row-arrow">›</text></button><button class="settings-row" hover-class="utility-pressed" data-page="nearby" bindtap="open"><text>附近餐厅缓存</text><text class="row-arrow">›</text></button><view wx:if="{{localDataError}}" class="error" role="alert">{{localDataError}}<button class="secondary" hover-class="utility-pressed" bindtap="retryCleanup">撤回同意并重试清理</button></view></view>
+  <view class="card"><button class="settings-row" hover-class="utility-pressed" data-page="canteen-records" bindtap="open"><text>食堂选择记录与清理</text><text class="row-arrow">›</text></button></view>
   <view class="card"><button class="settings-row" hover-class="utility-pressed" data-page="support" bindtap="open"><text>问题反馈</text><text class="row-arrow">›</text></button></view>
   <view wx:if="{{tasteReady || tasteStarted || consent}}" class="reset-section"><view class="settings-label">重置与撤回</view><button wx:if="{{tasteReady || tasteStarted}}" class="reset-button" hover-class="utility-pressed" bindtap="clearTaste">清除偏好并重新选择</button><button wx:if="{{consent}}" class="reset-button" hover-class="utility-pressed" bindtap="withdrawConsent">撤回隐私同意</button><view class="setting-hint">撤回同意将停止服务请求，并清除本次状态、口味偏好与本机决策、附近缓存。</view></view>
   <view class="settings-footer"><view>吃什么 · 微信小程序</view><text>{{version}} · 开发版本</text></view>

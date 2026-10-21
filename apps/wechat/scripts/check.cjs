@@ -9,6 +9,7 @@ const read = name => fs.readFileSync(path.join(root, name), 'utf8');
 const app = JSON.parse(read('app.json'));
 const project = JSON.parse(read('project.config.json'));
 execFileSync(process.execPath, [path.join(__dirname, 'build-virtual-catalog.cjs'), '--check'], { stdio: 'inherit' });
+execFileSync(process.execPath, [path.join(__dirname, 'build-canteen-data.cjs'), '--check'], { stdio: 'inherit' });
 const files = [];
 function walk(folder) {
   for (const item of fs.readdirSync(path.join(root, folder), { withFileTypes: true })) {

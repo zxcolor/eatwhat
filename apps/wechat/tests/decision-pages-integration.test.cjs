@@ -21,7 +21,7 @@ function harness(options = {}) {
   const stack = [];
   const modules = new Map();
   let definition;
-  const allowedPlatform = new Set(['hideShareMenu', 'navigateTo', 'navigateBack', 'redirectTo', 'reLaunch', 'showToast', 'setNavigationBarTitle']);
+  const allowedPlatform = new Set(['hideShareMenu', 'navigateTo', 'navigateBack', 'redirectTo', 'reLaunch', 'showToast', 'setNavigationBarTitle', 'getWindowInfo']);
   function forbid(name) {
     forbiddenCalls.push(name);
     throw new Error(`Forbidden integration capability: ${name}`);
@@ -31,6 +31,7 @@ function harness(options = {}) {
       return value => {
         if (!allowedPlatform.has(key)) return forbid(`wx.${String(key)}`);
         platformCalls.push({ name: key, value });
+        if (key === 'getWindowInfo') return { windowWidth: 390, windowHeight: 844 };
       };
     },
   });
@@ -144,6 +145,7 @@ test('real catalog and service drive the default package page with QA-only rende
   const h = harness();
   const home = h.page('index'); home.onShow(); home.decide();
   assert.equal(home.data.decisionOpen, true);
+  assert.equal(h.platformCalls.filter(call => call.name === 'getWindowInfo').length, 1);
   assert.equal(h.platformCalls.some(call => call.name === 'navigateTo'), false);
   const results = h.page('results'); results.onShow();
   const state = h.service.getState();
@@ -332,7 +334,13 @@ test('display copy discloses historical virtual prototypes and unknown compositi
   for (const name of ['index', 'results', 'detail']) {
     const source = fs.readFileSync(path.join(ROOT, 'pages', name, 'index.wxml'), 'utf8');
     // Home keeps the compact location label; result and detail carry the full disclosure.
-    assert.match(source, name === 'index' ? /<text>虚拟地图<\/text>/ : /历史原型构建的虚拟场景/);
+    if (name === 'index') {
+      assert.match(source, /<text class="location-current">虚拟地点<\/text>/);
+      assert.match(source, /aria-label="打开虚拟地图"/);
+    } else {
+      assert.match(source, /虚拟场景基于历史原型，含模拟属性。/);
+      assert.match(source, /价格不代表当前售价或可购买承诺，距离不对应现实路线。/);
+    }
     assert.doesNotMatch(source, /全部内容均为合成|均为合成数据|这份包含什么/);
   }
   const conditions = fs.readFileSync(path.join(ROOT, 'pages/conditions/index.wxml'), 'utf8');

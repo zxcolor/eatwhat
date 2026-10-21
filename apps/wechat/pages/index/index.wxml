@@ -6,6 +6,9 @@
     <button class="location" bindtap="open" data-page="location" aria-label="打开虚拟地图">
       <image src="/assets/location.svg" class="location-icon"/><text class="location-name">{{city}}</text><text class="location-current">虚拟地点</text><image src="/assets/chevron-down.svg" class="chevron"/>
     </button>
+    <button class="canteen-entry" data-page="canteen" bindtap="open" hover-class="press-soft" aria-label="食堂吃什么，帮你决定在学校食堂吃什么">
+      <view class="canteen-entry-mark" aria-hidden="true">食</view><view class="canteen-entry-copy"><text class="canteen-entry-title">食堂吃什么</text><text class="canteen-entry-hint">帮你决定在学校食堂吃什么</text></view><text class="canteen-entry-arrow" aria-hidden="true">↗</text>
+    </button>
     <view class="target-switch"><button class="target-option {{target === 'PACKAGE' ? 'selected' : ''}}" data-target="PACKAGE" bindtap="selectTarget">决定套餐</button><button class="target-option {{target === 'RESTAURANT' ? 'selected' : ''}}" data-target="RESTAURANT" bindtap="selectTarget">决定餐厅</button></view>
     <button class="filter-entry" bindtap="openFilter" hover-class="press-soft" aria-label="调整本次筛选条件"><view class="filter-symbol"><image src="/assets/conditions.svg"/></view><view class="filter-entry-copy"><text class="filter-entry-title">这顿的条件</text><text class="filter-summary">{{filterSummary}}</text></view><text class="filter-change">调整 ›</text></button>
     <button class="decision-card" bindtap="decide" bindtouchstart="pressDecision" hover-class="decision-card-pressed" hover-start-time="0" hover-stay-time="80">
@@ -36,6 +39,7 @@
     <view class="home-eyebrow">留住每一次选择</view>
     <view class="home-title">我的记录</view>
     <view class="tab-intro">本机摘要与账号记录，在这里分别查看。</view>
+    <button class="canteen-entry" data-page="canteen-records" bindtap="open" hover-class="press-soft"><view class="canteen-entry-mark" aria-hidden="true">食</view><view class="canteen-entry-copy"><text class="canteen-entry-title">食堂选择记录</text><text class="canteen-entry-hint">查看自己确认的菜品与规格</text></view><text class="canteen-entry-arrow" aria-hidden="true">›</text></button>
     <view class="card records-card"><view class="record-icon-wrap"><image class="empty-icon" src="/assets/history.svg"/></view><view class="record-title">本机最近决策</view><view class="muted">查看这台设备保留的决策摘要。</view><button class="primary" data-page="local-records" bindtap="open">查看本机摘要</button></view>
     <view class="card account-records">
       <view class="section-heading"><view class="label">收藏与账号记录</view><text class="status-chip">{{historyEnabled ? '账号服务' : '按服务能力开放'}}</text></view>

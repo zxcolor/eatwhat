@@ -1,6 +1,7 @@
 const service = require('./lib/service');
 const account = require('./lib/account');
 const localRecords = require('./lib/local-records');
+const canteenRecords = require('./lib/canteen-records');
 const nearby = require('./lib/nearby');
 const saved = require('./lib/saved');
 const decision = require('./lib/decision/service');
@@ -9,7 +10,7 @@ const CONSENT_KEY = 'eatwhat.wechat.consent.v2';
 const THEME_KEY = 'eatwhat.wechat.theme';
 const MOTION_KEY = 'eatwhat.wechat.reduced-motion';
 App({
-  globalData: { theme: 'system', systemTheme: 'light', reducedMotion: false, localDataError: '' },
+  globalData: { theme: 'system', systemTheme: 'light', reducedMotion: false, localDataError: '', canteenEpoch: 0 },
   onLaunch() {
     tasteProfile.load();
     this.syncTasteProfile();
@@ -28,6 +29,7 @@ App({
       this.updatePages();
     });
     try { localRecords.prune(); } catch (error) { this.globalData.localDataError = error.message; }
+    try { canteenRecords.prune(); } catch (error) { this.globalData.localDataError = [this.globalData.localDataError, error.message].filter(Boolean).join('；'); }
     if (!service.state.consent) { try { nearby.withdraw(); } catch (error) { this.globalData.localDataError = error.message; } }
     wx.onThemeChange(({ theme: value }) => {
       this.globalData.systemTheme = value;
@@ -59,6 +61,7 @@ App({
     return this.checkService();
   },
   withdrawConsent() {
+    this.globalData.canteenEpoch += 1;
     decision.setProfile(null);
     account.clear();
     saved.invalidate();
@@ -70,6 +73,7 @@ App({
     try { wx.removeStorageSync(CONSENT_KEY); consentRevoked = true; } catch (_) { /* A stored false also prevents restoration. */ }
     if (!consentRevoked) failures.push('隐私选择保存失败，请重试清理后再关闭小程序');
     try { localRecords.clear(); } catch (error) { failures.push(error.message); }
+    try { canteenRecords.withdraw(); } catch (error) { failures.push(error.message); }
     try { nearby.withdraw(); } catch (error) { failures.push(error.message); }
     this.globalData.localDataError = failures.join('；');
     this.updatePages();
