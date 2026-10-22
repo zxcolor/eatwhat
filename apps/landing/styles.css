@@ -21,7 +21,7 @@
 }
 
 * { box-sizing: border-box; }
-html { min-width: 320px; background: #03060d; }
+html { background: #03060d; }
 body { margin: 0; color: #edf6ff; font-family: var(--font-body); -webkit-font-smoothing: antialiased; }
 button, a { -webkit-tap-highlight-color: transparent; }
 button { font: inherit; }
@@ -97,7 +97,7 @@ body.motion-paused .title-metal::after { animation-play-state: paused; }
   .masthead-right { gap: 13px; }.launch-label { font-size: 10px; letter-spacing: 1px; }.launch-label i { margin-right: 6px; }.motion-toggle { width: 30px; height: 30px; }
   .hero { min-height: 520px; padding: 35px 6px 70px; }.hero-content { padding-bottom: 0; }
   .eyebrow { font-size: 8px; letter-spacing: 3px; margin-bottom: 38px; gap: 13px; }.eyebrow span { width: 19px; }
-  .title-metal { font-size: clamp(74px, 18vw, 125px); letter-spacing: .025em; padding-left: .025em; }.title-metal::after { padding-left: .025em; }
+  .title-metal { font-size: clamp(68px, 18vw, 125px); letter-spacing: .025em; padding-left: .025em; }.title-metal::after { padding-left: .025em; }
   .quote { margin-top: 3px; font-size: 32px; }.quote-open { margin-right: 5px; }.quote-close { margin-left: 3px; }
   .headline-support { font-size: clamp(14px, 3.6vw, 22px); letter-spacing: .12em; padding-left: .12em; margin-top: 25px; white-space: nowrap; }
   .coming-soon { margin-top: 42px; }.signal-line { height: 28px; margin-bottom: 24px; }.coming-soon p { font-size: 21px; }.coming-english { font-size: 7px; }
