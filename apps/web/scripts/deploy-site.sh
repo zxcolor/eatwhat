@@ -148,6 +148,36 @@ mv -Tf -- "$vhosts/api.eatwhat.pro.conf.next.$$" "$vhosts/api.eatwhat.pro.conf"
 ln -s -- "$candidate" "$site_root/current.next.$$"
 mv -Tf -- "$site_root/current.next.$$" "$site_root/current"
 
+# Reload signals are asynchronous. Old workers can already read the new
+# symlink's static files while still lacking /api; wait for both new document
+# policy and a successful API response before the unchanged strict checks.
+python3 - <<'PY'
+import json,subprocess,time
+base=['curl','--silent','--show-error','--max-time','2','--resolve','eatwhat.pro:443:127.0.0.1']
+deadline=time.monotonic()+20
+attempt=0
+while time.monotonic()<deadline:
+    attempt+=1
+    head=subprocess.run(base+['--head','https://eatwhat.pro/index.html'],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    headers=head.stdout.decode('iso-8859-1').lower()
+    policy_ready=(head.returncode==0 and 'content-security-policy:' in headers
+                  and "base-uri 'none'" in headers and 'geolocation=(self)' in headers)
+    api=subprocess.run(base+['--fail','https://eatwhat.pro/api/v1/config'],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    api_ready=False
+    if api.returncode==0:
+        try:
+            data=json.loads(api.stdout.decode('utf-8'))
+            api_ready=isinstance(data,dict) and isinstance(data.get('authCapabilities'),dict)
+        except (ValueError,UnicodeDecodeError):
+            pass
+    if policy_ready and api_ready:
+        print('NGINX_CANDIDATE_READY=OK ATTEMPTS='+str(attempt))
+        break
+    time.sleep(.25)
+else:
+    raise SystemExit('candidate Nginx workers did not become ready within 20 seconds')
+PY
+
 python3 - "$payload/release-manifest.json" "$backup" "$candidate" <<'PY'
 import hashlib,json,subprocess,sys
 manifest,backup,candidate=sys.argv[1:]
