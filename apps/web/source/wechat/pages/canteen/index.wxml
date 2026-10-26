@@ -1,0 +1,68 @@
+<view class="page canteen-page glass-page {{themeClass}} {{reducedMotion ? 'reduce-motion' : ''}}">
+  <view class="glass-backdrop" aria-hidden="true"></view>
+  <view class="stall-control">
+    <view class="stall-control-label">选择档口</view>
+    <picker mode="selector" range="{{stallOptions}}" range-key="name" value="{{stallIndex}}" bindchange="changeStall" data-revision="{{revision}}" aria-label="选择食堂档口">
+      <view class="stall-select glass-control"><text>{{stallOptions[stallIndex].name}}</text><text class="stall-chevron" aria-hidden="true">⌄</text></view>
+    </picker>
+    <view class="stall-hint">{{fixedStall ? '固定这个档口，只随机菜品' : '从全部档口中决定一道菜'}}</view>
+    <button wx:if="{{!fixedStall}}" class="dish-filter-toggle" bindtap="toggleDishFilters" aria-expanded="{{filtersExpanded}}">筛选菜品 · {{poolCount}}道可选 {{filtersExpanded ? '⌃' : '⌄'}}</button>
+    <view wx:if="{{!fixedStall && filtersExpanded}}" class="dish-filters glass-panel">
+      <view wx:for="{{dishFilterRows}}" wx:for-item="filter" wx:key="key" class="dish-filter-field">
+        <view class="stall-control-label">{{filter.label}}</view>
+        <picker mode="selector" range="{{filter.options}}" range-key="label" value="{{filter.index}}" bindchange="changeDishFilter" data-field="{{filter.key}}" data-revision="{{revision}}" aria-label="{{filter.label}}">
+          <view class="dish-filter-value glass-inset">{{filter.options[filter.index].label}} ⌄</view>
+        </picker>
+      </view>
+      <button class="rating-link clear-dish-filters" bindtap="clearDishFilters" data-revision="{{revision}}">清除菜品筛选</button>
+    </view>
+  </view>
+  <view wx:for="{{cards}}" wx:key="slot" class="result-paper glass-panel result-{{motionPhase}}" style="{{motionStyle}}" aria-live="polite">
+    <view class="paper-header result-part"><text class="stall-label">档口</text><text class="stall-name">{{item.stallName}}</text></view>
+    <view wx:if="{{item.category}}" class="dish-category">{{item.category}}</view>
+    <view class="dish-name result-part">{{item.name}}</view>
+    <view class="dish-attributes"><text wx:for="{{item.attributeLabels}}" wx:for-item="attribute" wx:key="*this" class="dish-attribute">{{attribute}}</text></view>
+    <view wx:if="{{item.attributeLabels.length}}" class="attribute-note">属性参考常见做法，实际以档口出品为准。</view>
+    <view class="paper-seam" aria-hidden="true"></view>
+    <view class="price-block result-part">
+      <view class="price-caption">菜单标价</view>
+      <view wx:if="{{item.priceNumber}}" class="fixed-price" aria-label="{{item.originalPriceText}}"><text class="price-number">{{item.priceNumber}}</text><text class="price-suffix">{{item.priceSuffix}}</text></view>
+      <view wx:else class="price-full">{{item.originalPriceText}}</view>
+      <view wx:if="{{item.priceKind === 'weight'}}" class="muted weight-copy">“均价14”为清单参考值，实付按所选重量计算。</view>
+      <view wx:for="{{item.notes}}" wx:for-item="note" wx:key="*this" class="muted dish-note">{{note}}</view>
+      <view wx:if="{{decisionSource}}" class="decision-source">{{decisionSource}}</view>
+      <view wx:if="{{decisionNote}}" class="muted dish-note">{{decisionNote}}</view>
+    </view>
+    <view class="rating-block glass-inset">
+      <view class="rating-title">大家的评分</view>
+      <view wx:if="{{ratingStatus === 'ready'}}" class="rating-summary">
+        <text class="rating-average">{{ratingCount ? averageScore + ' / 5' : '暂无评分'}}</text>
+        <text wx:if="{{ratingCount}}" class="rating-count">{{ratingCount}}人评分</text>
+      </view>
+      <view wx:if="{{ratingStatus === 'loading'}}" class="muted rating-copy">评分加载中…</view>
+      <view wx:if="{{ratingStatus === 'privacy'}}" class="muted rating-copy">同意隐私说明后可查看公共评分。</view>
+      <view wx:if="{{ratingStatus === 'privacy'}}">
+        <button class="rating-link" bindtap="openRatingPrivacy">阅读隐私说明</button>
+        <button class="secondary rating-submit" bindtap="acceptRatingPrivacy" disabled="{{busy || ratingBusy}}">同意隐私说明并查看</button>
+      </view>
+      <view wx:if="{{ratingStatus === 'ready' && signedIn}}" class="my-rating">
+        <view class="muted rating-copy">{{myScore ? '我的评分：' + myScore + '星，可修改' : '吃过这道菜？给个评分'}}</view>
+        <view class="rating-stars" role="group" aria-label="菜品评分，1至5星">
+          <button wx:for="{{stars}}" wx:for-item="star" wx:key="*this" class="rating-star {{draftScore >= star ? 'rating-star-selected' : ''}}" bindtap="selectRating" data-score="{{star}}" data-item-id="{{item.id}}" data-revision="{{revision}}" disabled="{{busy || ratingBusy}}" aria-label="{{star}}星" aria-pressed="{{draftScore === star}}">{{draftScore >= star ? '★' : '☆'}}</button>
+        </view>
+        <view class="rating-actions">
+          <button class="secondary rating-submit" bindtap="saveRating" data-item-id="{{item.id}}" data-revision="{{revision}}" disabled="{{busy || ratingBusy || !draftScore || draftScore === myScore}}">{{ratingBusy ? '提交中…' : myScore ? '更新评分' : '提交评分'}}</button>
+          <button wx:if="{{myScore}}" class="rating-link" bindtap="removeRating" data-item-id="{{item.id}}" data-revision="{{revision}}" disabled="{{busy || ratingBusy}}">撤回</button>
+        </view>
+        <view class="muted rating-disclosure">提交后计入公共平均分，不公开账号信息。</view>
+      </view>
+      <button wx:if="{{ratingStatus === 'ready' && !signedIn}}" class="rating-link" bindtap="openRatingAccount" data-item-id="{{item.id}}" data-revision="{{revision}}" disabled="{{busy}}">登录后评分</button>
+      <view wx:if="{{ratingError}}" class="error rating-copy" role="alert">{{ratingError}}</view>
+      <button wx:if="{{ratingError}}" class="rating-link" bindtap="retryRating" data-revision="{{revision}}" disabled="{{ratingBusy}}">刷新评分</button>
+      <view wx:if="{{ratingNotice}}" class="rating-notice" aria-live="polite">{{ratingNotice}}</view>
+    </view>
+  </view>
+  <view wx:if="{{status === 'empty'}}" class="muted empty-copy glass-panel">当前条件没有可选菜品，请调整筛选或切换档口。</view>
+  <view wx:if="{{error}}" class="error" role="alert">{{error}}</view>
+  <button class="primary decision-button" bindtap="decide" data-revision="{{revision}}" disabled="{{busy || status === 'empty'}}">{{decisionLabel}}</button>
+</view>

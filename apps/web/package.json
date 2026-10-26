@@ -1,0 +1,13 @@
+{
+  "name": "@eatwhat/web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Browser adaptation of the current EatWhat WeChat client",
+  "scripts": {
+    "build": "node scripts/build.cjs",
+    "check": "node scripts/check.cjs",
+    "typecheck": "node scripts/check.cjs",
+    "test": "node --test tests/*.test.cjs",
+    "dev": "node scripts/serve.cjs"
+  }
+}

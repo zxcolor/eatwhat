@@ -1,0 +1,165 @@
+/* EatWhat glass material. Original static scene; no external image request.
+ * Backdrop blur is progressive enhancement. The translucent pigment and rim
+ * stay readable when a renderer ignores backdrop-filter. No SVG url filter is
+ * required for navigation, input, data display or interaction. */
+.page.glass-page, .shell.glass-page {
+  --bg:#edf3f5; --card:rgba(255,255,255,.64); --text:#172b3c; --muted:#40566b;
+  --accent:#a63b21; --accent-soft:rgba(197,85,44,.12); --soft:rgba(226,238,244,.58);
+  --line:rgba(57,89,111,.16); --success:#1b6b52; --success-soft:rgba(78,157,119,.13);
+  --glass-fill:rgba(255,255,255,.48); --glass-fill-strong:rgba(249,252,254,.82);
+  --glass-control-fill:rgba(255,255,255,.32); --glass-inset-fill:rgba(244,249,253,.5);
+  --glass-edge:rgba(255,255,255,.86); --glass-edge-dim:rgba(255,255,255,.28);
+  --glass-rim:rgba(255,255,255,.78); --glass-reflect:rgba(137,192,213,.28);
+  --glass-shadow:0 14px 32px rgba(30,66,88,.12),0 3px 8px rgba(30,66,88,.045);
+  --glass-inset-shadow:inset 0 1px 0 rgba(255,255,255,.9),inset 0 -1px 0 rgba(255,255,255,.25),inset 1px 0 0 rgba(255,255,255,.34);
+  --glass-blur:24px; --glass-radius:28px; --glass-action:#b64728; --glass-action-ink:#fffaf7;
+  --glass-action-shadow:0 10px 24px rgba(148,58,30,.2); --glass-danger:#a52e3c;
+  --glass-danger-fill:rgba(250,228,230,.78); --glass-disabled:rgba(220,230,235,.68);
+  --glass-disabled-ink:#637785; --glass-scene:url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA3NTAgMTYyNCIgd2lkdGg9Ijc1MCIgaGVpZ2h0PSIxNjI0Ij4KPGRlZnM+CiA8bGluZWFyR3JhZGllbnQgaWQ9InNreSIgeDI9Ii44NSIgeTI9IjEiPjxzdG9wIHN0b3AtY29sb3I9IiNlZGYzZjUiLz48c3RvcCBvZmZzZXQ9Ii4zOCIgc3RvcC1jb2xvcj0iI2MzZGJlNSIvPjxzdG9wIG9mZnNldD0iLjcyIiBzdG9wLWNvbG9yPSIjZTBlOWU4Ii8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjZjJkZmNmIi8+PC9saW5lYXJHcmFkaWVudD4KIDxsaW5lYXJHcmFkaWVudCBpZD0iZm9sZCIgeDE9Ii4xIiB5MT0iLjI1IiB4Mj0iLjk1IiB5Mj0iLjc1Ij48c3RvcCBzdG9wLWNvbG9yPSIjZmZmIiBzdG9wLW9wYWNpdHk9Ii44OCIvPjxzdG9wIG9mZnNldD0iLjMyIiBzdG9wLWNvbG9yPSIjZDllYWYxIiBzdG9wLW9wYWNpdHk9Ii42NSIvPjxzdG9wIG9mZnNldD0iLjciIHN0b3AtY29sb3I9IiM4MWI0Y2EiIHN0b3Atb3BhY2l0eT0iLjU1Ii8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjNDI3YjliIiBzdG9wLW9wYWNpdHk9Ii4zMiIvPjwvbGluZWFyR3JhZGllbnQ+CiA8bGluZWFyR3JhZGllbnQgaWQ9InBlYXJsIiB4MT0iMCIgeTE9IjAiIHgyPSIuNiIgeTI9IjEiPjxzdG9wIHN0b3AtY29sb3I9IiNmZmYiIHN0b3Atb3BhY2l0eT0iLjg4Ii8+PHN0b3Agb2Zmc2V0PSIuNSIgc3RvcC1jb2xvcj0iI2VmZjVmNiIgc3RvcC1vcGFjaXR5PSIuNiIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iI2I0ZDRkZiIgc3RvcC1vcGFjaXR5PSIuMzgiLz48L2xpbmVhckdyYWRpZW50PgogPHJhZGlhbEdyYWRpZW50IGlkPSJ3YXJtIj48c3RvcCBzdG9wLWNvbG9yPSIjZjRiNzdjIiBzdG9wLW9wYWNpdHk9Ii43MiIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iI2YwYzdhNSIgc3RvcC1vcGFjaXR5PSIwIi8+PC9yYWRpYWxHcmFkaWVudD4KIDxyYWRpYWxHcmFkaWVudCBpZD0ibGlnaHQiPjxzdG9wIHN0b3AtY29sb3I9IiNmZmYiIHN0b3Atb3BhY2l0eT0iLjg1Ii8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjZmZmIiBzdG9wLW9wYWNpdHk9IjAiLz48L3JhZGlhbEdyYWRpZW50Pgo8L2RlZnM+CjxwYXRoIGZpbGw9InVybCgjc2t5KSIgZD0iTTAgMGg3NTB2MTYyNEgweiIvPgo8ZWxsaXBzZSBjeD0iNzUwIiBjeT0iOTUwIiByeD0iNjEwIiByeT0iNjUwIiBmaWxsPSJ1cmwoI3dhcm0pIi8+CjxwYXRoIGQ9Ik0tMTgwIDI1MEM2MCA2MzAgMjI1IDMxMCA1MTAgMzUwUzkxMCA2ODAgOTIwIDk0MEM4MjAgODMwIDYyMCA2NjAgMzgwIDcxMFMyNSA3ODAtMTIwIDEwNTBaIiBmaWxsPSJ1cmwoI2ZvbGQpIi8+CjxwYXRoIGQ9Ik0tMTkwIDI1MkM1NCA2MjQgMjI4IDMxMCA1MTAgMzUwUzkxNCA2OTAgOTIwIDk0MCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmIiBzdHJva2Utb3BhY2l0eT0iLjU4IiBzdHJva2Utd2lkdGg9IjIiLz4KPHBhdGggZD0iTS0xODAgMTEzMEM5MCA3NTAgMjgwIDgzMCA1MzAgMTAzNVM4NzAgMTIyMCA5MzAgMTE0MEw4NTAgMTYyNEgtMTgwWiIgZmlsbD0idXJsKCNwZWFybCkiLz4KPHBhdGggZD0iTS0xODAgMTEzMEM5MCA3NTAgMjgwIDgzMCA1MzAgMTAzNVM4NzAgMTIyMCA5MzAgMTE0MCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmIiBzdHJva2Utb3BhY2l0eT0iLjYiIHN0cm9rZS13aWR0aD0iMiIvPgo8ZWxsaXBzZSBjeD0iMTMwIiBjeT0iNjAiIHJ4PSI1NTAiIHJ5PSIzNTAiIGZpbGw9InVybCgjbGlnaHQpIi8+Cjwvc3ZnPg==");
+  position:relative; z-index:0; min-height:100vh; color:var(--text); background-color:var(--bg);
+  -webkit-font-smoothing:antialiased;
+}
+.page.glass-page.theme-dark, .shell.glass-page.theme-dark {
+  --bg:#0d1c2b; --card:rgba(31,55,73,.7); --text:#eef7ff; --muted:#b7cbdc;
+  --accent:#ffc09b; --accent-soft:rgba(239,162,116,.13); --soft:rgba(72,109,131,.25);
+  --line:rgba(175,214,232,.19); --success:#9be4c8; --success-soft:rgba(56,145,111,.2);
+  --glass-fill:rgba(27,52,71,.56); --glass-fill-strong:rgba(24,45,63,.88);
+  --glass-control-fill:rgba(55,92,116,.3); --glass-inset-fill:rgba(63,101,126,.22);
+  --glass-edge:rgba(205,237,249,.44); --glass-edge-dim:rgba(181,222,242,.1);
+  --glass-rim:rgba(221,246,255,.54); --glass-reflect:rgba(85,187,199,.18);
+  --glass-shadow:0 16px 36px rgba(0,9,22,.25),0 3px 8px rgba(0,9,22,.12);
+  --glass-inset-shadow:inset 0 1px 0 rgba(227,249,255,.34),inset 0 -1px 0 rgba(180,224,244,.09),inset 1px 0 0 rgba(216,245,255,.13);
+  --glass-action:#efb28a; --glass-action-ink:#34231c; --glass-action-shadow:0 10px 28px rgba(0,10,22,.22);
+  --glass-danger:#ffb3b9; --glass-danger-fill:rgba(93,42,55,.64); --glass-disabled:rgba(57,80,98,.58);
+  --glass-disabled-ink:#adc0cd; --glass-scene:url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA3NTAgMTYyNCIgd2lkdGg9Ijc1MCIgaGVpZ2h0PSIxNjI0Ij4KPGRlZnM+CiA8bGluZWFyR3JhZGllbnQgaWQ9InNlYSIgeDI9Ii44NSIgeTI9IjEiPjxzdG9wIHN0b3AtY29sb3I9IiMwZDFjMmIiLz48c3RvcCBvZmZzZXQ9Ii40MiIgc3RvcC1jb2xvcj0iIzE1MzY0YiIvPjxzdG9wIG9mZnNldD0iLjc2IiBzdG9wLWNvbG9yPSIjMTIzMTNjIi8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjMTgyYTM4Ii8+PC9saW5lYXJHcmFkaWVudD4KIDxsaW5lYXJHcmFkaWVudCBpZD0iZm9sZCIgeDE9Ii4xIiB5MT0iLjI1IiB4Mj0iLjk1IiB5Mj0iLjc1Ij48c3RvcCBzdG9wLWNvbG9yPSIjNjBhOWJjIiBzdG9wLW9wYWNpdHk9Ii40NiIvPjxzdG9wIG9mZnNldD0iLjMyIiBzdG9wLWNvbG9yPSIjMzI2ODgxIiBzdG9wLW9wYWNpdHk9Ii41NSIvPjxzdG9wIG9mZnNldD0iLjciIHN0b3AtY29sb3I9IiMxODNkNTkiIHN0b3Atb3BhY2l0eT0iLjgiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiMwYjFjMmUiIHN0b3Atb3BhY2l0eT0iLjciLz48L2xpbmVhckdyYWRpZW50PgogPGxpbmVhckdyYWRpZW50IGlkPSJwZWFybCIgeDE9IjAiIHkxPSIwIiB4Mj0iLjYiIHkyPSIxIj48c3RvcCBzdG9wLWNvbG9yPSIjNjQ5Nzk5IiBzdG9wLW9wYWNpdHk9Ii4zIi8+PHN0b3Agb2Zmc2V0PSIuNSIgc3RvcC1jb2xvcj0iIzI5NGE1OCIgc3RvcC1vcGFjaXR5PSIuNDUiLz48c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiMwYjFkMzEiIHN0b3Atb3BhY2l0eT0iLjgiLz48L2xpbmVhckdyYWRpZW50PgogPHJhZGlhbEdyYWRpZW50IGlkPSJ3YXJtIj48c3RvcCBzdG9wLWNvbG9yPSIjYTU2NTQzIiBzdG9wLW9wYWNpdHk9Ii40Ii8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjNzQ1MzQ1IiBzdG9wLW9wYWNpdHk9IjAiLz48L3JhZGlhbEdyYWRpZW50PgogPHJhZGlhbEdyYWRpZW50IGlkPSJsaWdodCI+PHN0b3Agc3RvcC1jb2xvcj0iIzQzODM5YyIgc3RvcC1vcGFjaXR5PSIuMyIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzE3MzA0NyIgc3RvcC1vcGFjaXR5PSIwIi8+PC9yYWRpYWxHcmFkaWVudD4KPC9kZWZzPgo8cGF0aCBmaWxsPSJ1cmwoI3NlYSkiIGQ9Ik0wIDBoNzUwdjE2MjRIMHoiLz4KPGVsbGlwc2UgY3g9Ijc1MCIgY3k9Ijk1MCIgcng9IjYxMCIgcnk9IjY1MCIgZmlsbD0idXJsKCN3YXJtKSIvPgo8cGF0aCBkPSJNLTE4MCAyNTBDNjAgNjMwIDIyNSAzMTAgNTEwIDM1MFM5MTAgNjgwIDkyMCA5NDBDODIwIDgzMCA2MjAgNjYwIDM4MCA3MTBTMjUgNzgwLTEyMCAxMDUwWiIgZmlsbD0idXJsKCNmb2xkKSIvPgo8cGF0aCBkPSJNLTE5MCAyNTJDNTQgNjI0IDIyOCAzMTAgNTEwIDM1MFM5MTQgNjkwIDkyMCA5NDAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2EzZDhkZiIgc3Ryb2tlLW9wYWNpdHk9Ii4xNiIgc3Ryb2tlLXdpZHRoPSIyIi8+CjxwYXRoIGQ9Ik0tMTgwIDExMzBDOTAgNzUwIDI4MCA4MzAgNTMwIDEwMzVTODcwIDEyMjAgOTMwIDExNDBMODUwIDE2MjRILTE4MFoiIGZpbGw9InVybCgjcGVhcmwpIi8+CjxwYXRoIGQ9Ik0tMTgwIDExMzBDOTAgNzUwIDI4MCA4MzAgNTMwIDEwMzVTODcwIDEyMjAgOTMwIDExNDAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2JjZTllMyIgc3Ryb2tlLW9wYWNpdHk9Ii4xOCIgc3Ryb2tlLXdpZHRoPSIyIi8+CjxlbGxpcHNlIGN4PSIxMzAiIGN5PSI2MCIgcng9IjU1MCIgcnk9IjM1MCIgZmlsbD0idXJsKCNsaWdodCkiLz4KPC9zdmc+");
+}
+
+.page.glass-page > .glass-backdrop, .shell.glass-page > .glass-backdrop {
+  position:fixed; z-index:-1; left:0; top:0; right:0; bottom:0; pointer-events:none;
+  background-color:var(--bg); background-image:var(--glass-scene);
+  background-size:cover; background-repeat:no-repeat; background-position:center center;
+}
+
+/* Geometry belongs to each native page; the shared layer owns the material. */
+.glass-panel, .glass-control, .glass-chrome, .glass-sheet { border-radius:var(--glass-radius); }
+.glass-panel, .glass-control { position:relative; }
+.glass-inset { border-radius:18px; }
+/* One material shell per visual group. Inner rows use the inset material. */
+.page.glass-page .glass-panel, .shell.glass-page .glass-panel,
+.page.glass-page .glass-control, .shell.glass-page .glass-control,
+.page.glass-page .glass-chrome, .shell.glass-page .glass-chrome,
+.page.glass-page .glass-sheet, .shell.glass-page .glass-sheet {
+  color:var(--text); background-color:var(--glass-fill);
+  background-image:linear-gradient(132deg,rgba(255,255,255,.17) 0%,rgba(255,255,255,.035) 35%,rgba(255,255,255,0) 64%,var(--glass-reflect) 100%);
+  border:1px solid var(--glass-edge-dim); border-top-color:var(--glass-edge); border-left-color:var(--glass-edge);
+  box-shadow:var(--glass-inset-shadow),var(--glass-shadow);
+  -webkit-backdrop-filter:blur(var(--glass-blur)) saturate(170%);
+  backdrop-filter:blur(var(--glass-blur)) saturate(170%);
+}
+.page.glass-page .glass-control, .shell.glass-page .glass-control {
+  --glass-blur:18px; background-color:var(--glass-control-fill);
+  box-shadow:var(--glass-inset-shadow),0 5px 14px rgba(27,61,85,.08);
+}
+.page.glass-page .glass-chrome, .shell.glass-page .glass-chrome {
+  --glass-blur:28px; background-color:var(--glass-control-fill);
+}
+.page.glass-page .glass-sheet, .shell.glass-page .glass-sheet {
+  --glass-blur:30px; background-color:var(--glass-fill-strong);
+}
+.page.glass-page .glass-panel::before, .shell.glass-page .glass-panel::before,
+.page.glass-page .glass-control::before, .shell.glass-page .glass-control::before,
+.page.glass-page .glass-chrome::before, .shell.glass-page .glass-chrome::before,
+.page.glass-page .glass-sheet::before, .shell.glass-page .glass-sheet::before {
+  content:""; position:absolute; top:0; left:12%; right:12%; height:1px; border:0;
+  pointer-events:none; border-radius:50%; opacity:.85;
+  background:linear-gradient(90deg,rgba(255,255,255,0),var(--glass-rim) 28%,rgba(255,255,255,.1) 65%,rgba(255,255,255,0));
+}
+.page.glass-page .glass-panel::after, .shell.glass-page .glass-panel::after,
+.page.glass-page .glass-control::after, .shell.glass-page .glass-control::after,
+.page.glass-page .glass-chrome::after, .shell.glass-page .glass-chrome::after,
+.page.glass-page .glass-sheet::after, .shell.glass-page .glass-sheet::after {
+  content:""; position:absolute; left:1px; right:1px; top:1px; bottom:1px;
+  width:auto; height:auto; transform:none; box-sizing:border-box; pointer-events:none;
+  border:1px solid transparent; border-right-color:var(--glass-edge-dim); border-bottom-color:var(--glass-edge-dim);
+  border-radius:inherit; background:none; box-shadow:inset -2px -2px 8px rgba(134,194,215,.055);
+}
+.page.glass-page .glass-inset, .shell.glass-page .glass-inset {
+  background:var(--glass-inset-fill); border:1px solid var(--line);
+  box-shadow:inset 0 1px 0 var(--glass-edge-dim); color:var(--text);
+}
+
+/* Pigmented optical controls retain hierarchy and a readable text core. */
+.page.glass-page .primary, .shell.glass-page .primary,
+.page.glass-page .glass-accent, .shell.glass-page .glass-accent {
+  position:relative; background-color:var(--glass-action); color:var(--glass-action-ink);
+  background-image:linear-gradient(170deg,rgba(255,255,255,.22),rgba(255,255,255,.025) 42%,rgba(0,0,0,.065));
+  border:1px solid rgba(255,255,255,.4); border-bottom-color:rgba(67,35,24,.17); border-radius:999px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.4),inset 0 -1px 0 rgba(59,29,16,.12),var(--glass-action-shadow);
+  min-height:52px; font-weight:600; letter-spacing:.15px; text-shadow:0 1px 1px rgba(54,22,11,.06);
+}
+.page.glass-page .secondary, .shell.glass-page .secondary {
+  position:relative; background-color:var(--glass-control-fill); color:var(--text);
+  background-image:linear-gradient(170deg,rgba(255,255,255,.18),rgba(255,255,255,0) 55%);
+  border:1px solid var(--glass-edge-dim); border-top-color:var(--glass-edge); border-radius:999px;
+  box-shadow:var(--glass-inset-shadow),0 4px 12px rgba(24,58,81,.055);
+  min-height:48px; -webkit-backdrop-filter:blur(14px) saturate(160%); backdrop-filter:blur(14px) saturate(160%);
+}
+.page.glass-page .chip, .shell.glass-page .chip {
+  color:var(--muted); background:var(--glass-inset-fill); border:1px solid var(--glass-edge-dim);
+  border-top-color:var(--glass-edge); box-shadow:inset 0 1px 0 var(--glass-edge-dim); border-radius:15px; min-height:44px;
+}
+.page.glass-page .chip.selected, .shell.glass-page .chip.selected {
+  color:var(--accent); background:var(--accent-soft); border-color:var(--accent);
+  box-shadow:inset 0 1px 0 var(--glass-edge),0 3px 10px rgba(62,77,84,.055); font-weight:600;
+}
+.page.glass-page .field, .shell.glass-page .field,
+.page.glass-page .glass-field, .shell.glass-page .glass-field {
+  color:var(--text); background:var(--glass-inset-fill); border:1px solid var(--line);
+  border-bottom-color:var(--glass-edge); border-radius:16px;
+  box-shadow:inset 0 2px 5px rgba(25,53,74,.045),0 1px 0 var(--glass-edge-dim); font-size:16px;
+}
+.page.glass-page .field:focus, .shell.glass-page .field:focus,
+.page.glass-page .glass-field:focus, .shell.glass-page .glass-field:focus {
+  border-color:var(--accent); background:var(--glass-fill-strong);
+}
+.page.glass-page button:focus-visible, .shell.glass-page button:focus-visible {
+  outline:2px solid var(--accent); outline-offset:3px;
+}
+.page.glass-page button[disabled], .shell.glass-page button[disabled],
+.page.glass-page button.primary[disabled], .shell.glass-page button.primary[disabled],
+.page.glass-page button.secondary[disabled], .shell.glass-page button.secondary[disabled],
+.page.glass-page button.chip[disabled], .shell.glass-page button.chip[disabled] {
+  color:var(--glass-disabled-ink); background:var(--glass-disabled); border-color:var(--line);
+  box-shadow:inset 0 1px 0 var(--glass-edge-dim); opacity:1; transform:none; text-shadow:none;
+}
+.page.glass-page .error, .shell.glass-page .error {
+  color:var(--glass-danger); background:var(--glass-danger-fill); border:1px solid var(--line);
+  border-top-color:var(--glass-edge); border-radius:18px; box-shadow:inset 0 1px 0 var(--glass-edge-dim);
+}
+.page.glass-page .title, .shell.glass-page .title { letter-spacing:-.65px; line-height:1.32; }
+.page.glass-page .subtitle, .shell.glass-page .subtitle { color:var(--muted); }
+.page.glass-page .tag, .shell.glass-page .tag,
+.page.glass-page .status-chip, .shell.glass-page .status-chip,
+.page.glass-page .dish-attribute, .shell.glass-page .dish-attribute {
+  color:var(--muted); background:var(--glass-inset-fill); border:1px solid var(--glass-edge-dim); border-radius:10px;
+}
+.page.glass-page .footnote, .page.glass-page .page-note, .shell.glass-page .page-footnote,
+.page.glass-page .attribute-note, .page.glass-page .small-note, .shell.glass-page .home-caption {
+  font-size:12px; line-height:1.75;
+}
+.page.glass-page .glass-chrome .primary, .page.glass-page .glass-chrome .secondary,
+.page.glass-page .glass-panel .secondary, .shell.glass-page .glass-panel .secondary {
+  -webkit-backdrop-filter:none; backdrop-filter:none;
+}
+@media (prefers-reduced-transparency:reduce) {
+  .page.glass-page, .shell.glass-page { --glass-fill:#f3f7f9; --glass-fill-strong:#fff; --glass-control-fill:#eaf1f5; --glass-inset-fill:#e8eff3; }
+  .page.glass-page.theme-dark, .shell.glass-page.theme-dark { --glass-fill:#1d3548; --glass-fill-strong:#182c3d; --glass-control-fill:#294458; --glass-inset-fill:#243d51; }
+  .page.glass-page .glass-panel, .shell.glass-page .glass-panel, .page.glass-page .glass-control, .shell.glass-page .glass-control, .page.glass-page .glass-chrome, .shell.glass-page .glass-chrome, .page.glass-page .glass-sheet, .shell.glass-page .glass-sheet, .page.glass-page .secondary, .shell.glass-page .secondary { -webkit-backdrop-filter:none; backdrop-filter:none; }
+}
+@media (prefers-contrast:more) {
+  .page.glass-page, .shell.glass-page { --glass-fill:#f3f7fa; --glass-control-fill:#eaf1f5; --glass-inset-fill:#eef3f6; --glass-edge:#496a81; --glass-edge-dim:#496a81; --muted:#293f52; }
+  .page.glass-page.theme-dark, .shell.glass-page.theme-dark { --glass-fill:#172e40; --glass-control-fill:#1e394e; --glass-inset-fill:#193347; --glass-edge:#91b7ce; --glass-edge-dim:#91b7ce; --muted:#d5e6f0; }
+}
+.glass-page.reduce-motion button, .glass-page.motion-reduced button, .glass-page.reduced-motion button { transition:none; }
+.glass-page.reduce-motion button:active, .glass-page.motion-reduced button:active, .glass-page.reduced-motion button:active { transform:none; }
+@media (prefers-reduced-motion:reduce) { .glass-page button { transition:none; }.glass-page button:active { transform:none; } }

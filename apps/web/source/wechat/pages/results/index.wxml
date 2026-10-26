@@ -1,0 +1,41 @@
+<view wx:if="{{preferenceReady}}" class="page restaurant-page glass-page {{themeClass}} {{reducedMotion ? 'reduced-motion' : ''}}">
+  <view class="glass-backdrop" aria-hidden="true"></view>
+  <view class="page-heading"><view class="eyebrow">附近餐厅</view><view class="title">{{loading ? '正在找餐厅' : totalCount ? '这次看看这家' : '找一家餐厅'}}</view><view class="subtitle">{{summary}}</view></view>
+  <view class="context-row">
+    <button class="context-location glass-control" bindtap="location" disabled="{{actionBusy}}" hover-class="quiet-pressed"><view class="context-label">出发地点</view><view>{{locationLabel}} ⌄</view></button>
+    <button class="context-adjust glass-control" bindtap="adjust" disabled="{{actionBusy}}" hover-class="quiet-pressed">调整条件</button>
+  </view>
+  <view wx:if="{{error}}" class="error" aria-live="polite">{{error}}</view>
+  <view wx:if="{{notice}}" class="notice" aria-live="polite">{{notice}}</view>
+  <view wx:if="{{hasResponse}}" class="pool-progress glass-inset" aria-live="polite"><view>本轮已收集 {{collectedCount}} 家 · 已看 {{seenCount}} 家 · 还剩 {{remainingCount}} 家</view><text>{{rangeLabel}}</text></view>
+  <view wx:if="{{collectionNotice}}" class="notice" aria-live="polite">{{collectionNotice}}</view>
+  <view wx:if="{{loading}}" class="empty glass-panel" aria-live="polite"><view class="loading-mark" aria-hidden="true">···</view><view>正在收集餐厅，不足100家时会自动扩大范围，请稍候。</view></view>
+  <block wx:elif="{{hasResponse && totalCount}}">
+    <view wx:for="{{items}}" wx:key="viewKey" class="restaurant-card glass-panel">
+      <view class="restaurant-image-area">
+        <image wx:if="{{item.imageUrl}}" class="restaurant-image" src="{{item.imageUrl}}" mode="aspectFill" lazy-load="{{true}}" data-index="{{item.index}}" data-revision="{{revision}}" binderror="imageError" aria-label="{{item.name}}门店图片"/>
+        <view wx:else class="restaurant-image-placeholder"><view class="restaurant-mark" aria-hidden="true">店</view><text>暂无门店图片</text></view>
+      </view>
+      <view class="restaurant-copy"><view class="restaurant-heading"><view class="restaurant-main"><view class="restaurant-name">{{item.name}}</view><view class="source">{{item.sourceAttribution}}</view></view></view>
+      <view class="facts-row glass-inset"><view class="fact"><view class="fact-label">人均参考</view><view class="price">{{item.price}}</view></view><view class="fact"><view class="fact-label">距离参考</view><view class="distance">{{item.distance}}</view></view></view>
+      <view class="status-row"><view class="status-badge status-{{item.openTone}}"><view class="status-dot" aria-hidden="true"/><text>{{item.openLabel}}</text></view><text>{{item.travel}}</text></view>
+      <view class="contact-row"><text class="contact-label">联系电话</text><text class="contact-value">{{item.phone}}</text></view>
+      <view class="address">{{item.address}}</view>
+      <view wx:if="{{item.tags.length}}" class="restaurant-tags"><text wx:for="{{item.tags}}" wx:for-item="tag" wx:key="*this" class="tag">{{tag}}</text></view>
+      <button wx:if="{{item.canViewRoute}}" class="primary destination-action" data-index="{{item.index}}" data-revision="{{revision}}" bindtap="openRoute" disabled="{{actionBusy}}" aria-label="在小程序内查看到{{item.name}}的路线">小程序内查看路线</button>
+      <button class="secondary destination-action external-map-action" data-index="{{item.index}}" data-revision="{{revision}}" bindtap="navigate" disabled="{{!item.canNavigate || actionBusy}}" loading="{{actionBusy}}" aria-label="在微信地图查看{{item.name}}">打开微信地图</button>
+      <view class="navigation-note" aria-live="polite">{{item.navigationNotice}}</view>
+      <button class="detail-link" data-index="{{item.index}}" data-revision="{{revision}}" bindtap="detail" disabled="{{actionBusy}}" hover-class="quiet-pressed"><text>查看餐厅详情</text><text>›</text></button></view>
+    </view>
+    <view class="footnote">{{liveOnly ? '按来源顺序展示。' : ''}}人均价格仅供参考，距离与出行时间为估算。</view>
+  </block>
+  <view wx:else class="empty-state glass-panel">
+    <view class="empty-mark">店</view><view class="empty-title">{{hasResponse ? '暂时没有合适的餐厅' : '还没有餐厅结果'}}</view>
+    <view class="empty-copy">{{unavailableNotice || (hasResponse ? '试着调整预算或搜索距离，再获取一次。' : '选择出发地点后，获取附近餐厅。')}}</view>
+    <button wx:if="{{!canRequest}}" class="secondary" bindtap="home">返回首页</button>
+  </view>
+  <view wx:if="{{roundComplete}}" class="round-complete glass-inset" aria-live="polite">本轮 {{collectedCount}} 家已全部看过。需要新一轮时，请主动重新收集。</view>
+  <button wx:if="{{canNext}}" class="primary result-action" data-revision="{{revision}}" bindtap="next" disabled="{{actionBusy}}">换一个</button>
+  <button wx:if="{{canRequest}}" class="result-action {{canNext ? 'secondary' : 'primary'}}" data-revision="{{revision}}" bindtap="retry" loading="{{loading}}" disabled="{{loading || actionBusy}}">{{hasResponse ? '重新收集一轮' : '收集餐厅'}}</button>
+  <view class="footnote">返回首页或查看详情会继续本轮；切到后台、修改地点或条件后需重新收集。本轮结果最长保留2小时，不写入附近餐厅缓存。</view>
+</view>

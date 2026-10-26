@@ -1,0 +1,43 @@
+{
+  "pages": [
+    "pages/preferences/index",
+    "pages/index/index",
+    "pages/canteen/index",
+    "pages/takeout/index",
+    "pages/canteen-records/index",
+    "pages/location/index",
+    "pages/conditions/index",
+    "pages/results/index",
+    "pages/detail/index",
+    "pages/route/index",
+    "pages/account/index",
+    "pages/settings/index",
+    "pages/privacy/index",
+    "pages/support/index",
+    "pages/saved/index",
+    "pages/local-records/index",
+    "pages/nearby/index"
+  ],
+  "window": {
+    "navigationBarTextStyle": "@navigationBarTextStyle",
+    "navigationBarTitleText": "吃什么",
+    "navigationBarBackgroundColor": "@navigationBarBackgroundColor",
+    "backgroundColor": "@backgroundColor"
+  },
+  "darkmode": true,
+  "themeLocation": "theme.json",
+  "permission": {
+    "scope.userLocation": {
+      "desc": "在你主动选择当前位置时，用于查找附近餐厅和显示所在城市。"
+    }
+  },
+  "requiredPrivateInfos": [
+    "getLocation"
+  ],
+  "networkTimeout": {
+    "request": 15000
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json",
+  "lazyCodeLoading": "requiredComponents"
+}

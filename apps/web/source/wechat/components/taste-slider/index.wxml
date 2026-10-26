@@ -1,0 +1,14 @@
+<view class="taste-card {{themeClass}} {{isDiscrete ? 'is-discrete' : 'is-continuous'}} {{isUltra ? 'is-ultra' : ''}} {{controlDisabled ? 'is-disabled' : ''}} {{dragging ? 'is-dragging' : ''}} {{reducedMotion ? 'reduce-motion' : ''}} {{pageVisible ? '' : 'is-hidden'}}" style="--taste-press:{{pressMs}}ms;">
+  <view wx:if="{{isDiscrete}}" class="taste-heading"><text class="taste-caption">辣度</text><view class="taste-value" aria-hidden="true">{{displayLabel}}</view></view>
+  <view wx:else class="taste-heading flavor-heading"><text class="flavor-end {{activeSide === 'left' ? 'is-active' : ''}}">清淡</text><text class="flavor-end {{activeSide === 'right' ? 'is-active' : ''}}">重口味</text></view>
+  <view class="taste-control" aria-role="slider" aria-label="{{isDiscrete ? '辣度' : '口味轻重'}}，当前{{displayLabel}}，左右拖动调整" bindtouchstart="touchStart" catchtouchmove="touchMove" bindtouchend="touchEnd" bindtouchcancel="touchCancel">
+    <view class="taste-rail" aria-hidden="true">
+      <view class="taste-fill" style="{{fillStyle}}">
+        <view wx:if="{{isUltra}}" class="ultra-fill"><view class="ultra-glow ultra-glow-one"/><view class="ultra-glow ultra-glow-two"/></view>
+      </view>
+      <view wx:for="{{particleRuns}}" wx:for-item="run" wx:key="id" class="particle-stream"><view wx:for="{{particles}}" wx:key="id" class="particle-path" style="top:{{item.top}}%;transform:translate3d({{item.start}}%,0,0);animation-duration:{{item.duration}}ms;animation-delay:{{item.delay}}ms;"><view class="particle-dot" style="width:{{item.size}}px;height:{{item.size}}px;opacity:{{item.opacity}};"/></view></view>
+      <view wx:if="{{isDiscrete}}" class="tick-rail"><view wx:for="{{ticks}}" wx:key="id" class="tick-position" style="transform:translate3d({{item.percent}}%,0,0);opacity:{{item.value > displayValue ? 1 : 0}};"><view class="tick-dot"/></view></view>
+    </view>
+    <view class="taste-travel" aria-hidden="true"><view class="taste-thumb-position" style="transform:translate3d({{percent}}%,0,0);"><view class="taste-thumb"><view class="taste-thumb-light"/></view></view></view>
+  </view>
+</view>

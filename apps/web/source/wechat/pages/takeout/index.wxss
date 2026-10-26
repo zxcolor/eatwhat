@@ -1,0 +1,69 @@
+.takeout-page { max-width:760px; margin:0 auto; padding:28px 20px calc(38px + env(safe-area-inset-bottom)); }
+.takeout-header { margin:6px 4px 26px; }
+.takeout-eyebrow { margin-bottom:10px; color:var(--accent); font-size:12px; font-weight:600; line-height:1.5; letter-spacing:1.5px; }
+.takeout-header .title { margin-bottom:11px; font-size:30px; line-height:1.35; letter-spacing:-.6px; }
+.takeout-header .subtitle { font-size:13px; line-height:1.85; }
+.takeout-page .card { padding:22px; margin-bottom:18px; border-radius:29px; }
+.takeout-page .row { align-items:flex-start; flex-wrap:wrap; gap:8px 12px; }
+.step-label { flex-shrink:0; padding:4px 9px; border-radius:999px; background:var(--soft); color:var(--muted); font-size:12px; font-weight:600; line-height:18px; }
+.image-empty { margin:18px 0; padding:24px 12px 22px; border-radius:22px; color:var(--muted); font-size:14px; line-height:1.85; text-align:center; }
+.image-empty > text { display:block; margin-top:5px; font-size:12px; line-height:1.8; }
+.image-symbol { display:flex; align-items:center; justify-content:center; width:58px; height:58px; margin:0 auto 15px; border:1px solid var(--line); border-radius:19px; background:var(--accent-soft); color:var(--accent); font-size:31px; font-weight:300; line-height:1; }
+.preview-list { margin-top:18px; }
+.preview-row { display:flex; align-items:center; gap:15px; margin-top:10px; padding:12px; border-radius:21px; }
+.preview-thumb { flex:0 0 88px; width:88px; height:112px; margin:0; padding:0; overflow:hidden; border:1px solid var(--line); border-radius:14px; background:var(--soft); }
+.preview-thumb image { display:block; width:100%; height:100%; }
+.preview-copy { flex:1; min-width:0; overflow-wrap:anywhere; }
+.preview-label { font-size:15px; font-weight:650; line-height:1.6; }
+.preview-dimensions { display:block; margin:5px 0; font-size:12px; line-height:1.75; }
+.text-button { width:auto; min-height:44px; margin:0; padding:10px 0; border:0; border-radius:12px; background:transparent; color:var(--accent); font-size:13px; font-weight:600; line-height:24px; text-align:left; white-space:normal; }
+.text-button[disabled] { background:transparent; color:var(--muted); }
+.clear-images { margin:6px auto 0; text-align:center; }
+.image-note,.small-note { color:var(--muted); font-size:12px; line-height:1.85; }
+.image-note { margin-top:15px; }
+.disclosure { margin-top:14px; font-size:13px; line-height:1.9; overflow-wrap:anywhere; }
+.privacy-card > .muted { margin-top:8px; font-size:13px; line-height:1.85; }
+.service-note { margin-top:14px; color:var(--muted); font-size:12px; line-height:1.85; }
+.consent-row { display:flex; align-items:flex-start; gap:8px; margin-top:18px; padding:15px 13px; border-radius:19px; font-size:12px; line-height:1.9; }
+.consent-row checkbox { flex-shrink:0; margin-top:1px; transform:scale(.85); transform-origin:top left; }
+.consent-row text { min-width:0; margin-left:-3px; overflow-wrap:anywhere; }
+.status-card { display:flex; align-items:center; gap:12px; margin:18px 0; padding:15px 17px; border-radius:22px; font-size:13px; line-height:1.8; }
+.status-card > view:nth-child(2) { flex:1; min-width:0; overflow-wrap:anywhere; }
+.status-card .text-button { flex-shrink:0; margin-left:auto; padding:10px 1px; }
+.status-dot { flex:0 0 8px; width:8px; height:8px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 5px var(--accent-soft); }
+.notice { margin:16px 0; padding:14px 16px; border-radius:18px; color:var(--muted); font-size:12px; line-height:1.85; }
+.candidate-intro { margin:14px 0 16px; font-size:12px; line-height:1.85; }
+.candidate-row { margin:12px 0; padding:16px 14px 8px; border-radius:21px; }
+.candidate-main { display:flex; align-items:flex-start; gap:9px; }
+.candidate-main checkbox { flex-shrink:0; margin-top:5px; transform:scale(.85); transform-origin:top left; }
+.candidate-copy { flex:1; min-width:0; margin-left:-3px; overflow-wrap:anywhere; word-break:break-all; }
+.candidate-kind { color:var(--muted); font-size:12px; font-weight:600; line-height:1.7; letter-spacing:.5px; }
+.candidate-name { margin:4px 0; font-size:17px; font-weight:650; line-height:1.5; }
+.candidate-merchant,.candidate-meta { margin-top:5px; color:var(--muted); font-size:12px; line-height:1.8; }
+.candidate-price { margin-top:8px; color:var(--accent); font-size:15px; font-weight:600; line-height:1.7; font-variant-numeric:tabular-nums; }
+.candidate-source { margin-left:35px; font-size:12px; }
+.round-count { margin:12px 2px 0; color:var(--muted); font-size:12px; line-height:1.85; font-variant-numeric:tabular-nums; }
+.candidates-card .small-note { margin-top:12px; }
+.takeout-page .result-card { padding:28px 24px; border-radius:32px; }
+.result-caption { margin-bottom:22px; color:var(--accent); font-size:12px; font-weight:600; line-height:1.6; letter-spacing:1px; }
+.result-kind { color:var(--muted); font-size:12px; font-weight:600; line-height:1.7; }
+.result-name { margin:8px 0 12px; font-size:30px; font-weight:700; line-height:1.4; letter-spacing:-.6px; overflow-wrap:anywhere; word-break:break-all; }
+.result-merchant,.result-meta { margin-top:10px; color:var(--muted); font-size:13px; line-height:1.85; overflow-wrap:anywhere; }
+.result-divider { height:1px; margin:24px 0; background:linear-gradient(90deg,transparent,var(--line) 12%,var(--line) 88%,transparent); }
+.price-caption { color:var(--muted); font-size:12px; font-weight:600; line-height:1.7; }
+.result-price { margin-top:9px; color:var(--accent); font-size:27px; font-weight:650; line-height:1.5; letter-spacing:-.4px; overflow-wrap:anywhere; font-variant-numeric:tabular-nums; }
+.result-source { margin:24px 0 6px; font-size:12px; font-weight:650; line-height:1.8; }
+.page-note { padding:12px 12px 8px; color:var(--muted); font-size:12px; line-height:1.9; text-align:center; }
+.processing-canvas { position:fixed; left:-10000px; top:0; width:1px; height:1px; opacity:0; pointer-events:none; }
+.reduce-motion button { transition:none; }
+.reduce-motion button:active { transform:none; }
+@media (max-width:350px) {
+  .takeout-page { padding-left:16px; padding-right:16px; }
+  .takeout-header .title { font-size:26px; }
+  .takeout-page .card { padding:18px; border-radius:26px; }
+  .preview-row { gap:12px; padding:10px; }
+  .preview-thumb { flex-basis:76px; width:76px; height:100px; }
+  .takeout-page .result-card { padding:24px 20px; }
+  .result-name { font-size:27px; }
+  .result-price { font-size:24px; }
+}

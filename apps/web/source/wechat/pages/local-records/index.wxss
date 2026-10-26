@@ -1,0 +1,46 @@
+.utility-page .title { margin:0 0 8px; font-size:30px; line-height:38px; letter-spacing:-.6px; }
+.utility-page .subtitle { margin-bottom:24px; font-size:14px; line-height:22px; }
+.page-eyebrow { margin-bottom:8px; color:var(--muted); font-size:12px; line-height:18px; }
+.utility-page .card { padding:20px; border-radius:28px; }
+.utility-page .muted { font-size:13px; line-height:22px; }
+.utility-page button { min-height:44px; transition:transform 150ms cubic-bezier(.23,1,.32,1), background-color 150ms ease; }
+.utility-page button.utility-pressed { transform:scale(.98); }
+.utility-page button[disabled] { transform:none; }
+.utility-page .secondary { min-height:48px; border-radius:999px; font-size:14px; }
+.privacy-summary { display:flex; align-items:flex-start; gap:13px; }
+.privacy-summary .label { font-size:14px; line-height:22px; margin-bottom:5px; }
+.privacy-mark { flex-shrink:0; display:flex; align-items:center; justify-content:center; width:38px; height:38px; border-radius:13px; background:var(--soft); color:var(--muted); font-size:23px; }
+.list-heading { display:flex; justify-content:space-between; gap:12px; margin:24px 2px 12px; font-size:14px; font-weight:600; }
+.list-heading text:last-child { color:var(--muted); font-size:12px; font-weight:400; }
+.record .row { align-items:flex-start; }
+.record .label { min-width:0; font-size:15px; line-height:24px; }
+.summary { margin-top:12px; padding-top:12px; border-top:1px solid var(--line); }
+.count { flex-shrink:0; padding:4px 8px; border-radius:999px; background:var(--accent-soft); color:var(--accent); font-size:12px; line-height:18px; }
+.empty-state { min-height:230px; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; }
+.empty-symbol { display:flex; justify-content:center; align-items:center; width:54px; height:54px; border:1px solid var(--line); border-radius:18px; background:var(--soft); color:var(--muted); font-size:28px; margin-bottom:16px; }
+.empty-title { font-size:16px; line-height:24px; font-weight:600; }
+.empty-copy { max-width:250px; color:var(--muted); font-size:13px; line-height:22px; margin-top:8px; }
+.error-title { font-weight:600; margin-bottom:5px; }
+.utility-page .retry-button { width:auto; margin:8px 0 0; padding:10px 14px; border:1px solid var(--accent); border-radius:999px; background:transparent; color:var(--accent); font-size:13px; line-height:22px; }
+.utility-page .danger-button { color:#a23d39; background:transparent; }
+.theme-dark .danger-button { color:#efa49d; }
+.utility-page.reduce-motion button { transition:none; }
+.utility-page.reduce-motion button.utility-pressed { transform:none; }
+@media (prefers-reduced-motion:reduce) { .utility-page button { transition:none; } .utility-page button.utility-pressed { transform:none; } }
+
+/* Local summaries retain their compact factual hierarchy. */
+.records-page .page-eyebrow { letter-spacing:.06em; }
+.records-page .privacy-summary { gap:14px; padding:21px; border-radius:28px; }
+.records-page .privacy-summary > view:last-child { min-width:0; flex:1; }
+.records-page .privacy-mark { width:44px; height:44px; border-radius:16px; color:var(--accent); }
+.records-page .privacy-summary .label { font-size:15px; line-height:24px; }
+.records-page .list-heading { margin:28px 5px 12px; font-size:15px; }
+.records-page .record { padding:21px; border-radius:26px; }
+.records-page .record .row { flex-wrap:wrap; gap:9px; }
+.records-page .record .label { min-width:0; flex:1 1 150px; font-size:16px; line-height:25px; }
+.records-page .count { font-size:12px; line-height:20px; max-width:100%; }
+.records-page .summary { font-size:13px; line-height:1.8; overflow-wrap:anywhere; }
+.records-page .empty-symbol { width:60px; height:60px; border-radius:22px; color:var(--accent); }
+.records-page .empty-copy { line-height:1.8; }
+.glass-page.records-page button.danger-button:not([disabled]) { color:#a23d39; background:rgba(163,61,57,.055); border-color:rgba(163,61,57,.22); }
+.glass-page.records-page.theme-dark button.danger-button:not([disabled]) { color:#f2b0a8; background:rgba(179,68,62,.11); border-color:rgba(242,176,168,.26); }

@@ -1,0 +1,47 @@
+<view wx:if="{{mounted}}" class="filter-layer {{themeClass}} {{reducedMotion ? 'reduce-motion' : ''}} {{entered ? 'is-open' : ''}} {{closing ? 'is-closing' : ''}} {{dragging ? 'is-dragging' : ''}}">
+  <view class="filter-backdrop" data-session="{{session}}" catchtap="close" catchtouchmove="swallow" aria-label="取消本次筛选"/>
+  <view class="filter-panel" style="--filter-drag:{{dragY}}px;" catchtap="swallow" aria-role="dialog" aria-modal="true" aria-label="筛选这一顿">
+    <view class="filter-header" data-session="{{session}}" catchtouchstart="dragStart" catchtouchmove="dragMove" catchtouchend="dragEnd" catchtouchcancel="dragCancel">
+      <view class="filter-handle"/>
+      <view class="filter-title">筛选这一顿</view>
+      <view class="filter-drag-hint">下拉顶部收起 · 应用后才生效</view>
+      <button class="filter-button filter-close" data-session="{{session}}" bindtap="close" catchtouchstart="swallow" hover-class="quiet-pressed" aria-label="取消并关闭筛选">×</button>
+    </view>
+    <scroll-view class="filter-scroll" scroll-y="{{true}}" enhanced="{{true}}" bounces="{{false}}" show-scrollbar="{{false}}">
+      <view wx:if="{{prepared}}" class="filter-content">
+        <view class="filter-context"><text>{{target === 'PACKAGE' ? '决定套餐' : '决定餐厅'}}</text><text>虚拟起点 · {{originLabel}}</text></view>
+        <view class="filter-card">
+          <view class="range-heading"><view class="filter-label">总价上限 <text class="field-unit">元</text></view><button class="filter-button limit-button {{budget.unlimited ? 'selected' : ''}}" data-key="budgetCents" data-session="{{session}}" bindtap="clearLimit" disabled="{{closing || applying || stale}}" hover-class="quiet-pressed">不限</button></view>
+          <view class="range-control"><view class="range-bubble" style="left:{{budget.bubblePercent}}%;">{{budget.text}}</view><slider class="filter-slider" min="0" max="{{budget.maximum}}" step="1" value="{{budget.value}}" data-key="budgetCents" data-session="{{session}}" bindchanging="rangeChanging" bindchange="rangeChanging" activeColor="{{themeClass === 'theme-dark' ? '#efaa7c' : '#b94a29'}}" backgroundColor="{{themeClass === 'theme-dark' ? '#45403a' : '#e4e1d9'}}" block-color="#fff" block-size="24" disabled="{{closing || applying || stale}}" aria-label="预算上限，单位元"/></view>
+          <view class="range-scale"><text>0 元</text><text>{{budget.maximum}} 元</text></view>
+          <view class="field-note">拖动设定预算，点击「不限」取消上限。</view>
+        </view>
+        <view class="filter-card">
+          <view class="range-heading"><view class="filter-label">距离上限 <text class="field-unit">虚拟单位</text></view><button class="filter-button limit-button {{distance.unlimited ? 'selected' : ''}}" data-key="maxDistanceUnits" data-session="{{session}}" bindtap="clearLimit" disabled="{{closing || applying || stale}}" hover-class="quiet-pressed">不限</button></view>
+          <view class="range-control"><view class="range-bubble" style="left:{{distance.bubblePercent}}%;">{{distance.text}}</view><slider class="filter-slider" min="0" max="{{distance.maximum}}" step="1" value="{{distance.value}}" data-key="maxDistanceUnits" data-session="{{session}}" bindchanging="rangeChanging" bindchange="rangeChanging" activeColor="{{themeClass === 'theme-dark' ? '#efaa7c' : '#b94a29'}}" backgroundColor="{{themeClass === 'theme-dark' ? '#45403a' : '#e4e1d9'}}" block-color="#fff" block-size="24" disabled="{{closing || applying || stale}}" aria-label="距离上限，单位为虚拟单位"/></view>
+          <view class="range-scale"><text>0 单位</text><text>{{distance.maximum}} 单位</text></view>
+          <view class="field-note">只用于虚拟场景比较，不是米数或现实路程。</view>
+        </view>
+        <view class="filter-card">
+          <view class="filter-label">这次的口味条件</view>
+          <view class="field-note">仅依据目录中的模拟属性，具体配料仍未知。</view>
+          <view class="spicy-choices"><button wx:for="{{spicyChoices}}" wx:key="index" class="filter-button spicy-choice {{item.selected ? 'selected' : ''}}" data-index="{{item.index}}" data-session="{{session}}" bindtap="selectSpicy" disabled="{{closing || applying || stale}}" hover-class="quiet-pressed" aria-label="{{item.label}}{{item.selected ? '，已选' : ''}}">{{item.label}}</button></view>
+          <view class="filter-toggle"><view class="toggle-copy"><view class="toggle-label">只选模拟素食</view><view class="field-note">未知素食属性不会当作符合条件</view></view><switch class="filter-switch" checked="{{vegetarianOnly}}" data-key="vegetarianOnly" data-session="{{session}}" bindchange="toggle" color="{{themeClass === 'theme-dark' ? '#efaa7c' : '#b94a29'}}" disabled="{{closing || applying || stale}}" aria-label="只选模拟素食"/></view>
+          <view wx:if="{{target === 'PACKAGE'}}" class="filter-toggle"><view class="toggle-copy"><view class="toggle-label">优先模拟正餐</view><view class="field-note">用于排序，具体分量和营养未知</view></view><switch class="filter-switch" checked="{{preferMain}}" data-key="preferMain" data-session="{{session}}" bindchange="toggle" color="{{themeClass === 'theme-dark' ? '#efaa7c' : '#b94a29'}}" disabled="{{closing || applying || stale}}" aria-label="优先模拟正餐"/></view>
+        </view>
+        <view class="filter-card">
+          <view class="filter-label">这次更在意什么</view>
+          <view class="field-note">越向右，给符合条件的候选排序时越看重这一项。</view>
+          <view wx:for="{{priorities}}" wx:key="key" class="filter-priority {{item.inactive ? 'is-inactive' : ''}}"><view class="priority-heading"><text>{{item.label}}</text><text class="priority-value">{{item.description}}</text></view><slider class="filter-slider priority-slider" min="0" max="6" step="1" value="{{item.value}}" data-key="{{item.key}}" data-session="{{session}}" bindchanging="priorityChanging" bindchange="priorityChanging" activeColor="{{themeClass === 'theme-dark' ? '#efaa7c' : '#b94a29'}}" backgroundColor="{{themeClass === 'theme-dark' ? '#45403a' : '#e4e1d9'}}" block-color="#fff" block-size="22" disabled="{{item.inactive || closing || applying || stale}}" aria-label="{{item.label}}优先程度"/><view class="range-scale"><text>不参考</text><text>很在意</text></view></view>
+        </view>
+        <view class="filter-summary"><view class="summary-title">本次已选</view><view class="summary-tags"><text wx:for="{{summary}}" wx:key="id" class="summary-tag">{{item.label}}</text></view><view class="field-note">沿用已确认的口味偏好，此处只调整这一顿。</view></view>
+      </view>
+    </scroll-view>
+    <view class="filter-footer">
+      <view wx:if="{{error}}" class="filter-error" aria-live="polite">{{error}}</view>
+      <view class="filter-count {{count === 0 ? 'is-empty' : ''}}" aria-live="polite"><view wx:if="{{countPending}}" class="count-pending">正在核对可选数量…</view><view wx:elif="{{count === null}}" class="count-pending">可选数量暂不可用</view><view wx:else class="count-line"><text class="count-number">{{count}}</text><text class="count-label">{{targetUnit}}符合条件</text><text wx:if="{{counts.unknown}}" class="unknown-count">另有 {{counts.unknown}} 个资料不足</text></view></view>
+      <view wx:if="{{count === 0}}" class="empty-count-note">当前没有已知符合的选择，可以继续调整条件。</view>
+      <view class="filter-actions"><button class="filter-button cancel-button" data-session="{{session}}" bindtap="close" hover-class="quiet-pressed">取消</button><button class="filter-button apply-button {{!prepared || countPending || count === null || applying || closing || stale ? 'is-disabled' : ''}}" data-session="{{session}}" bindtap="apply" loading="{{applying}}" disabled="{{!prepared || countPending || count === null || applying || closing || stale}}" hover-class="apply-pressed">应用这些条件</button></view>
+    </view>
+  </view>
+</view>

@@ -1,0 +1,1101 @@
+{
+  "formatVersion": 1,
+  "release": "20261026-preference-ai-budget-770b1b01f930",
+  "image": "sha256:2aadff36759594233c245b0e46422d68a88c25aadd3f1c5fa6cc91b59a1781ac",
+  "files": [
+    {
+      "path": ".dockerignore",
+      "sha256": "e15ff9c191d88fa939a7951af94be2ff38437210ca79760c32522ba333197487",
+      "bytes": 252
+    },
+    {
+      "path": "apps/api/Dockerfile",
+      "sha256": "6eb4c66a1c62a96398503f7e13dcbbff4a6900a5a2e4285b6555046a992b92c9",
+      "bytes": 1785
+    },
+    {
+      "path": "apps/api/migrations/0001_initial_schema.sql",
+      "sha256": "ebdda07eba3f68b88de87078facab9aa42e71288efcfce753269601ea35a34aa",
+      "bytes": 111609
+    },
+    {
+      "path": "apps/api/migrations/0002_persistence_api.sql",
+      "sha256": "513c664f75c143b46beb5203a1871451040048b8544eda5da361072dfc3d7f5c",
+      "bytes": 26351
+    },
+    {
+      "path": "apps/api/migrations/0003_admin_security.sql",
+      "sha256": "6f20ddabb9c4b0dddfbb175801a7551d1155e56b2545b79bc9a1edda9984e40a",
+      "bytes": 67682
+    },
+    {
+      "path": "apps/api/migrations/0004_admin_api_primitives.sql",
+      "sha256": "e93a13c10040e9c7005946d7c46ec4b5e4d3a1bda993baaba0947943d2441362",
+      "bytes": 13047
+    },
+    {
+      "path": "apps/api/migrations/0005_support_feedback_security.sql",
+      "sha256": "b18c9ed97f38b393ba260f134d6e83fa092073a887a363aef7a9cfb8eb447750",
+      "bytes": 20962
+    },
+    {
+      "path": "apps/api/migrations/0006_data_export_delivery.sql",
+      "sha256": "cd481d585b961c7914e27feb44e8cbc9ad4cd0b1c4d0ce4a7b34ccc079319e25",
+      "bytes": 55025
+    },
+    {
+      "path": "apps/api/migrations/0007_otp_verification_attempt_limit.sql",
+      "sha256": "06aebb75d2135681b42c6ca4bc61ff2cf18fad9b1f2501db608f1e5096de5653",
+      "bytes": 1728
+    },
+    {
+      "path": "apps/api/migrations/0008_fix_jsonb_object_cardinality.sql",
+      "sha256": "f7309a4bb7d0112e17b60368206a4757bc5c9cbde519b5767ff32dfb4be69827",
+      "bytes": 4511
+    },
+    {
+      "path": "apps/api/migrations/0009_qualify_admin_session_expiry.sql",
+      "sha256": "b226f0af83dceeb89d144d2b25296b1b2a8f9afb641540d78e5d024361f6f24b",
+      "bytes": 3406
+    },
+    {
+      "path": "apps/api/migrations/0010_fusion_phone_auth.sql",
+      "sha256": "1aa9ecf40341c86adafd462686305beb8f7254df9e57ad06eaabebbd6012f180",
+      "bytes": 18926
+    },
+    {
+      "path": "apps/api/migrations/0011_phone_only_auth.sql",
+      "sha256": "173ba3f9119f71fb32a6c158fb747e253bc52e98c74c7e08c94cfead811584d4",
+      "bytes": 30651
+    },
+    {
+      "path": "apps/api/migrations/0012_wechat_union_aliases.sql",
+      "sha256": "76771e373dbbbbdc485ceb7a0508b6bb7de2bdbef42a55575b22b51f9856eb24",
+      "bytes": 16286
+    },
+    {
+      "path": "apps/api/migrations/0013_admin_config_control.sql",
+      "sha256": "e1d21e559b16b8da540651ab34932def3ee00daac25290919ac632f7a1a62b5c",
+      "bytes": 33363
+    },
+    {
+      "path": "apps/api/migrations/0014_wechat_miniprogram_login.sql",
+      "sha256": "a59f91049a452362a36464a4faf22dd1803664a234f802b6d876e94dac16d965",
+      "bytes": 5472
+    },
+    {
+      "path": "apps/api/migrations/0015_place_image_display_rights.sql",
+      "sha256": "c94ec4426cff4002a4151f8dd76aeac3a6a410eb015543730f99c965a198bc85",
+      "bytes": 2029
+    },
+    {
+      "path": "apps/api/migrations/0016_canteen_public_ratings.sql",
+      "sha256": "82fd8b55c50ff1ad1bc56626647cf7956d0883c9d3e076bce1fb78ea7dc5874b",
+      "bytes": 14901
+    },
+    {
+      "path": "apps/api/package.json",
+      "sha256": "b43b1665364573e0aa31ed7bb8fac27fce72934c8c39ea00fd66c56b4d01e2cc",
+      "bytes": 1810
+    },
+    {
+      "path": "apps/api/src/admin/admin-app.module.ts",
+      "sha256": "7fad762799b587e215d4f4f72a87690f10db3aa377bdbca16fa8dbd67cda3feb",
+      "bytes": 158
+    },
+    {
+      "path": "apps/api/src/admin/admin-audit-cursor.ts",
+      "sha256": "cc192592fe895f96c02c38ea6c995f5e9c2128b06f95f62cc45ed069782a1a9b",
+      "bytes": 1988
+    },
+    {
+      "path": "apps/api/src/admin/admin-config.ts",
+      "sha256": "d3bc1266b83a466843dcd433b1d767eef1de0c8b84be7e4a18c9510f5d6bcfde",
+      "bytes": 10902
+    },
+    {
+      "path": "apps/api/src/admin/admin-crypto.ts",
+      "sha256": "9d934f96b440e556f7b9efcaa8c2046975a8e1dc5bc5b6f91d393d2bd63cba5c",
+      "bytes": 6368
+    },
+    {
+      "path": "apps/api/src/admin/admin-database.pool.ts",
+      "sha256": "08c7046be6208795b85a1827034645b792f238ff00dfcc467ae02eb06ca52070",
+      "bytes": 4630
+    },
+    {
+      "path": "apps/api/src/admin/admin-errors.ts",
+      "sha256": "4c53df6cdcadcc28123f8bed1b1ea8ea7f863ce67301f47f15870dbd5828eb3c",
+      "bytes": 2835
+    },
+    {
+      "path": "apps/api/src/admin/admin-main.ts",
+      "sha256": "b5867c4071afc18aadbfa41dcb491693cd1653a8264feb56cb57659af42dac50",
+      "bytes": 1141
+    },
+    {
+      "path": "apps/api/src/admin/admin-process-config.module.ts",
+      "sha256": "ce650c6347e9119244980ab6c19602b30ef2d4663ff8660782d795281dfef78f",
+      "bytes": 349
+    },
+    {
+      "path": "apps/api/src/admin/admin-process-config.ts",
+      "sha256": "49c87dc4d37a5cf8d49652113aef2d883d40f2ba90e54b99018a6dddbe1d49d2",
+      "bytes": 3993
+    },
+    {
+      "path": "apps/api/src/admin/admin-request-context.ts",
+      "sha256": "996a51c765ab10980b5264798707d694f91dd016cc9f6ff4504395fe57248a5a",
+      "bytes": 3258
+    },
+    {
+      "path": "apps/api/src/admin/admin-webauthn.adapter.ts",
+      "sha256": "75ec4bcc09e6bd9795d8e03d3fda5ac6a0e3e8d25af63c26e3aa89208d77cd3d",
+      "bytes": 7197
+    },
+    {
+      "path": "apps/api/src/admin/admin.controller.ts",
+      "sha256": "424073ad28f965a093eb6b72dac9402ece2d0e979ec5873c35a1ed3b6791a41f",
+      "bytes": 6855
+    },
+    {
+      "path": "apps/api/src/admin/admin.guards.ts",
+      "sha256": "3c07c695b7f88d76b8726db03cb8f721d1b8b3f56146a7270ef2d2b2546823ec",
+      "bytes": 8163
+    },
+    {
+      "path": "apps/api/src/admin/admin.module.ts",
+      "sha256": "d4a4af470a60cd1fb7f509751a5b33c1c28677a39e9d22230495b397c9a26377",
+      "bytes": 1471
+    },
+    {
+      "path": "apps/api/src/admin/admin.repository.ts",
+      "sha256": "fe77b3703f6353e07989dc9bb0cca15130ba1108097e9cf9ec834f7dc40881a0",
+      "bytes": 22875
+    },
+    {
+      "path": "apps/api/src/admin/admin.services.ts",
+      "sha256": "a0b14cd7fe93d5a5b26f8fc8fda6ba2554192d023b58dedf93a419ee50066ab8",
+      "bytes": 20431
+    },
+    {
+      "path": "apps/api/src/amap-real-key.smoke.ts",
+      "sha256": "308eadd1e007bc446e54dec8f8d1a90197af9c8ada63ea4feb5c38ca81e39261",
+      "bytes": 9132
+    },
+    {
+      "path": "apps/api/src/app.module.ts",
+      "sha256": "dad097eedd4b0dceb70ca2dba5d1a97db2d8b34e3a0b722d8de0cb504d5c8d60",
+      "bytes": 2152
+    },
+    {
+      "path": "apps/api/src/auth/account.controller.ts",
+      "sha256": "33b8a43056e8f6364a0bb685867bcc24f00a812dd664f06454980432b8eb978f",
+      "bytes": 6744
+    },
+    {
+      "path": "apps/api/src/auth/auth-availability.guard.ts",
+      "sha256": "dc144ffdcd1d59f2165f1fd89ed6d89da4a2dc8be80cc40929a34e31a2a30aab",
+      "bytes": 521
+    },
+    {
+      "path": "apps/api/src/auth/auth-config.ts",
+      "sha256": "e6952628226403181804dc791b38856fb5d228d8f956485395453d4851ae8872",
+      "bytes": 18282
+    },
+    {
+      "path": "apps/api/src/auth/auth-crypto.ts",
+      "sha256": "7d7256ececca249049ae58c572c69b47731fd31064ead11574e5b5a41e75076f",
+      "bytes": 8173
+    },
+    {
+      "path": "apps/api/src/auth/auth-errors.ts",
+      "sha256": "658b00872a98bf501c967e9a39ec226f28bb13603a23255fd246bb8c5a89da7b",
+      "bytes": 2707
+    },
+    {
+      "path": "apps/api/src/auth/auth-provider.factories.ts",
+      "sha256": "2f9aacdb527007403802853616739efa56b7733207290802ab720b4a7668f273",
+      "bytes": 2777
+    },
+    {
+      "path": "apps/api/src/auth/auth-rate-limit.interceptor.ts",
+      "sha256": "ee59bed801839f6af42d72ca7651623167c8fbf0c743e5c7950399312487fa11",
+      "bytes": 802
+    },
+    {
+      "path": "apps/api/src/auth/auth-workflow.types.ts",
+      "sha256": "7ddba6a0031d0cd7b021893b2e1c8d748752b8e08c6f088b0125a43d45d1a74d",
+      "bytes": 4738
+    },
+    {
+      "path": "apps/api/src/auth/auth.controller.ts",
+      "sha256": "182534df5267a725e0dccb2999966eb643aa44e182067f6e694d46280d48c9c0",
+      "bytes": 5438
+    },
+    {
+      "path": "apps/api/src/auth/auth.module.ts",
+      "sha256": "071ca5fda46ee762f5a0932bd7ba0924a857f22190c27a6fc74eb3bb3c8f9392",
+      "bytes": 3730
+    },
+    {
+      "path": "apps/api/src/auth/auth.repository.ts",
+      "sha256": "780ad65afe0857dedf2059740f5113737fe28b1dc4f88f9184e09b690af2836a",
+      "bytes": 69022
+    },
+    {
+      "path": "apps/api/src/auth/auth.service.ts",
+      "sha256": "5a3e479a2f9ee4f39e13d6c0dccd0a71f01d7b76cd2dc93e4acd6db458c2158e",
+      "bytes": 43974
+    },
+    {
+      "path": "apps/api/src/auth/authenticated-user.resolver.ts",
+      "sha256": "b0319111c561dc23e7701ba82113310a8722d0b51db4633d884aacc5e27d7307",
+      "bytes": 2687
+    },
+    {
+      "path": "apps/api/src/auth/bearer-token.ts",
+      "sha256": "a798bfe6836381e2f1d4916495565753d7f8ffe650587e0369450d1a7bca9dba",
+      "bytes": 652
+    },
+    {
+      "path": "apps/api/src/auth/data-export-artifact.reader.ts",
+      "sha256": "b478c0d0609326ec1da2aa77149cc3d86b078b92b14dab6eb3b6701d62450b1b",
+      "bytes": 1010
+    },
+    {
+      "path": "apps/api/src/auth/providers/aliyun-official.clients.ts",
+      "sha256": "b16eddbc9c71f27b3377b6844d896182e42124747efa1495070bbb33a0e00068",
+      "bytes": 6957
+    },
+    {
+      "path": "apps/api/src/auth/providers/aliyun-pnvs-otp.provider.ts",
+      "sha256": "aaf87504df9511e2e2e7fec9177ddba8ed5c6b4545b9007a84cb684338e6b2e6",
+      "bytes": 5765
+    },
+    {
+      "path": "apps/api/src/auth/providers/bounded-identity-json.ts",
+      "sha256": "593c7adc9d470f8ea9bb2b4934e8654e496129131f0bb8b0a1631b745d318e42",
+      "bytes": 2403
+    },
+    {
+      "path": "apps/api/src/auth/providers/external-identity.provider.ts",
+      "sha256": "24abb3e32632da0731d7d717fd0bced90be723482d24306b1de2fbac051a9585",
+      "bytes": 1332
+    },
+    {
+      "path": "apps/api/src/auth/providers/otp-delivery.provider.ts",
+      "sha256": "a0ef445e449f7d3aa405a40abb04bde9e4ba24dc8a35fe317492f968e2318d42",
+      "bytes": 2327
+    },
+    {
+      "path": "apps/api/src/auth/providers/qq-identity.provider.ts",
+      "sha256": "b6681741aabc1f2d0312e434cef88d9744fcdd0c0cb0917d8e87956de0027fd4",
+      "bytes": 6704
+    },
+    {
+      "path": "apps/api/src/auth/providers/smtp-email-otp.provider.ts",
+      "sha256": "90f796d084ed6cd215c477ebb7f4f015e1da9a0c90586dfdbfd1a069cba69274",
+      "bytes": 5820
+    },
+    {
+      "path": "apps/api/src/auth/providers/unavailable-otp.provider.ts",
+      "sha256": "a0c3a67985b700d34f10520d1a158ea30c414d2e46cb434d1d8dfc1654b9c0e4",
+      "bytes": 1007
+    },
+    {
+      "path": "apps/api/src/auth/providers/wechat-identity.provider.ts",
+      "sha256": "4abea2375e7981ffb1b11de153942b3e803974ae48bd0c4ee5e99e024d73f0cd",
+      "bytes": 4251
+    },
+    {
+      "path": "apps/api/src/auth/providers/wechat-miniprogram-identity.provider.ts",
+      "sha256": "6b209daa943c75c76d8f9ab05574848c515ddcd642c9632c269ac2070eea20a8",
+      "bytes": 3473
+    },
+    {
+      "path": "apps/api/src/canteen-ratings/canteen-ratings.controller.ts",
+      "sha256": "e5838a43cf6037900c75743f18c9a6c31eee3e0dfca2ebfd063bcc19d7f3f85b",
+      "bytes": 1674
+    },
+    {
+      "path": "apps/api/src/canteen-ratings/canteen-ratings.module.ts",
+      "sha256": "0b0c2872b8ddec059d2488ed706c91e4a8685e424195492a8dd99b82024d9404",
+      "bytes": 627
+    },
+    {
+      "path": "apps/api/src/canteen-ratings/canteen-ratings.service.ts",
+      "sha256": "8d50f797a3f4fb2cf3aeab78e173ad0663743ec9ae6c1a4e64839b3be3728c76",
+      "bytes": 5117
+    },
+    {
+      "path": "apps/api/src/canteen/canteen-candidate-sampling.ts",
+      "sha256": "1a38a818ed3bf191989cba404f435461c60483db9c909ac04317a4586a3dd6c9",
+      "bytes": 1137
+    },
+    {
+      "path": "apps/api/src/canteen/canteen-decision.controller.ts",
+      "sha256": "9a2a03264d28652a13a28caf99972198f2f998abae7e8218247f8df8182b3bc8",
+      "bytes": 1679
+    },
+    {
+      "path": "apps/api/src/canteen/canteen-decision.module.ts",
+      "sha256": "d21f3dc4c7c4c41bebdbbc75e99021cbcb807caec39c9cc35a0f99940a2c3cc8",
+      "bytes": 409
+    },
+    {
+      "path": "apps/api/src/canteen/canteen-decision.service.ts",
+      "sha256": "08baf1e47cc0aa8da251225a94099b3108b83024e9cb3a08d1d959b4270e5fd9",
+      "bytes": 9881
+    },
+    {
+      "path": "apps/api/src/canteen/canteen-mimo.config.ts",
+      "sha256": "d65f0eeb13cbd3fae293067addb19e503c2c41b34be7f9e611afc128e298fc41",
+      "bytes": 1882
+    },
+    {
+      "path": "apps/api/src/canteen/canteen-preference-candidates.ts",
+      "sha256": "ac871657bcae57fb50c044aa0a56cf56a9ea63b76afb7faf10ee0399505c2229",
+      "bytes": 1784
+    },
+    {
+      "path": "apps/api/src/canteen/canteen-recommendation-reason.ts",
+      "sha256": "448244f46d31ab142477412e5eafbee0508f7d31a792f69d8ed5a7e8f7a8ecbe",
+      "bytes": 2265
+    },
+    {
+      "path": "apps/api/src/common/common-security.module.ts",
+      "sha256": "6c6361998e2101dc35645c7b4bb85d95955865a768f926a8c6c8a1e4470fc8fe",
+      "bytes": 284
+    },
+    {
+      "path": "apps/api/src/common/http-problem-details.ts",
+      "sha256": "9dcd3c9a22f7ffa33fb5e24c7e37baee96125a21faa790b79f309b8de1ec98f5",
+      "bytes": 1470
+    },
+    {
+      "path": "apps/api/src/common/http-runtime-security.ts",
+      "sha256": "f23b2d4796c190e7ba6d5818792938fd4fcd1be6f7c9500bb7c1fa4c6159c838",
+      "bytes": 15362
+    },
+    {
+      "path": "apps/api/src/common/ip-rate-limit.guard.ts",
+      "sha256": "c9441100016e80011cc92e2da48b7baa193cdead7b4dcf2117823d4f64c6989b",
+      "bytes": 4009
+    },
+    {
+      "path": "apps/api/src/common/recommendation-request.registry.ts",
+      "sha256": "8807dfe6481462f902d430c0c609904137fe86b74b19651dcf3c4b8a0b281b92",
+      "bytes": 12471
+    },
+    {
+      "path": "apps/api/src/common/safe-exception.filter.ts",
+      "sha256": "580a4871a7b44ec30ce798a167edb9c159f71eae229fae3c1a3f7e2fe5f27b30",
+      "bytes": 4889
+    },
+    {
+      "path": "apps/api/src/common/safe-request-id.ts",
+      "sha256": "e9b2a35cea3772d09f2ac797ab2bb99967bc69b772b6ecfff2d131fe1312f2a5",
+      "bytes": 888
+    },
+    {
+      "path": "apps/api/src/common/zod-body.pipe.ts",
+      "sha256": "791cc62daefd88c46ebdd5eeb02b4e5f5f83dd2166fbec7e241fcf4bd35cff99",
+      "bytes": 639
+    },
+    {
+      "path": "apps/api/src/config/app-config.module.ts",
+      "sha256": "72261daff187705e6cbbac23e78858e596a7d2c8bb2258149887a3ac22c69cbc",
+      "bytes": 471
+    },
+    {
+      "path": "apps/api/src/config/app-config.ts",
+      "sha256": "7e412bf3c19ff5b8494daa330c02de449b8fb699da598c3d7a9c45c54c0f1d07",
+      "bytes": 17093
+    },
+    {
+      "path": "apps/api/src/config/data-rights-policy.ts",
+      "sha256": "d0afe9707350dca7c4d827b2285970563e2bf37c9e01ebcc8a7847a3bfcc0a2b",
+      "bytes": 3809
+    },
+    {
+      "path": "apps/api/src/data-export/aliyun-oss-export-artifact.store.ts",
+      "sha256": "7b6b8ca792d598a7d4d18b29e34ff1b292b08f930cf39bec288d39babf677d13",
+      "bytes": 20183
+    },
+    {
+      "path": "apps/api/src/data-export/export-artifact-config.ts",
+      "sha256": "678aa20822586b4d199839430882093e54061998091e66ddd39a58334faae261",
+      "bytes": 5806
+    },
+    {
+      "path": "apps/api/src/data-export/export-artifact-crypto.ts",
+      "sha256": "7a7cde075b3041a70243f9166511e73f236cebabb655cf4f36f305b6185c4eda",
+      "bytes": 4896
+    },
+    {
+      "path": "apps/api/src/data-export/export-artifact.store.ts",
+      "sha256": "7ee3d4875a7eb8af63619a7316b3d7f7c99ab982c65811e68193f65a1ba67951",
+      "bytes": 1883
+    },
+    {
+      "path": "apps/api/src/data-export/export-snapshot.ts",
+      "sha256": "4e54ee13aefa43af592a25e01bc8d396d191e5d78a1a2a64920dd21ab4872fc3",
+      "bytes": 6567
+    },
+    {
+      "path": "apps/api/src/data-export/export-worker-config.ts",
+      "sha256": "a555fe88cde82cd1bb75d3ea5ceed09876221336368c878f81d1c166e590e111",
+      "bytes": 6755
+    },
+    {
+      "path": "apps/api/src/data-export/export-worker-main.ts",
+      "sha256": "8e6f6c5bffe2ed5fa5a6f605dde069b5fb6c24f45136553b980b2f6845a344ec",
+      "bytes": 4830
+    },
+    {
+      "path": "apps/api/src/data-export/export-worker.repository.ts",
+      "sha256": "4e6a445eb97791ed8dbf985ab8e724264a198f18cce76f71c3cda1af31579b09",
+      "bytes": 21559
+    },
+    {
+      "path": "apps/api/src/data-export/export-worker.ts",
+      "sha256": "19d40a23ea8b504b80173d3401e1446caf44b56a2f6cce11f6972df6e36e1338",
+      "bytes": 19413
+    },
+    {
+      "path": "apps/api/src/data-export/private-export-artifact.reader.ts",
+      "sha256": "b3e8c4db6e1a88483961181a6a26184300ec6b0499d7252cd214e99d4e62fd8d",
+      "bytes": 7300
+    },
+    {
+      "path": "apps/api/src/database/cleanup-cli.ts",
+      "sha256": "2c26565b19013d64f8b0772cb7006d7e7306cf4d5f8388647bc2dae723105f80",
+      "bytes": 1580
+    },
+    {
+      "path": "apps/api/src/database/database-cli-errors.ts",
+      "sha256": "c7ba646401e58d521f6cd178cd124f505a66391538831bba0a847b8b2b4cec6b",
+      "bytes": 380
+    },
+    {
+      "path": "apps/api/src/database/database-config.ts",
+      "sha256": "b68606a4806030d1a60cb70a261c0f02ccd5de29b5a577815f3fd08c8da1692e",
+      "bytes": 11139
+    },
+    {
+      "path": "apps/api/src/database/database-pool.ts",
+      "sha256": "d3190033791ea10908184d41445eb56376d3ce520580111b42ddc3fb53902d82",
+      "bytes": 6765
+    },
+    {
+      "path": "apps/api/src/database/database.module.ts",
+      "sha256": "de14bc0866640613bf10916d144313e86aef8b660ce255001343c16e4e5cb702",
+      "bytes": 545
+    },
+    {
+      "path": "apps/api/src/database/migrate-cli.ts",
+      "sha256": "71bb9f5bfc8ea0830ee3337d5979a7a2f256c272973eb09308720bb661f338a6",
+      "bytes": 1473
+    },
+    {
+      "path": "apps/api/src/database/migration-plan.ts",
+      "sha256": "459361286e004900aa4da862d296f401543170bddfc30385cbb40a5ded6692e5",
+      "bytes": 8114
+    },
+    {
+      "path": "apps/api/src/database/migration-runner.ts",
+      "sha256": "f7d443f38a9b28090ee638e7fc8db7b5fe89d09caecfe3ba5bf7eb07a6b6f7da",
+      "bytes": 6651
+    },
+    {
+      "path": "apps/api/src/database/retention-cleanup.ts",
+      "sha256": "f75cf0e6e6bb0915a63ede0db571ea3cc670a13632167f81fb2c2f5a2da855c6",
+      "bytes": 4267
+    },
+    {
+      "path": "apps/api/src/database/standalone-pool.ts",
+      "sha256": "762d0dd733dbacd1d9dca9f729c43f1f6dcf3e7a8dabdd2b4a99d8f3c927eaee",
+      "bytes": 538
+    },
+    {
+      "path": "apps/api/src/events/recommendation-events.controller.ts",
+      "sha256": "94def9ccc0b9955f0f32619795859ce7b9cd1bf6fee4eb98cba01534f1a9e8fb",
+      "bytes": 879
+    },
+    {
+      "path": "apps/api/src/events/recommendation-events.module.ts",
+      "sha256": "66d500c0d0763448a07adc4d94e44990b49841642c4177d7790e16c5d05250a4",
+      "bytes": 541
+    },
+    {
+      "path": "apps/api/src/events/recommendation-events.service.ts",
+      "sha256": "6f9c6c27cf83a730c6abc39311ef560b66c85c6f7dbfd4ef1bdb15c0a69fbf9e",
+      "bytes": 3713
+    },
+    {
+      "path": "apps/api/src/favorites/favorites.controller.ts",
+      "sha256": "3e360acfc14a4255382d4f17116b6d1fe4ae7f7d9df273d2ff5e7977baeff0a2",
+      "bytes": 1959
+    },
+    {
+      "path": "apps/api/src/favorites/favorites.module.ts",
+      "sha256": "3d34466b91779916f9ab596e29e29b759030dcc57b4fd38d1a36da56a557e809",
+      "bytes": 385
+    },
+    {
+      "path": "apps/api/src/favorites/favorites.service.ts",
+      "sha256": "a7228c0b587f4a907446fad27104e64966d879a6a44c74d29498e05671aa995e",
+      "bytes": 6244
+    },
+    {
+      "path": "apps/api/src/feature-config/feature-config.controller.ts",
+      "sha256": "16a08c2ff0a3d7168470b2c40b67aee074285d2adb763b1a56b0971bdb54ff8b",
+      "bytes": 414
+    },
+    {
+      "path": "apps/api/src/feature-config/feature-config.module.ts",
+      "sha256": "250990c359f330ffd239ad4c9db6f4e77a3c4d4923f51de48c96b1a9ae10d687",
+      "bytes": 877
+    },
+    {
+      "path": "apps/api/src/feature-config/feature-config.service.ts",
+      "sha256": "8a192275ed2b91334c0c4916a3509193d5e16e621179fce45c7132fef8c2663e",
+      "bytes": 10388
+    },
+    {
+      "path": "apps/api/src/health/health.controller.ts",
+      "sha256": "0231e7914faf9612a37360e77c79999eefad23302f47524c3ab2c482b4cda03c",
+      "bytes": 1295
+    },
+    {
+      "path": "apps/api/src/health/health.module.ts",
+      "sha256": "7a4ce4038acee98afdb5cf7e79c4e2eda7737f5ad1773217c07dc3085ba2cf50",
+      "bytes": 379
+    },
+    {
+      "path": "apps/api/src/history/history.controller.ts",
+      "sha256": "dc21f6b988cc4009ab8476f2e9beb10893511058b06566892dfd167196a8132b",
+      "bytes": 997
+    },
+    {
+      "path": "apps/api/src/history/history.module.ts",
+      "sha256": "b5b802a0cfaeee7b9c1a085415926c3b122ea28e2aecb1dd82dc6148110e9e9b",
+      "bytes": 461
+    },
+    {
+      "path": "apps/api/src/history/history.service.ts",
+      "sha256": "551f91edf00c3ffe77b477fec735b70f4ae9336fa49589c4606b3a70067ceae5",
+      "bytes": 4255
+    },
+    {
+      "path": "apps/api/src/location-city/amap-location-city.provider.ts",
+      "sha256": "e598e8d6379fd381b59cd944fe488dc199605172f5db54daf7ff6c16f14bf6c6",
+      "bytes": 5322
+    },
+    {
+      "path": "apps/api/src/location-city/location-city.controller.ts",
+      "sha256": "805a4f3a026e869cd392786ad31d44ca6a2e0214e1a0e756b9e55e79dfc6d10c",
+      "bytes": 683
+    },
+    {
+      "path": "apps/api/src/location-city/location-city.module.ts",
+      "sha256": "cfb055ed5e5a647928545ff83e74c49cd3cf2be0c3fffc1fb3f05768045959fa",
+      "bytes": 520
+    },
+    {
+      "path": "apps/api/src/location-city/location-city.service.ts",
+      "sha256": "f42703f34d7aa19151adb385a60fd16d6a6a2b4974ae2b1939ab380634455f85",
+      "bytes": 808
+    },
+    {
+      "path": "apps/api/src/location-search/location-search.controller.ts",
+      "sha256": "797d2a927359e4b37fd78ab2806ab50e747d5c4af28c2f79743cf45c70837e8d",
+      "bytes": 783
+    },
+    {
+      "path": "apps/api/src/location-search/location-search.module.ts",
+      "sha256": "9133a3dbb1f0b92f148ebfb731d13c859d79eebdf28013ac3659b2ffb0eadb3c",
+      "bytes": 2448
+    },
+    {
+      "path": "apps/api/src/location-search/location-search.provider.ts",
+      "sha256": "cf3f7b17ed8601b061f482499fbab134cee23784a525fc53ec022d88dccc498b",
+      "bytes": 1139
+    },
+    {
+      "path": "apps/api/src/location-search/location-search.service.ts",
+      "sha256": "67ae8be6424532b7b7b4b245d1f309014bc48ddedc395c501e64d42981c548e4",
+      "bytes": 1212
+    },
+    {
+      "path": "apps/api/src/location-search/providers/amap-location-search.provider.ts",
+      "sha256": "474a821cf984c74bf477cbfcf2bdd8cfcc8b916e204d66a5024df309767b1135",
+      "bytes": 7656
+    },
+    {
+      "path": "apps/api/src/location-search/providers/demo-location-search.provider.ts",
+      "sha256": "9f91d03ff9725343c399a1714caea07cdfe756c1e1c6ad2ce836dc36842d05f2",
+      "bytes": 2587
+    },
+    {
+      "path": "apps/api/src/location-search/providers/unavailable-location-search.provider.ts",
+      "sha256": "aefdb9a38adc783f640dafe0210067debbf1a6b3c4b1c9d7a2cc587dbe2b0d85",
+      "bytes": 528
+    },
+    {
+      "path": "apps/api/src/main.ts",
+      "sha256": "194a991a6fbb94aadca3fcf03e46a90f9637bbe334b9bc21fb06b6d86e6a5941",
+      "bytes": 923
+    },
+    {
+      "path": "apps/api/src/mimo/mimo-budget.ts",
+      "sha256": "ab63ebc6b5a9763cf87a77dfc37b9d0d871cf6d6e712246d0e1c86ed1f2b6130",
+      "bytes": 1265
+    },
+    {
+      "path": "apps/api/src/mimo/mimo.module.ts",
+      "sha256": "9dcf06ce08f0ea08af985b84de967d0e9fe6c4bc217b01f3ddf8b32dca1dd6da",
+      "bytes": 512
+    },
+    {
+      "path": "apps/api/src/mimo/mimo.tokens.ts",
+      "sha256": "7421fb6a9844ddf1f94fd409b4272e95540ca6ea48f7b000344e8fff714747c4",
+      "bytes": 127
+    },
+    {
+      "path": "apps/api/src/nearby-restaurants/nearby-restaurants.controller.ts",
+      "sha256": "410994662bdf5efca0fe25094eb869e0f47a6522c94d18a37397b59027355cbe",
+      "bytes": 738
+    },
+    {
+      "path": "apps/api/src/nearby-restaurants/nearby-restaurants.module.ts",
+      "sha256": "a0e71552b8f2f0973ea526e2b6970327c644f46e1942a4cc27a2a5a9b4e3f948",
+      "bytes": 497
+    },
+    {
+      "path": "apps/api/src/nearby-restaurants/nearby-restaurants.service.ts",
+      "sha256": "9386dfb8f3c8b6ddee864495076946d2bf979e44cede52ebd846bd5de4f3a8e8",
+      "bytes": 2604
+    },
+    {
+      "path": "apps/api/src/operational-config/operational-config.module.ts",
+      "sha256": "06e301545330e6a359c0cb79735a6ef004c9cfdf7dda0f22d97f324babae4100",
+      "bytes": 360
+    },
+    {
+      "path": "apps/api/src/operational-config/operational-config.service.ts",
+      "sha256": "49a4050242deea61bab75e6043627b8a46f385fe4dc280b2fd14c5ac8efc0a5c",
+      "bytes": 5416
+    },
+    {
+      "path": "apps/api/src/operational-config/operational-config.types.ts",
+      "sha256": "8b0066ccf1120e37a0e651ddac6d77b162c6cd6ef91a1a426239db18c73e1f2b",
+      "bytes": 4829
+    },
+    {
+      "path": "apps/api/src/persistence/persistence-support.ts",
+      "sha256": "f9e7b1e6d385c81d19679eb4145b0a8a5b2dec3b67b5a53e4d45a8b77a461898",
+      "bytes": 5847
+    },
+    {
+      "path": "apps/api/src/persistence/persistence-user.service.ts",
+      "sha256": "fd8a23b87448a168eac57149cd9f3cd2bc62df72e959ac3ad7385f58c632710d",
+      "bytes": 510
+    },
+    {
+      "path": "apps/api/src/persistence/persistence.module.ts",
+      "sha256": "288f44afef9088ac8b30deaa0c6928097d8d84d7a1fde56729c8caa6fd7a745e",
+      "bytes": 965
+    },
+    {
+      "path": "apps/api/src/persistence/persistence.repository.ts",
+      "sha256": "150aef0ed8bf5ef317bdf349c58126615963d94fd4754f402ca7ab5174b3402f",
+      "bytes": 14219
+    },
+    {
+      "path": "apps/api/src/persistence/place-presentation.resolver.ts",
+      "sha256": "f09d29c2b6be22d15cd68ce15f96e83d0ffa72cb1c21bec4f9522777a4361892",
+      "bytes": 9146
+    },
+    {
+      "path": "apps/api/src/place-search/place-keyword-search.provider.ts",
+      "sha256": "dedccb2a0570b0f4855ca7b75a14d55bd01ca44fb26e2e6b0d8c67ff897c7cf2",
+      "bytes": 1479
+    },
+    {
+      "path": "apps/api/src/place-search/place-search.controller.ts",
+      "sha256": "da656a53fb226bfaa7b83f3894c09d4339c150efe45fdc810dacb2ad0ed6b45c",
+      "bytes": 744
+    },
+    {
+      "path": "apps/api/src/place-search/place-search.module.ts",
+      "sha256": "71cfbb4823b978685c4969cf4da03d81e4e8b8bbd85c04ed536c921fd8852a9d",
+      "bytes": 2529
+    },
+    {
+      "path": "apps/api/src/place-search/place-search.service.ts",
+      "sha256": "b3d1514be42bc2900a03a9dc7b105f2ff19d5bf8a8feffe1d0e6f45abb548644",
+      "bytes": 3931
+    },
+    {
+      "path": "apps/api/src/place-search/providers/amap-place-keyword-search.provider.ts",
+      "sha256": "b59269f686f83e86c821954f55a4c01bbf6fc2e170a48e6e057f1bbdc1167205",
+      "bytes": 10805
+    },
+    {
+      "path": "apps/api/src/place-search/providers/demo-place-keyword-search.provider.ts",
+      "sha256": "2ab747123bc9088caaa6b2a9c87c894dfaa63234a595b7902de7c2aa193c5eea",
+      "bytes": 2864
+    },
+    {
+      "path": "apps/api/src/place-search/providers/unavailable-place-keyword-search.provider.ts",
+      "sha256": "c542e468eae206361726758406ac3b582e917dc1803e1256a7b53a611b652742",
+      "bytes": 547
+    },
+    {
+      "path": "apps/api/src/private-feedback/private-feedback.controller.ts",
+      "sha256": "80ded73a2af1f73ce0aa10f7a09e1eed7584e77c7ba2389c389e9e3c96cbc8ba",
+      "bytes": 1772
+    },
+    {
+      "path": "apps/api/src/private-feedback/private-feedback.module.ts",
+      "sha256": "a6fa5d2611570ecadcd42f06901f10678cec29cd2b1ba12aba8c8035cd99104c",
+      "bytes": 429
+    },
+    {
+      "path": "apps/api/src/private-feedback/private-feedback.service.ts",
+      "sha256": "f8848c05391dbb5abd40a5d797bdb155e622bcca8250636c2a161201ecc91fce",
+      "bytes": 5981
+    },
+    {
+      "path": "apps/api/src/providers/amap-photo-url.ts",
+      "sha256": "12628dcfaf0f9458e7d39a70433ffc3715a955041e12551ed54f3074f334a562",
+      "bytes": 2859
+    },
+    {
+      "path": "apps/api/src/providers/amap-request-signature.ts",
+      "sha256": "3f31314c81b9b6b63eb02d2660f6478b9bee4d402728a35300c603abca083e2d",
+      "bytes": 1633
+    },
+    {
+      "path": "apps/api/src/providers/amap-response-status.ts",
+      "sha256": "3ac2768bba34c75dc839b703ed97cb00d03bff97d9ece7701467e615808fc789",
+      "bytes": 3775
+    },
+    {
+      "path": "apps/api/src/providers/provider-catalog.ts",
+      "sha256": "eaf6c6da2bf027447c3967a52f86285f1063856a30b03c278103c3c2b5e655ec",
+      "bytes": 2142
+    },
+    {
+      "path": "apps/api/src/providers/provider-registry.ts",
+      "sha256": "d4e708c4ffac25087e9ceb3f9cd64bf7b3b6a80ad4161287463b55f05b263ee9",
+      "bytes": 5014
+    },
+    {
+      "path": "apps/api/src/recommendations/domain/explicit-cuisine-preference.ts",
+      "sha256": "6b9dff1afa84f373422297a6fbe7c1d05d433f501f5115609b01547973407dbb",
+      "bytes": 2132
+    },
+    {
+      "path": "apps/api/src/recommendations/domain/geo.ts",
+      "sha256": "546347a4a20f8b9d2dbe347ceda1fe0f019eb835666394fcd2e21e7e99098361",
+      "bytes": 5256
+    },
+    {
+      "path": "apps/api/src/recommendations/domain/place-candidate.ts",
+      "sha256": "b5758f9446e091abcaeca30debcb0c7df2dfd3469e9fd1dd2654ebcd71891943",
+      "bytes": 1609
+    },
+    {
+      "path": "apps/api/src/recommendations/domain/recommendation-engine.ts",
+      "sha256": "be44c67d98d84f15dd6e12ef29f553d4573c8b250b8bb661b418238994e3e2a5",
+      "bytes": 19856
+    },
+    {
+      "path": "apps/api/src/recommendations/domain/recommendation-profile.ts",
+      "sha256": "6c4fe1f20c20c83afabab2e168aa27f040a23ee24031d1f5f4bffd2971333445",
+      "bytes": 2889
+    },
+    {
+      "path": "apps/api/src/recommendations/domain/recommendation-query-plan.ts",
+      "sha256": "41f20348f068bcb35ed917da84fb1497a7f0f0b14899fcadb5e647248a814a9d",
+      "bytes": 3418
+    },
+    {
+      "path": "apps/api/src/recommendations/domain/restaurant-taste-query.ts",
+      "sha256": "9280425578be581f66ebe0777cc954eaadd8ff9c3b9eedc6af605cbc6194dc3d",
+      "bytes": 4278
+    },
+    {
+      "path": "apps/api/src/recommendations/providers/amap-place.provider.ts",
+      "sha256": "3a7b5956d12f7307a9679ce4a9be9fe03a173b9c5b0f623662243fe53bfa311c",
+      "bytes": 17711
+    },
+    {
+      "path": "apps/api/src/recommendations/providers/amap-restaurant-route.provider.ts",
+      "sha256": "5b583f50cc8d83686adbfce90923a0f2b241a27725c2c468174c466266bafc4a",
+      "bytes": 9183
+    },
+    {
+      "path": "apps/api/src/recommendations/providers/bounded-json-response.ts",
+      "sha256": "6618fb100091e1dedf66f59170839898d7cab99c117a0521ee70da5a63c0b07c",
+      "bytes": 2858
+    },
+    {
+      "path": "apps/api/src/recommendations/providers/demo-place.provider.ts",
+      "sha256": "278fd494cc6319c5824fe9408905c58505e7fb451f326207c85dfed426d5b314",
+      "bytes": 9809
+    },
+    {
+      "path": "apps/api/src/recommendations/providers/intent-coordinator.ts",
+      "sha256": "9b60e7919d4ec86c67e6e3604eaa44990e151624f4dd9f789eb5d6069fc6d82e",
+      "bytes": 2511
+    },
+    {
+      "path": "apps/api/src/recommendations/providers/mimo-restaurant-intent.provider.ts",
+      "sha256": "fd2b9c17b1a4c8d119c86b2f175fc0b46e4ed4d1e6f0230f5d86bd675dfc2066",
+      "bytes": 7976
+    },
+    {
+      "path": "apps/api/src/recommendations/providers/qwen-intent-registry.ts",
+      "sha256": "a766fd59bb8c00e1955278eae6258136e398a89d78c99b95c0143fed99648614",
+      "bytes": 2144
+    },
+    {
+      "path": "apps/api/src/recommendations/providers/qwen-intent.provider.ts",
+      "sha256": "27c4b47e0bed6908ac6f9ff6943393d1b7a1758b0959e3dcc205b46c3eb13239",
+      "bytes": 6520
+    },
+    {
+      "path": "apps/api/src/recommendations/providers/rule-intent.provider.ts",
+      "sha256": "87bf59b04a5a694b752a3f9c142f1d038620a4747d28ae6e2a0ad2d4df27b468",
+      "bytes": 2644
+    },
+    {
+      "path": "apps/api/src/recommendations/providers/unavailable-place.provider.ts",
+      "sha256": "d3bdf6fa9d9c86a5525099026a676bf3b2840839f5034c930c51cf2c85c419bc",
+      "bytes": 1384
+    },
+    {
+      "path": "apps/api/src/recommendations/recommendations.controller.ts",
+      "sha256": "beb443218a287bdad600ee1f51280bc174d0df28e58832fe8d456d9e44df2934",
+      "bytes": 804
+    },
+    {
+      "path": "apps/api/src/recommendations/recommendations.module.ts",
+      "sha256": "8f36232b1263d1bddfbf70a7e1390f587c6f8b81d54fe8e673a0129c3b09a949",
+      "bytes": 3449
+    },
+    {
+      "path": "apps/api/src/recommendations/recommendations.service.ts",
+      "sha256": "596d09ffac9c58244b683fc34a8d81f5fdb2d4498bd1b321d86471a456d49159",
+      "bytes": 8261
+    },
+    {
+      "path": "apps/api/src/recommendations/restaurant-decision-pool.controller.ts",
+      "sha256": "f9ef64d2f69fdb4b9e5f2dd296ccf0f8adb48b32c784b911eb97d8f904253e9b",
+      "bytes": 1627
+    },
+    {
+      "path": "apps/api/src/recommendations/restaurant-decision-pool.service.ts",
+      "sha256": "081e98331eb7fe464b6c2a3c26b5fb4bde4e5a08629552583eb2d359d8bad8eb",
+      "bytes": 13082
+    },
+    {
+      "path": "apps/api/src/recommendations/restaurant-route.controller.ts",
+      "sha256": "59dd643ea31458271d786bfb33d747b24e1ea2c415eae8f0da42a4f093f87f1c",
+      "bytes": 1569
+    },
+    {
+      "path": "apps/api/src/recommendations/restaurant-route.service.ts",
+      "sha256": "cebde80f31154904776f49d986258bc93e82003332cdaf37f0df575ced92d7ce",
+      "bytes": 4216
+    },
+    {
+      "path": "apps/api/src/support-feedback/support-feedback-config.ts",
+      "sha256": "92381cc8db8e2400822bef4868e04a556765fbc5c5e1c7f76ef31f12e5b18b6c",
+      "bytes": 5141
+    },
+    {
+      "path": "apps/api/src/support-feedback/support-feedback-crypto.ts",
+      "sha256": "b763bd73c7f773990c61ce0a770fd8b2da170e6f314db3f47054653199fc9760",
+      "bytes": 9437
+    },
+    {
+      "path": "apps/api/src/support-feedback/support-feedback.controller.ts",
+      "sha256": "0ab433f73a78b3fa0936d8f5c4de002adaf2711713ff82937d0cfb72510d5012",
+      "bytes": 943
+    },
+    {
+      "path": "apps/api/src/support-feedback/support-feedback.module.ts",
+      "sha256": "0d79055a4a09cfe39c605d68207dbeb7a63b253c5c205e53b2667429f5a12456",
+      "bytes": 989
+    },
+    {
+      "path": "apps/api/src/support-feedback/support-feedback.repository.ts",
+      "sha256": "8d2a42fdb17a05fb9013b1186b8b1881cc38bb119196dcbc3b7e581f9685e5f7",
+      "bytes": 4419
+    },
+    {
+      "path": "apps/api/src/support-feedback/support-feedback.service.ts",
+      "sha256": "755ddb08dbc49073cd9a20ac5655d6ecb3733973078392b140464b7a14d6d09d",
+      "bytes": 10596
+    },
+    {
+      "path": "apps/api/src/support-feedback/support-feedback.tokens.ts",
+      "sha256": "9b4af95c6c64e982390f065eaaa541ae374ea852df9676bf8b73206208a5851a",
+      "bytes": 74
+    },
+    {
+      "path": "apps/api/src/takeout/takeout-errors.ts",
+      "sha256": "126545dd3821d98152adc0d84ef66304c02d604b215cb374553b22fea522401d",
+      "bytes": 1266
+    },
+    {
+      "path": "apps/api/src/takeout/takeout-image.processor.ts",
+      "sha256": "ea6199dd72c35405a3b2220b0a22133c8c4715eca045a88b10ed5d4905d8612d",
+      "bytes": 5258
+    },
+    {
+      "path": "apps/api/src/takeout/takeout-receipt.service.ts",
+      "sha256": "c6d0c4083261efbb8c07b7edcab61d91b5c23d6fa923e71cba17e1950e5793f2",
+      "bytes": 3221
+    },
+    {
+      "path": "apps/api/src/takeout/takeout.controller.ts",
+      "sha256": "7f77ff454d57fbf9c735b2e44fe5cc81c26717ed79b991d7deecba49121519fa",
+      "bytes": 2325
+    },
+    {
+      "path": "apps/api/src/takeout/takeout.module.ts",
+      "sha256": "45ac0e06a305b7704b625635c552293ab7e046ea0afe71d51bd8ac2710e7b48b",
+      "bytes": 529
+    },
+    {
+      "path": "apps/api/src/takeout/takeout.service.ts",
+      "sha256": "d7eb9546ccc525d98c0bc496b43ac25af402c6fc4d61291b2903e79d318f8b78",
+      "bytes": 15138
+    },
+    {
+      "path": "apps/api/tsconfig.json",
+      "sha256": "4b5ca8c2592a31eed07248be427644903bd26d22a019db28506d4a4c5ea452df",
+      "bytes": 311
+    },
+    {
+      "path": "package.json",
+      "sha256": "eeb788a8bf55eb6f974bd9552a66df46fab024810bc2806b9a47010ea00ea980",
+      "bytes": 1049
+    },
+    {
+      "path": "packages/contracts/package.json",
+      "sha256": "a1ead0a86d0e44535e5da3c3459e2dc79ca662e4ebc0fcccf8cabf85b3c4e51f",
+      "bytes": 617
+    },
+    {
+      "path": "packages/contracts/src/canteen-catalog.ts",
+      "sha256": "fc3384be16072c0840730aca61467554326a14c0274ad477badb9d45065d4cf5",
+      "bytes": 70515
+    },
+    {
+      "path": "packages/contracts/src/canteen-decision.ts",
+      "sha256": "bc575b17185dd4c29bb7215a40532468a8aef99051d450202b8c39c0553a706a",
+      "bytes": 2714
+    },
+    {
+      "path": "packages/contracts/src/canteen-ratings.ts",
+      "sha256": "9c28d5ab049accc76af319a685bcccdc6f1856a12fc23ae3ef2a9d5341e1d9a0",
+      "bytes": 2818
+    },
+    {
+      "path": "packages/contracts/src/index.ts",
+      "sha256": "ef9dacd526f2db8938d937e4a65139f539e44ab54818baee924a172873f1adad",
+      "bytes": 71750
+    },
+    {
+      "path": "packages/contracts/src/restaurant-decision.ts",
+      "sha256": "8a8d3d7204a0c224b911737646687027c98ceb76af3be49873bc91d8a5bb9178",
+      "bytes": 3925
+    },
+    {
+      "path": "packages/contracts/src/restaurant-route.ts",
+      "sha256": "664b9bc6b8df74ae9b0b7f8101127f70814c4d520ba2bb44b712888f2477597c",
+      "bytes": 2884
+    },
+    {
+      "path": "packages/contracts/src/takeout.ts",
+      "sha256": "97868841e765b583414fa50ecaef1b9504db4130f636d800733bbf3631db5a6e",
+      "bytes": 6334
+    },
+    {
+      "path": "packages/contracts/tsconfig.build.json",
+      "sha256": "bf9b1687801d968a8dade0a3dd4e3cb1bf6df175cfa9a587213815a66a6d91da",
+      "bytes": 70
+    },
+    {
+      "path": "packages/contracts/tsconfig.json",
+      "sha256": "2a173ebc32f14d33afd62404ea107c295ae5cdc4e0168b0c520ad5675e87f41c",
+      "bytes": 168
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "sha256": "43798ad1d7238c14168193d2f5a6e966e4008aa21f542c63e3b6aa72c1768099",
+      "bytes": 123917
+    },
+    {
+      "path": "pnpm-workspace.yaml",
+      "sha256": "01afaa7a53c5194962c079bab4679be5ac6be40c018bc1d099fdaa925cf30011",
+      "bytes": 757
+    },
+    {
+      "path": "tsconfig.base.json",
+      "sha256": "f8e9c386329603c24751fad3295aaf36bcd409848c426465eb5b865b169412ff",
+      "bytes": 395
+    }
+  ],
+  "validationFiles": [
+    {
+      "sha256": "cdd3c15f3d3aa1e32181ace544a5ad9364742ff8b31c7d8f0a232479889a0758",
+      "path": "apps/api/vitest.config.ts",
+      "bytes": 391
+    },
+    {
+      "sha256": "a0d3bb2922172d0dadf55d329112323ed5ebd46f39e1e03f76d0f3901f6bb838",
+      "path": "apps/api/src/auth/auth.repository.test.ts",
+      "bytes": 68436
+    },
+    {
+      "sha256": "101f5f3c6a727a176fcc74535366ee9c064754bf2b2c99a08403a15f31c5db27",
+      "path": "apps/api/src/auth/auth.service.test.ts",
+      "bytes": 25074
+    },
+    {
+      "sha256": "db7244a523f3985b8c28d2d258d496aead8dcc57be63eee1f2ec63d9984be09c",
+      "path": "apps/api/src/auth/auth-session-query.test.ts",
+      "bytes": 1143
+    },
+    {
+      "sha256": "1fea19272a1409eada27ba550856f331383025214e5fe417421f889d26f48bbb",
+      "path": "apps/api/src/auth/wechat-miniprogram-login.test.ts",
+      "bytes": 7774
+    },
+    {
+      "sha256": "4ba33b542eed331636e84c43cacc312bca1746d9596efd3c3478f9f2decc3daf",
+      "path": "packages/contracts/src/index.test.ts",
+      "bytes": 45604
+    },
+    {
+      "sha256": "283a247eaeaf86cdeb6a5ab2120bf0249aee0ae6deeb82bec5639c90da7ddb23",
+      "path": "packages/contracts/src/wechat-miniprogram.test.ts",
+      "bytes": 1823
+    },
+    {
+      "sha256": "e6bfa723d1087d56d2e29eab5a458ddb1c5db1bb8c5eccfde82ece35dfb28116",
+      "path": "docs/openapi.v1.json",
+      "bytes": 291213
+    }
+  ],
+  "verifiedAt": "2026-10-26T14:21:44.918Z",
+  "provenance": "Runtime inputs retrieved from the active immutable budget release and individually SHA-256 verified. Three budget source updates are preserved; WEB patch inputs, 10 related compiled originals, 34 deployment payloads and 16 migration checksums are unchanged from the prior audited release. Validation-only inputs remain independently pinned."
+}

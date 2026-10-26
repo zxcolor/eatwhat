@@ -1,0 +1,19 @@
+<view wx:if="{{preferenceReady}}" class="page conditions-page glass-page {{themeClass}} {{reducedMotion ? 'reduce-motion' : ''}}">
+  <view class="glass-backdrop" aria-hidden="true"></view>
+  <view class="title">餐厅推荐条件</view>
+  <view class="subtitle">预算、范围和出行安排，按这次用餐来选。</view>
+  <view wx:if="{{serviceMessage}}" class="card service-card glass-panel">
+    <view class="muted">{{serviceMessage}}</view>
+    <button wx:if="{{!consent}}" class="secondary" bindtap="home">返回首页</button>
+    <button wx:else class="secondary" bindtap="refresh" loading="{{refreshing}}" disabled="{{refreshing || status === 'loading'}}">重新连接</button>
+  </view>
+  <button class="card origin-card glass-control" bindtap="location" disabled="{{!canSubmit}}"><view class="origin-symbol">↗</view><view class="origin-content"><view class="origin-caption">出发地点</view><view class="label">{{locationLabel}}</view></view><text class="origin-change">更换 ›</text></button>
+  <view wx:if="{{choices.budgetMaxYuan.length}}" class="card limits-card glass-panel">
+    <view class="form-field"><view class="section-title">人均预算</view><view class="field-caption">餐厅人均消费仅供参考，未知价格会单独说明。</view><view class="chips"><button wx:for="{{choices.budgetMaxYuan}}" wx:key="index" class="chip {{item.selected ? 'selected' : ''}}" data-key="budgetMaxYuan" data-index="{{item.index}}" data-revision="{{item.revision}}" bindtap="select" disabled="{{opening || refreshing}}">{{item.label}}</button></view></view>
+    <view class="form-field"><view class="section-title">起始搜索范围</view><view class="field-caption">候选不足100家时，会在当前服务范围内自动扩大；预算和排除条件保持不变。</view><view class="chips"><button wx:for="{{choices.radiusMeters}}" wx:key="index" class="chip {{item.selected ? 'selected' : ''}}" data-key="radiusMeters" data-index="{{item.index}}" data-revision="{{item.revision}}" bindtap="select" disabled="{{opening || refreshing}}">{{item.label}}</button></view></view>
+    <view class="form-field"><view class="section-title">用餐时段</view><view class="chips"><button wx:for="{{choices.mealPeriod}}" wx:key="index" class="chip {{item.selected ? 'selected' : ''}}" data-key="mealPeriod" data-index="{{item.index}}" data-revision="{{item.revision}}" bindtap="select" disabled="{{opening || refreshing}}">{{item.label}}</button></view></view>
+    <view class="form-field"><view class="section-title">出行方式</view><view class="chips"><button wx:for="{{choices.travelMode}}" wx:key="index" class="chip {{item.selected ? 'selected' : ''}}" data-key="travelMode" data-index="{{item.index}}" data-revision="{{item.revision}}" bindtap="select" disabled="{{opening || refreshing}}">{{item.label}}</button></view></view>
+    <view class="form-field"><view class="section-title">可用时间</view><view class="chips"><button wx:for="{{choices.availableMinutes}}" wx:key="index" class="chip {{item.selected ? 'selected' : ''}}" data-key="availableMinutes" data-index="{{item.index}}" data-revision="{{item.revision}}" bindtap="select" disabled="{{opening || refreshing}}">{{item.label}}</button></view></view>
+  </view>
+  <view class="conditions-footer glass-chrome"><view wx:if="{{error}}" class="error">{{error}}</view><view class="footer-note">仅用于本次餐厅推荐</view><button class="primary" bindtap="submit" disabled="{{!canSubmit}}" loading="{{opening}}">按这些条件选餐厅</button></view>
+</view>

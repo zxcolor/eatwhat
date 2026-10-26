@@ -1,0 +1,21 @@
+<view class="page route-page glass-page {{themeClass}} {{reducedMotion ? 'reduced-motion' : ''}}">
+  <view class="glass-backdrop" aria-hidden="true"></view>
+  <block wx:if="{{preferenceReady && current}}">
+    <view class="route-heading"><view class="eyebrow">到店路线</view><view class="destination-title">{{destinationName}}</view><view class="origin-caption">从 {{originLabel}} 出发</view></view>
+    <view class="mode-tabs glass-control"><button wx:for="{{modes}}" wx:key="value" class="mode-tab {{mode === item.value ? 'selected' : ''}}" data-mode="{{item.value}}" data-revision="{{revision}}" bindtap="changeMode" disabled="{{actionBusy}}" aria-label="查看{{item.label}}路线">{{item.label}}</button></view>
+    <view wx:if="{{unsupportedMode}}" class="route-message glass-panel">当前选择了公交。小程序内可查看步行或骑行路线，也可以打开微信地图查看公交方案。</view>
+    <view wx:if="{{loading}}" class="route-message glass-panel" aria-live="polite"><view class="loading-label">正在规划{{mode === 'BIKE' ? '骑行' : '步行'}}路线</view><view class="subtle">正在查询实际道路，请稍候。</view></view>
+    <block wx:if="{{hasRoute}}">
+      <view class="map-frame glass-panel"><map id="restaurant-route-map" data-revision="{{revision}}" binderror="mapError" class="route-map" latitude="{{center.latitude}}" longitude="{{center.longitude}}" scale="15" markers="{{markers}}" polyline="{{polylines}}" include-points="{{includePoints}}" show-location="{{false}}" show-compass="{{true}}" show-scale="{{true}}" enable-zoom="{{true}}" enable-scroll="{{true}}" enable-poi="{{false}}" aria-label="{{destinationName}}的{{mode === 'BIKE' ? '骑行' : '步行'}}路线"/></view>
+      <view wx:if="{{mapNotice}}" class="route-footnote" aria-live="polite">{{mapNotice}}</view>
+      <view class="route-summary glass-panel"><view><view class="route-duration">{{durationLabel}}</view><view class="subtle">{{mode === 'BIKE' ? '骑行' : '步行'}} · {{distanceLabel}}</view></view><button class="overview-button glass-control" data-revision="{{revision}}" bindtap="showAll" disabled="{{actionBusy}}">查看全程</button></view>
+      <view class="steps-heading">分步说明<text>点击路段可在地图查看</text></view>
+      <view class="steps-list glass-panel"><button wx:for="{{steps}}" wx:key="index" class="route-step {{selectedStep === index ? 'step-selected' : ''}}" data-index="{{index}}" data-revision="{{revision}}" bindtap="selectStep" disabled="{{actionBusy}}"><view class="step-number">{{index + 1}}</view><view class="step-copy"><view class="step-instruction">{{item.instruction}}</view><view class="subtle">{{item.roadName ? item.roadName + ' · ' : ''}}{{item.distance}}</view></view><text class="step-chevron" aria-hidden="true">›</text></button></view>
+      <view class="route-footnote">{{sourceAttribution}} · 预计时间仅供参考，请遵循现场道路指示。本页展示规划路线，不跟踪当前位置。</view>
+    </block>
+    <view wx:if="{{error}}" class="error" aria-live="polite">{{error}}</view>
+    <button wx:if="{{!unsupportedMode && !loading && !hasRoute}}" class="primary" data-revision="{{revision}}" bindtap="retry" disabled="{{actionBusy}}">重新获取路线</button>
+    <view class="route-actions"><button class="secondary" bindtap="back">返回餐厅</button><button class="secondary" data-revision="{{revision}}" bindtap="openMap" disabled="{{actionBusy}}" loading="{{actionBusy}}">打开微信地图</button></view>
+  </block>
+  <view wx:else class="route-empty glass-panel"><view class="empty-title">需要重新获取餐厅</view><view class="subtle">{{error || '请返回真实决策，选择餐厅后查看路线。'}}</view><button class="primary" bindtap="back">返回餐厅结果</button></view>
+</view>

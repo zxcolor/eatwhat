@@ -1,0 +1,28 @@
+.location-page { padding:28px 20px calc(244px + env(safe-area-inset-bottom)); }
+.location-page > .title { margin:2px 4px 11px; font-size:30px; line-height:1.35; letter-spacing:-.6px; }
+.location-page > .subtitle { margin:0 4px 25px; font-size:13px; line-height:1.85; }
+.location-page .card { padding:23px 22px; margin-bottom:17px; border-radius:28px; }
+.location-symbol { display:flex; align-items:center; justify-content:center; width:48px; height:48px; margin-bottom:17px; border:1px solid var(--line); border-radius:17px; background:var(--accent-soft); color:var(--accent); font-size:29px; line-height:1; }
+.location-card .muted,.search-card .muted { margin-top:8px; font-size:13px; line-height:1.85; }
+.search-card .field { height:54px; margin:17px 0 10px; padding:14px 16px; border-radius:18px; font-size:16px; line-height:24px; }
+.field-note { margin:14px 5px 18px; color:var(--muted); font-size:12px; line-height:1.85; overflow-wrap:anywhere; }
+.search-card .field-note { margin-bottom:0; }
+button.place-result { display:flex; align-items:center; gap:14px; width:100%; padding:20px 21px; color:var(--text); line-height:1.6; text-align:left; white-space:normal; }
+.place-copy { flex:1; min-width:0; }
+.place-name { font-size:17px; font-weight:650; line-height:1.5; overflow-wrap:anywhere; }
+.place-address { margin-top:7px; color:var(--muted); font-size:12px; line-height:1.85; overflow-wrap:anywhere; }
+.place-source { margin-top:11px; color:var(--muted); font-size:12px; font-weight:500; line-height:1.8; overflow-wrap:anywhere; }
+.place-chevron { display:flex; align-items:center; justify-content:center; flex:0 0 32px; width:32px; height:32px; border-radius:50%; background:var(--soft); color:var(--accent); font-size:19px; }
+.privacy-note { margin-top:22px; font-size:12px; line-height:1.9; }
+.page.glass-page .location-footer { position:fixed; left:14px; right:14px; bottom:calc(12px + env(safe-area-inset-bottom)); z-index:20; max-width:680px; margin:0 auto; padding:16px; border-radius:29px; }
+.footer-choice { margin:0 3px 5px; color:var(--text); font-size:13px; font-weight:600; line-height:1.65; overflow-wrap:anywhere; }
+.footer-source { margin:0 3px 10px; color:var(--muted); font-size:12px; line-height:1.75; overflow-wrap:anywhere; }
+.location-footer .primary { min-height:54px; margin-top:12px; }
+.location-footer .error { margin:0 0 12px; padding:11px 13px; font-size:12px; line-height:1.75; }
+@media (max-width:350px) {
+  .location-page { padding-left:16px; padding-right:16px; padding-bottom:calc(274px + env(safe-area-inset-bottom)); }
+  .location-page > .title { font-size:27px; }
+  .location-page .card { padding:21px 19px; border-radius:26px; }
+  button.place-result { gap:10px; }
+  .page.glass-page .location-footer { left:12px; right:12px; padding:14px; }
+}

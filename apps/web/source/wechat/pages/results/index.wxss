@@ -1,0 +1,72 @@
+.restaurant-page { padding:28px 20px calc(38px + env(safe-area-inset-bottom)); }
+.page-heading { margin:2px 4px 23px; }
+.eyebrow { margin-bottom:10px; color:var(--accent); font-size:12px; font-weight:600; line-height:1.5; letter-spacing:1.4px; }
+.title { margin-bottom:10px; font-size:30px; line-height:1.35; letter-spacing:-.6px; }
+.subtitle { font-size:13px; line-height:1.85; }
+.context-row { display:flex; align-items:stretch; gap:10px; margin-bottom:20px; }
+.context-location,.context-adjust { min-height:66px; margin:0; padding:12px 15px; border-radius:22px; color:var(--text); font-size:13px; line-height:1.6; text-align:left; white-space:normal; }
+.context-location { flex:1; min-width:0; overflow-wrap:anywhere; }
+.context-adjust { display:flex; align-items:center; justify-content:center; flex:0 0 auto; color:var(--accent); font-weight:600; text-align:center; }
+.context-label { margin-bottom:3px; color:var(--muted); font-size:12px; font-weight:600; line-height:18px; letter-spacing:.3px; }
+.restaurant-card { margin-bottom:20px; padding:12px; border-radius:32px; }
+.restaurant-image-area { position:relative; height:184px; margin-bottom:18px; overflow:hidden; border-radius:23px; background:var(--soft); }
+.restaurant-image-area::after { content:''; position:absolute; inset:0; border:1px solid rgba(255,255,255,.25); border-radius:inherit; pointer-events:none; }
+.restaurant-image { display:block; width:100%; height:100%; }
+.restaurant-image-placeholder { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; height:100%; color:var(--muted); font-size:12px; line-height:1.7; }
+.restaurant-mark { display:flex; align-items:center; justify-content:center; flex-shrink:0; width:54px; height:54px; border:1px solid var(--line); border-radius:18px; background:var(--glass-control-fill); color:var(--muted); font-size:23px; }
+.restaurant-copy { padding:0 11px; }
+.restaurant-heading { display:flex; align-items:center; gap:12px; }
+.restaurant-main { flex:1; min-width:0; }
+.restaurant-name { font-size:25px; font-weight:650; line-height:1.4; letter-spacing:-.4px; overflow-wrap:anywhere; }
+.source { margin-top:7px; color:var(--muted); font-size:12px; line-height:1.85; overflow-wrap:anywhere; }
+.facts-row { display:flex; gap:14px; margin:19px 0 17px; padding:16px; border-radius:20px; }
+.fact { flex:1; min-width:0; }
+.fact + .fact { padding-left:14px; border-left:1px solid var(--line); }
+.fact-label { margin-bottom:6px; color:var(--muted); font-size:12px; font-weight:600; line-height:18px; letter-spacing:.2px; }
+.price,.distance { font-size:18px; font-weight:650; line-height:1.5; overflow-wrap:anywhere; font-variant-numeric:tabular-nums; }
+.status-row { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px 12px; color:var(--muted); font-size:12px; line-height:1.8; }
+.status-badge { display:inline-flex; align-items:center; gap:6px; max-width:100%; padding:5px 10px; border-radius:999px; background:var(--soft); color:var(--muted); font-size:12px; font-weight:600; line-height:18px; }
+.status-dot { flex:0 0 6px; width:6px; height:6px; border-radius:50%; background:currentColor; }
+.status-open { background:var(--success-soft); color:var(--success); }
+.status-closed { background:var(--accent-soft); color:var(--accent); }
+.contact-row { display:flex; align-items:flex-start; gap:12px; margin-top:14px; line-height:1.8; }
+.contact-label { flex-shrink:0; color:var(--muted); font-size:12px; }
+.contact-value { flex:1; min-width:0; color:var(--text); font-size:13px; overflow-wrap:anywhere; word-break:break-all; }
+.address { margin-top:8px; color:var(--muted); font-size:12px; line-height:1.85; overflow-wrap:anywhere; }
+.restaurant-tags { display:flex; flex-wrap:wrap; gap:7px; margin-top:13px; }
+.tag { max-width:100%; padding:5px 9px; border:1px solid var(--line); border-radius:9px; color:var(--muted); font-size:12px; line-height:1.6; overflow-wrap:anywhere; }
+.destination-action { min-height:52px; margin:20px 0 0; }
+.external-map-action { margin-top:10px; }
+.navigation-note { margin:10px 0 0; color:var(--muted); font-size:12px; line-height:1.8; text-align:center; overflow-wrap:anywhere; }
+.detail-link { display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; min-height:54px; margin:17px 0 0; padding:14px 2px; border-top:1px solid var(--line); border-radius:0; background:transparent; color:var(--accent); font-size:13px; font-weight:600; line-height:1.8; text-align:left; }
+.detail-link > text:last-child { font-size:22px; font-weight:400; line-height:24px; }
+.notice { margin:16px 4px; color:var(--muted); font-size:12px; line-height:1.85; }
+.footnote { margin:16px 4px; color:var(--muted); font-size:12px; line-height:1.9; }
+.pool-progress { margin:16px 0; padding:14px 16px; border-radius:20px; color:var(--text); font-size:12px; line-height:1.85; font-variant-numeric:tabular-nums; }
+.pool-progress text { display:block; margin-top:4px; color:var(--muted); font-size:12px; line-height:1.8; }
+.round-complete { margin:18px 0; padding:16px 18px; border-radius:20px; color:var(--muted); font-size:13px; line-height:1.85; }
+.empty-state,.restaurant-page > .empty { margin:18px 0; padding:34px 24px; border-radius:30px; text-align:center; }
+.empty-mark,.loading-mark { display:flex; align-items:center; justify-content:center; width:66px; height:66px; margin:0 auto 20px; border:1px solid var(--line); border-radius:22px; background:var(--soft); color:var(--muted); font-size:27px; }
+.loading-mark { color:var(--accent); font-size:32px; font-weight:600; letter-spacing:4px; padding-left:4px; }
+.restaurant-page > .empty { font-size:13px; line-height:1.9; }
+.empty-title { font-size:23px; font-weight:650; line-height:1.45; letter-spacing:-.3px; }
+.empty-copy { margin-top:13px; color:var(--muted); font-size:13px; line-height:1.85; }
+.empty-state .secondary { margin-top:24px; }
+.result-action { min-height:56px; margin-top:12px; }
+.quiet-pressed { opacity:.82; }
+.reduced-motion button { transition:none; }
+.reduced-motion button:active { transform:none; }
+@media (max-width:350px) {
+  .restaurant-page { padding-left:16px; padding-right:16px; }
+  .title { font-size:27px; }
+  .context-row { gap:8px; }
+  .context-location,.context-adjust { padding:11px 12px; font-size:12px; }
+  .restaurant-card { padding:10px; border-radius:28px; }
+  .restaurant-image-area { height:164px; border-radius:20px; }
+  .restaurant-copy { padding:0 8px; }
+  .restaurant-name { font-size:22px; }
+  .facts-row { gap:12px; padding:14px 12px; }
+  .fact + .fact { padding-left:12px; }
+  .price,.distance { font-size:16px; }
+  .empty-state { padding:30px 20px; }
+}

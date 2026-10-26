@@ -126,6 +126,8 @@ importers:
 
   apps/miniprogram: {}
 
+  apps/web: {}
+
   apps/wechat: {}
 
   packages/contracts:
