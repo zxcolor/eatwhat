@@ -1,0 +1,37 @@
+<view wx:if="{{preferenceReady}}" class="page restaurant-detail glass-page {{themeClass}} {{reducedMotion ? 'reduced-motion' : ''}}">
+  <view class="glass-backdrop" aria-hidden="true"></view>
+  <block wx:if="{{current}}">
+    <view class="choice-summary glass-panel">
+      <view class="restaurant-image-area">
+        <image wx:if="{{result.imageUrl}}" class="restaurant-image" src="{{result.imageUrl}}" mode="aspectFill" data-revision="{{revision}}" binderror="imageError" aria-label="{{result.name}}门店图片"/>
+        <view wx:else class="restaurant-image-placeholder"><view class="restaurant-mark" aria-hidden="true">店</view><text>暂无门店图片</text></view>
+      </view>
+      <view class="summary-copy"><view class="result-name">{{result.name}}</view><view class="source">{{result.sourceAttribution}}</view>
+      <view class="facts-row glass-inset"><view class="fact"><view class="fact-label">人均参考</view><view class="price">{{result.price}}</view></view><view class="fact"><view class="fact-label">距离参考</view><view class="distance">{{result.distance}}</view></view></view>
+      <view class="reference-note">人均价格仅供参考，距离与出行时间为估算。</view></view>
+    </view>
+    <view class="information-section glass-panel">
+      <view class="section-title">餐厅信息</view>
+      <view class="information-row"><text class="information-label">营业</text><text>{{result.openLabel}}</text></view>
+      <view class="information-row"><text class="information-label">地址</text><text>{{result.address}}</text></view>
+      <view class="information-row"><text class="information-label">电话</text><text>{{result.phone}}</text></view>
+      <view class="information-row"><text class="information-label">出行</text><text>{{result.travel}}</text></view>
+      <view wx:if="{{result.tags.length}}" class="restaurant-tags"><text wx:for="{{result.tags}}" wx:key="*this" class="tag">{{item}}</text></view>
+      <view class="action-row"><button class="secondary" data-revision="{{revision}}" bindtap="call" disabled="{{!canCall || actionBusy || saveBusy}}">拨打电话</button><button class="secondary" data-revision="{{revision}}" bindtap="copyAddress" disabled="{{!canCopy || actionBusy || saveBusy}}">复制地址</button></view>
+      <view wx:if="{{actionNotice}}" class="note">{{actionNotice}}</view>
+    </view>
+    <view wx:if="{{result.reasons.length}}" class="information-section glass-panel"><view class="section-title">推荐说明</view><view wx:for="{{result.reasons}}" wx:key="code" class="reason">{{item.text}}</view></view>
+    <view wx:if="{{result.warnings.length}}" class="information-section glass-panel"><view class="section-title">信息提醒</view><view wx:for="{{result.warnings}}" wx:key="*this" class="note">{{item}}</view></view>
+    <view class="information-section glass-panel">
+      <view wx:if="{{canFavorite || canFeedback}}" class="section-title">保存与反馈</view>
+      <button wx:if="{{canFavorite}}" class="secondary" data-revision="{{revision}}" bindtap="saveFavorite" disabled="{{favoriteSaved || saveBusy || actionBusy}}">{{favoriteSaved ? '已收藏' : '收藏餐厅'}}</button>
+      <view wx:if="{{canFeedback}}" class="feedback-options"><button wx:for="{{feedbackTypes}}" wx:key="type" class="chip" data-type="{{item.type}}" data-revision="{{revision}}" bindtap="feedback" disabled="{{item.submitted || saveBusy || actionBusy}}">{{item.submitted ? '已记录 · ' + item.label : item.label}}</button></view>
+      <view class="note">{{saveNotice}}</view><button wx:if="{{canFavorite || canFeedback}}" class="saved-link" bindtap="openSaved">查看账号记录 ›</button>
+    </view>
+    <view wx:if="{{error}}" class="error" aria-live="polite">{{error}}</view>
+    <button wx:if="{{canViewRoute}}" class="primary inapp-route-action" data-revision="{{revision}}" bindtap="openRoute" disabled="{{actionBusy || saveBusy}}">小程序内查看路线</button>
+    <view wx:if="{{canNavigate}}" class="note">打开微信地图后，可选择路线与导航方式。</view>
+    <view class="detail-actions glass-chrome"><button class="secondary" bindtap="back">返回</button><button class="primary" data-revision="{{revision}}" bindtap="navigate" disabled="{{!canNavigate || actionBusy || saveBusy}}" loading="{{actionBusy}}" aria-label="在微信地图查看{{result.name}}">打开微信地图</button></view>
+  </block>
+  <view wx:else class="detail-empty glass-panel"><view class="empty-mark">↻</view><view class="empty-title">需要重新获取餐厅</view><view class="empty-copy">{{actionNotice}}</view><button class="primary" bindtap="back">返回餐厅结果</button></view>
+</view>

@@ -1,0 +1,14 @@
+{
+  "name": "jsbi",
+  "version": "4.3.2",
+  "license": "Apache-2.0",
+  "repository": "https://github.com/GoogleChromeLabs/jsbi",
+  "source": "https://registry.npmjs.org/jsbi/-/jsbi-4.3.2.tgz",
+  "integrity": "sha512-9fqMSQbhJykSeii05nxKl4m6Eqn2P6rOlYiS+C5Dr/HPIU/7yZxu5qzbs40tgaFORiw2Amd0mirjxatXYMkIew==",
+  "upstreamFile": "package/dist/jsbi-cjs.js",
+  "modifications": "none",
+  "sha256": {
+    "jsbi.js": "b952fc88337eae5d90b397da4251e207d816056ea4c574df576f17e68626dd94",
+    "LICENSE": "9568a2b155e66ac3e0ba1fd80b52b827b9460e6cf6f233125e7cbca8e206ddc3"
+  }
+}

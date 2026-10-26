@@ -1,0 +1,35 @@
+<view wx:if="{{preferenceReady}}" class="page location-page glass-page {{themeClass}} {{reducedMotion ? 'reduce-motion' : ''}}">
+  <view class="glass-backdrop" aria-hidden="true"></view>
+  <view class="title">从哪里出发</view>
+  <view class="subtitle">使用当前位置，或搜索你想出发的地点。</view>
+  <view wx:if="{{serviceMessage}}" class="card glass-panel service-card">
+    <view class="muted">{{serviceMessage}}</view>
+    <button wx:if="{{!consent}}" class="secondary" bindtap="home">返回首页</button>
+    <button wx:else class="secondary" bindtap="refresh" loading="{{refreshing}}" disabled="{{refreshing || status === 'loading'}}">重新连接</button>
+  </view>
+  <view class="card glass-panel location-card">
+    <view class="location-symbol" aria-hidden="true">⌖</view><view class="label">当前位置</view>
+    <view class="muted">仅在你点击后申请定位，用于这次附近餐厅推荐。</view>
+    <button class="secondary" bindtap="locate" loading="{{locating}}" disabled="{{!canLocate || locating || busy || saving || refreshing}}">{{locating ? '正在获取位置' : '使用当前位置'}}</button>
+  </view>
+  <view class="card glass-panel search-card">
+    <view class="label">手动选择地点</view>
+    <view class="muted">输入城市和地标、学校或街道名称。</view>
+    <input class="field glass-field" value="{{query}}" maxlength="80" placeholder="搜索地点名称" bindinput="inputQuery" bindconfirm="search" confirm-type="search" disabled="{{!canSearch || saving || refreshing}}" aria-label="地点名称"/>
+    <button class="secondary" bindtap="search" loading="{{busy}}" disabled="{{!canSearch || busy || locating || saving || refreshing}}">搜索地点</button>
+    <view wx:if="{{consent && status === 'ready' && !canSearch}}" class="field-note">地点搜索暂未开放，可使用当前位置。</view>
+  </view>
+  <view wx:if="{{notice}}" class="field-note">{{notice}}</view>
+  <button wx:for="{{places}}" wx:key="index" class="card glass-panel place-result" data-index="{{item.index}}" data-revision="{{item.revision}}" bindtap="choose" disabled="{{saving}}">
+    <view class="place-copy"><view class="place-name">{{item.name}}</view>
+    <view wx:if="{{item.address}}" class="place-address">{{item.address}}</view>
+    <view class="place-source">{{item.sourceLabel}} · 实时地点</view></view><text class="place-chevron" aria-hidden="true">↗</text>
+  </button>
+  <view class="field-note privacy-note">位置仅用于当前使用过程，不写入本机记录。退出小程序或撤回隐私同意后清除。</view>
+  <view class="location-footer glass-chrome">
+    <view wx:if="{{error}}" class="error">{{error}}</view>
+    <view class="footer-choice">{{selectionLabel ? '已选：' + selectionLabel : '请先选择出发地点'}}</view>
+    <view wx:if="{{selectionSource}}" class="footer-source">{{selectionSource}}</view>
+    <button class="primary" bindtap="confirm" loading="{{saving}}" disabled="{{!canConfirm || saving}}">从这里出发</button>
+  </view>
+</view>

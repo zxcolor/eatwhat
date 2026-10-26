@@ -1,0 +1,16 @@
+<view class="page glass-page utility-page records-page {{themeClass}} {{reducedMotion ? 'reduce-motion' : ''}}">
+  <view class="glass-backdrop" aria-hidden="true"></view>
+  <view class="page-eyebrow">只保存在这台设备</view>
+  <view class="title">最近决策</view>
+  <view class="subtitle">回看之前的条件与结果数量。</view>
+  <view class="card glass-panel privacy-summary"><view class="privacy-mark glass-inset">◷</view><view><view class="label">最多保留 30 条 · 90 天</view><view class="muted">只保存时间与决策摘要，不保存位置或餐厅信息。</view></view></view>
+  <view wx:if="{{error}}" class="error" role="alert"><view class="error-title">记录暂时没有读出来</view><view>{{error}}</view><button class="retry-button glass-control" hover-class="utility-pressed" bindtap="syncState">重新读取</button></view>
+  <view wx:elif="{{!consent}}" class="card glass-panel empty-state"><view class="empty-symbol glass-inset">◷</view><view class="empty-title">先确认隐私选择</view><view class="empty-copy">请到“个人”阅读并同意隐私说明，再查看本机记录。</view></view>
+  <view wx:elif="{{!entries.length}}" class="card glass-panel empty-state"><view class="empty-symbol glass-inset">◷</view><view class="empty-title">暂无最近决策</view><view class="empty-copy">已有的本机决策摘要会显示在这里。附近餐厅推荐只保存不含餐厅内容和位置的决策摘要。</view></view>
+  <view wx:if="{{entries.length}}" class="list-heading"><text>本机记录</text><text>{{entries.length}} 条</text></view>
+  <view wx:for="{{entries}}" wx:key="id" class="card glass-panel record">
+    <view class="row"><text class="label">{{item.title}}</text><text class="count">{{item.count}} 个结果</text></view>
+    <view class="muted summary">{{item.summary}}</view>
+  </view>
+  <button wx:if="{{entries.length}}" class="secondary danger-button" hover-class="utility-pressed" bindtap="clearRecords">清空最近决策</button>
+</view>

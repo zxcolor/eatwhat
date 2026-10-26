@@ -1,0 +1,91 @@
+<template name="result-card">
+  <view class="meal-art" style="{{artStyle}}" aria-label="虚拟餐点示意，具体配料和分量未知">
+    <view class="art-ring"/><view class="art-plate"><view class="art-rice"/><view class="art-main"/><view class="art-greens"/></view>
+    <view class="art-caption">餐点示意 · 非实物照片</view>
+  </view>
+  <view class="sheet-card-content" style="{{infoStyle}}">
+    <view class="result-card">
+      <view class="pick-row"><view class="pick-label">虚拟体验 · {{target === 'PACKAGE' ? '一份套餐' : '一家餐厅'}}</view><view wx:if="{{confirmed}}" class="chosen-label">已选定</view></view>
+      <view class="result-name">{{card.name}}</view>
+      <view class="restaurant">{{target === 'PACKAGE' ? card.restaurantName : card.mealName}}</view>
+      <view class="result-facts">
+        <view class="fact"><view class="fact-label">{{target === 'PACKAGE' ? '虚拟套餐价' : '本次最低已知虚拟套餐价'}}</view><view class="price">{{card.priceText}}</view></view>
+        <view class="fact distance-fact"><view class="fact-label">从所选虚拟地点出发</view><view class="distance">{{card.distanceText}}</view></view>
+      </view>
+      <view wx:if="{{briefReason}}" class="brief-reason"><text class="reason-mark">✓</text><text>{{briefReason}}</text></view>
+      <view class="unknown-summary"><view class="uncertainty">营业状态未知</view><view wx:for="{{card.uncertainties}}" wx:key="*this" class="uncertainty">{{item}}</view><view wx:if="{{!card.uncertainties.length}}" class="uncertainty">具体配料、分量和营养未知</view></view>
+      <button wx:if="{{detailEnabled}}" class="sheet-button detail-link" data-id="{{card.id}}" data-revision="{{card.revision}}" bindtap="detail" disabled="{{locked}}" hover-class="quiet-pressed"><text>查看{{target === 'PACKAGE' ? '这份套餐' : '这家餐厅'}}详情</text><text>›</text></button>
+      <view wx:else class="detail-spacer"/>
+    </view>
+  </view>
+</template>
+<view wx:if="{{mounted}}" class="sheet-layer {{themeClass}} {{entered ? 'is-open' : ''}} {{closing ? 'is-closing' : ''}} {{reducedMotion ? 'motion-reduced' : ''}}">
+  <view class="sheet-backdrop" catchtap="close" catchtouchmove="swallow" aria-label="关闭本次决定"/>
+  <view class="sheet-panel" style="{{panelDragStyle}}" catchtap="swallow" aria-role="dialog" aria-modal="true" aria-label="{{confirmed ? '已确认的虚拟决定' : '本次虚拟决定'}}">
+    <view class="sheet-header" bindtouchstart="headerStart" catchtouchmove="headerMove" bindtouchend="headerEnd" bindtouchcancel="headerCancel">
+      <view class="sheet-handle"/>
+      <view class="sheet-heading">{{confirmed ? '这顿，决定好了' : '这顿就吃这个'}}</view>
+      <button class="sheet-button close-button" bindtap="close" aria-label="关闭本次决定" hover-class="quiet-pressed">×</button>
+    </view>
+    <view wx:if="{{!contentReady}}" class="sheet-skeleton" aria-role="status" aria-live="polite">
+      <view class="skeleton-art"/><view class="skeleton-card"><view class="skeleton-line short"/><view class="skeleton-line title-line"/><view class="skeleton-line"/><view class="skeleton-facts"><view class="skeleton-line"/><view class="skeleton-line"/></view></view><view class="preparing-copy">正在准备这次决定</view>
+    </view>
+    <view wx:else class="sheet-reveal" style="{{revealStyle}}">
+      <scroll-view class="sheet-scroll" scroll-y="{{!dragging}}" enhanced="{{true}}" bounces="{{false}}" show-scrollbar="{{false}}">
+        <block wx:if="{{displayCard}}">
+          <view class="candidate-deck">
+            <view wx:if="{{previewCount > 1}}" class="deck-outline deck-back" aria-hidden="true"/>
+            <view wx:if="{{previewCount > 0}}" class="deck-outline deck-front" aria-hidden="true"/>
+            <view class="motion-card" style="{{cardStyle}}" bindtouchstart="dragStart" bindtouchmove="dragMove" bindtouchend="dragEnd" bindtouchcancel="dragCancel">
+              <template is="result-card" data="{{card:displayCard,target:displayTarget,briefReason:displayReason,confirmed:confirmed,artStyle:artworkStyle,infoStyle:informationStyle,detailEnabled:true,locked:interactionLocked}}"/>
+            </view>
+            <view wx:if="{{outgoingCard}}" class="motion-card outgoing-card" style="{{outgoingStyle}}" aria-hidden="true">
+              <template is="result-card" data="{{card:outgoingCard,target:outgoingTarget,briefReason:outgoingReason,confirmed:false,artStyle:'',infoStyle:'',detailEnabled:false,locked:true}}"/>
+            </view>
+          </view>
+          <view class="sheet-content">
+            <view wx:if="{{confirmed}}" class="confirmation" aria-live="polite"><view class="confirmation-title">这次选择已记下</view><view>仅记录本次虚拟决定，不是已吃记录，也不会产生真实订单。</view></view>
+            <view wx:else class="gesture-hint">左右滑动换一个，也可以点下方按钮</view>
+            <view class="decision-context">
+              <view class="context-row"><button class="sheet-button text-button location-button" bindtap="location" disabled="{{interactionLocked}}" hover-class="quiet-pressed"><text class="context-label">虚拟地点</text><text class="context-value">{{originLabel}} ⌄</text></button><button class="sheet-button text-button" bindtap="adjust" disabled="{{interactionLocked}}" hover-class="quiet-pressed">调整条件</button></view>
+              <view wx:if="{{summary}}" class="condition-summary">{{summary}}</view>
+            </view>
+            <view class="why-section">
+              <button class="sheet-button why-toggle" bindtap="toggleWhy" disabled="{{interactionLocked}}" hover-class="quiet-pressed" aria-expanded="{{showWhy}}"><text>为什么选它</text><text class="toggle-mark {{showWhy ? 'is-expanded' : ''}}">+</text></button>
+              <view wx:if="{{whyMounted}}" class="why-clip" style="{{whyStyle}}">
+                <view class="why-content why-inner">
+                  <view class="why-label">已知的模拟信息</view><view wx:if="{{current.roleText}}" class="why-line">{{current.roleText}}</view><view wx:for="{{current.factsSummary}}" wx:key="*this" class="why-line">{{item}}</view>
+                  <view class="why-label">本次推荐依据</view><view wx:for="{{current.reasons}}" wx:key="*this" class="why-line">{{item}}</view><view wx:for="{{reasons}}" wx:key="*this" class="why-line">{{item}}</view>
+                  <view class="why-footnote">先核对你选择的条件；标注不全的条件不会当作已经满足。随机与换口味只在主动点击时使用，不会自动成为个人偏好或比较结论。</view>
+                </view>
+              </view>
+            </view>
+            <view wx:if="{{!confirmed}}" class="strategy-row"><view class="strategy-label">想换种选法</view><view class="strategy-options"><button class="sheet-button text-button" data-strategy="uniform" bindtap="chooseStrategy" disabled="{{interactionLocked}}" hover-class="quiet-pressed">随机一次</button><text>·</text><button class="sheet-button text-button" data-strategy="weighted" bindtap="chooseStrategy" disabled="{{interactionLocked}}" hover-class="quiet-pressed">偶尔换个口味</button></view></view>
+          </view>
+        </block>
+        <view wx:else class="empty-content">
+          <view class="empty-mark">{{error ? '!' : status === 'needs_information' ? '?' : status === 'exhausted' ? '↻' : '—'}}</view>
+          <view class="empty-eyebrow">{{error ? '这次决定暂未完成' : status === 'needs_information' ? '有些条件还无法核实' : status === 'exhausted' ? '本轮选择已看完' : '本次虚拟决定'}}</view>
+          <view class="empty-title">{{error ? '再试一次' : empty.title}}</view>
+          <view class="empty-copy">{{error || empty.description}}</view>
+          <view wx:if="{{uncertainties.length}}" class="empty-unknowns"><view wx:for="{{uncertainties}}" wx:key="*this" class="uncertainty">{{item}}</view></view>
+          <view class="empty-context"><view class="context-label">当前条件</view><view wx:if="{{summary}}" class="condition-summary">{{summary}}</view><button class="sheet-button text-button location-button" bindtap="location" disabled="{{interactionLocked}}" hover-class="quiet-pressed">虚拟 · {{originLabel}} ⌄</button></view>
+        </view>
+        <view wx:if="{{error && displayCard}}" class="sheet-error" aria-live="polite">{{error}}</view>
+        <view class="virtual-note">虚拟场景基于历史原型，含模拟属性。价格不代表当前售价或可购买承诺，距离不对应现实路线。本次体验仅保留在内存中。</view>
+      </scroll-view>
+      <view class="sheet-actions">
+        <block wx:if="{{displayCard}}">
+          <button class="sheet-button sheet-secondary" data-id="{{displayCard.id}}" data-revision="{{displayCard.revision}}" bindtap="secondaryAction" disabled="{{interactionLocked}}" hover-class="secondary-pressed">{{confirmed ? '重新决定' : target === 'PACKAGE' ? '换一份' : '换一家'}}</button>
+          <view class="confirm-action-wrap">
+            <button class="sheet-button sheet-primary confirm-action confirm-{{confirmPhase}}" data-id="{{displayCard.id}}" data-revision="{{displayCard.revision}}" bindtap="primaryAction" disabled="{{interactionLocked}}" hover-class="primary-pressed" aria-label="{{confirmed ? '完成本次决定' : target === 'PACKAGE' ? '就吃这份' : '就吃这家'}}">
+              <view class="confirm-surface"/><text class="confirm-label">{{confirmPhase === 'pending' ? '正在确认' : target === 'PACKAGE' ? '就吃这份' : '就吃这家'}}</text><view class="confirm-check"><view class="check-stroke"/></view>
+            </button>
+            <view wx:if="{{confirmPhase === 'done'}}" class="confirm-caption" aria-role="status" aria-live="polite">已选定 · 点此完成</view>
+          </view>
+        </block>
+        <button wx:else class="sheet-button sheet-primary" bindtap="emptyAction" disabled="{{interactionLocked}}" hover-class="primary-pressed">{{error ? '重试这次决定' : empty.action}}</button>
+      </view>
+    </view>
+  </view>
+</view>

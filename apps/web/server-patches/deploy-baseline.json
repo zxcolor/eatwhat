@@ -1,0 +1,224 @@
+{
+  "formatVersion": 1,
+  "release": "20261026-preference-ai-853f06b",
+  "helpers": [
+    {
+      "sha256": "382971d0e02097c804c841e14660deb4fde470ba1bbb185ec6d4056a61bbcb0c",
+      "bytes": 107647,
+      "path": "scripts/build-ecs-deployment-bundle.ps1"
+    },
+    {
+      "sha256": "2032f1f794785583969510506d80cf8e1ae69c9d94c0da39f230acd386bbff04",
+      "bytes": 475,
+      "path": "scripts/verify-ecs-deployment-bundle.ps1"
+    }
+  ],
+  "files": [
+    {
+      "sha256": "b3c4940b840b006332c5c7fa35cb3c8fbb09012264ac95ed515a2836d60d983d",
+      "bundlePath": "compose.yml",
+      "bytes": 11339,
+      "path": "infra/ecs/compose.yml"
+    },
+    {
+      "sha256": "1e59dabfd5327bbfd355715ce0076e4b880f40388cf7622ddf951f84858f2eb2",
+      "bundlePath": "nginx/api.unfinished-era.com.conf",
+      "bytes": 17587,
+      "path": "infra/ecs/nginx/api.unfinished-era.com.conf"
+    },
+    {
+      "sha256": "13515260b68d04511a05a6e07ed3e9b4a74b3e4930e548a07acebdab575dc552",
+      "bundlePath": "nginx/api.eatwhat.pro.conf",
+      "bytes": 17481,
+      "path": "infra/ecs/nginx/api.eatwhat.pro.conf"
+    },
+    {
+      "sha256": "6c9c88a3ba3de5db3ed204855cd8338f39e8e3b67c5afe14f31cbe4afad0dbd1",
+      "bundlePath": "nginx/api.unfinished-era.com.acme.conf",
+      "bytes": 473,
+      "path": "infra/ecs/nginx/api.unfinished-era.com.acme.conf"
+    },
+    {
+      "sha256": "2c837e5b4c27ac4b4388b7c8029e492befab7a4c649600167625d00a3e425aa7",
+      "bundlePath": "nginx/api.unfinished-era.com.well-known.conf",
+      "bytes": 222,
+      "path": "infra/ecs/nginx/api.unfinished-era.com.well-known.conf"
+    },
+    {
+      "sha256": "3847d8d4deb4ca34bb375018dcc735ce98fb415e29a0f729bffeb170c824ce92",
+      "bundlePath": "postgres/pg_hba.conf",
+      "bytes": 1555,
+      "path": "infra/ecs/postgres/pg_hba.conf"
+    },
+    {
+      "sha256": "1807ac45ecd1fc70aef499d34f97049e015f8b27725548bbbd0c522ff6682d67",
+      "bundlePath": "deployment.env.example",
+      "bytes": 3625,
+      "path": "infra/ecs/deployment.env.example"
+    },
+    {
+      "sha256": "ad1988c4b4eabec681f735a27908896865013488484cc0877ce713c001fe0479",
+      "bundlePath": "scripts/activate-baota-nginx.sh",
+      "bytes": 264,
+      "path": "infra/ecs/scripts/activate-baota-nginx.sh"
+    },
+    {
+      "sha256": "5d52e038522ee4e47b58d728c4141bf40bdba163b69aaa93050d684bf4bc67dd",
+      "bundlePath": "scripts/activate-api-subdomain-nginx.sh",
+      "bytes": 21012,
+      "path": "infra/ecs/scripts/activate-api-subdomain-nginx.sh"
+    },
+    {
+      "sha256": "dcd3150934ce8ee15148ce08deed9c7786986e17d8fe49ccf4c2d7ae242f4715",
+      "bundlePath": "scripts/activate-candidate-release.sh",
+      "bytes": 14069,
+      "path": "infra/ecs/scripts/activate-candidate-release.sh"
+    },
+    {
+      "sha256": "a85a4015a626a7e42197a8fa02248beebdda171f1fced0a09db7a468de21e3a0",
+      "bundlePath": "scripts/verify-rollback-release.sh",
+      "bytes": 5367,
+      "path": "infra/ecs/scripts/verify-rollback-release.sh"
+    },
+    {
+      "sha256": "ad0d3e112266416449a6b6c0c836479ea3bb74fb17beb46a453d9f04610f1c8e",
+      "bundlePath": "scripts/assert-phone-only-bridge-runtime.sh",
+      "bytes": 2908,
+      "path": "infra/ecs/scripts/assert-phone-only-bridge-runtime.sh"
+    },
+    {
+      "sha256": "8d1150d9b9886733a6c02546cfa7f1b68f74afd98a4168342768a7ccd758405c",
+      "bundlePath": "scripts/assert-wechat-union-aliases-bridge-runtime.sh",
+      "bytes": 3014,
+      "path": "infra/ecs/scripts/assert-wechat-union-aliases-bridge-runtime.sh"
+    },
+    {
+      "sha256": "fec76f915a1efe2ee514a93a9922925b04c03ecb81dd58ec9ceeeb9a7d05cfba",
+      "bundlePath": "scripts/backup-database.sh",
+      "bytes": 9512,
+      "path": "infra/ecs/scripts/backup-database.sh"
+    },
+    {
+      "sha256": "c31dbf72ecbfbca40b0bec0051783ae1641e63940a3f7405b15bed2a35be50cf",
+      "bundlePath": "scripts/harden-release-permissions.sh",
+      "bytes": 1019,
+      "path": "infra/ecs/scripts/harden-release-permissions.sh"
+    },
+    {
+      "sha256": "57040ec3c0017efae6a35ea231be71c693d9ad273309d296f622bd3b7b64cf27",
+      "bundlePath": "scripts/prepare-secrets.sh",
+      "bytes": 6480,
+      "path": "infra/ecs/scripts/prepare-secrets.sh"
+    },
+    {
+      "sha256": "9fc5facd7e3be828bd733d4f75a4fd91fed631482b2118ccda56e5bd2f386c03",
+      "bundlePath": "scripts/preflight-deployment.sh",
+      "bytes": 35053,
+      "path": "infra/ecs/scripts/preflight-deployment.sh"
+    },
+    {
+      "sha256": "4d496b0906d5c447815b4d235869e0861af8896137bd30f93bc86968a219c239",
+      "bundlePath": "scripts/provision-database.sh",
+      "bytes": 27861,
+      "path": "infra/ecs/scripts/provision-database.sh"
+    },
+    {
+      "sha256": "0e078efbc4ba06ea8768283fd6cc348c1705fe92a1159cd6f9683c8e30b383d1",
+      "bundlePath": "scripts/reload-nginx-after-certificate-renewal.sh",
+      "bytes": 6450,
+      "path": "infra/ecs/scripts/reload-nginx-after-certificate-renewal.sh"
+    },
+    {
+      "sha256": "e44a6f385ecf3b217e8e73722d06866c1a61e6b54e61a9e9219ccd222e10f8dc",
+      "bundlePath": "scripts/restore-database.sh",
+      "bytes": 9258,
+      "path": "infra/ecs/scripts/restore-database.sh"
+    },
+    {
+      "sha256": "a9afc916ce223799fedff8e43f2c35f6e1a80e972826096d2a418ad5cdbb0e51",
+      "bundlePath": "scripts/restore-extension-plan.sh",
+      "bytes": 4877,
+      "path": "infra/ecs/scripts/restore-extension-plan.sh"
+    },
+    {
+      "sha256": "ee72f27b1555c8322e68d66a26ce5414914288ce157400bfd5c4d02a0d5cc4ab",
+      "bundlePath": "scripts/rollback-database.sh",
+      "bytes": 7916,
+      "path": "infra/ecs/scripts/rollback-database.sh"
+    },
+    {
+      "sha256": "6270f840234cc1c49739e2e125bda3224ab227332a5b0052d1aefcdcfa343fd9",
+      "bundlePath": "scripts/smoke-test.sh",
+      "bytes": 490,
+      "path": "infra/ecs/scripts/smoke-test.sh"
+    },
+    {
+      "sha256": "859c83ed5b1ce5b6367ec5e1d1cfa8b82d0e719ab5f82e515652950a96db41d7",
+      "bundlePath": "scripts/verify-runtime.sh",
+      "bytes": 14694,
+      "path": "infra/ecs/scripts/verify-runtime.sh"
+    },
+    {
+      "sha256": "b9a1c58515aaf6f7cd28dfbb0d149c703d64c55abb9377e09823b1da51a312b7",
+      "bundlePath": "scripts/update-amap-secrets.sh",
+      "bytes": 7043,
+      "path": "infra/ecs/scripts/update-amap-secrets.sh"
+    },
+    {
+      "sha256": "a1a0421036caea17c97c70e9fe3d778514135d8db4db16e9d1b2ee9703803844",
+      "bundlePath": "scripts/update-mimo-secrets.sh",
+      "bytes": 6558,
+      "path": "infra/ecs/scripts/update-mimo-secrets.sh"
+    },
+    {
+      "sha256": "f837b03c5042a257e3b0860ba671ccd1c1b6ed672ffe47c1523050b4fe36004d",
+      "bundlePath": "scripts/update-auth-secrets.sh",
+      "bytes": 42141,
+      "path": "infra/ecs/scripts/update-auth-secrets.sh"
+    },
+    {
+      "sha256": "1391e14e894fda1fb1befb530bf47f8d2194c8a5576c02a48e0005821c50b7d3",
+      "bundlePath": "scripts/verify-database-backup.sh",
+      "bytes": 4036,
+      "path": "infra/ecs/scripts/verify-database-backup.sh"
+    },
+    {
+      "sha256": "bc98ff086a536d0256a8cb037f8434af385acf67fea1768338d89d2abd5cb286",
+      "bundlePath": "sql/bootstrap-extensions.sql",
+      "bytes": 1492,
+      "path": "infra/postgres/bootstrap-extensions.sql"
+    },
+    {
+      "sha256": "20f5ed1504101d2433abf48cfa319aada8fe6bb48e989f4c40f48d00caed71eb",
+      "bundlePath": "sql/restore-extensions.sql",
+      "bytes": 9274,
+      "path": "infra/postgres/restore-extensions.sql"
+    },
+    {
+      "sha256": "ade6acffa176c878581074cd2a3750d4c27d28b2796ef39af643c2beee131143",
+      "bundlePath": "sql/role-grants.sql",
+      "bytes": 30121,
+      "path": "infra/postgres/role-grants.sql"
+    },
+    {
+      "sha256": "bf691cba48bc49c9b9f91277b950bc892a5cc11b641f8f5a98092b7e93fcb201",
+      "bundlePath": "sql/verify-admin-config-control.sql",
+      "bytes": 7008,
+      "path": "infra/postgres/verify-admin-config-control.sql"
+    },
+    {
+      "sha256": "e1362852f4ee7b8e9fc7630b4416d1a233dbdb1f1ddb2e46602a1bc9491a8fa0",
+      "bundlePath": "sql/verify-wechat-miniprogram-login.sql",
+      "bytes": 3352,
+      "path": "infra/postgres/verify-wechat-miniprogram-login.sql"
+    },
+    {
+      "sha256": "decf4f3a79f5cc6370a266f4a99713f3851f157ce5f916e28ef939930d32609c",
+      "bundlePath": "sql/verify-canteen-public-ratings.sql",
+      "bytes": 5372,
+      "path": "infra/postgres/verify-canteen-public-ratings.sql"
+    }
+  ],
+  "verifiedAt": "2026-10-26T13:13:01.047Z",
+  "provenance": "All 34 payload hashes matched the active release SHA256SUMS; local builder helpers remain independently pinned."
+}

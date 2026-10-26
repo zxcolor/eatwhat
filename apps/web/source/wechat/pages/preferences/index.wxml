@@ -1,0 +1,19 @@
+<view class="page glass-page preference-page {{themeClass}} {{reducedMotion ? 'reduce-motion' : ''}}">
+  <view class="glass-backdrop" aria-hidden="true"></view>
+  <view class="preference-heading">
+    <view class="preference-title">请选择你的口味</view>
+    <view class="preference-description">左右拖动选择辣度，再选一种口味轻重。</view>
+  </view>
+  <view class="preference-sliders">
+    <taste-slider field="spicyLevel" label="" value="{{spicyValue}}" revision="{{revision}}" min="{{0}}" max="{{4}}" step="{{1}}" labels="{{spicyLevels}}" default-value="{{defaultSpicy}}" disabled="{{busy}}" reduced-motion="{{reducedMotion}}" theme-class="{{themeClass}}" bind:input="onSliderInput" bind:commit="onSliderCommit" bind:reset="onSliderReset" bind:dragstate="onSliderDragState"/>
+    <view class="flavor-choice">
+      <view class="flavor-choice-title">口味轻重</view>
+      <view class="flavor-buttons">
+        <button class="flavor-button {{intensityValue === 0 ? 'selected' : ''}}" data-value="{{0}}" data-revision="{{revision}}" bindtap="selectFlavor" disabled="{{busy || dragging}}" aria-pressed="{{intensityValue === 0}}" hover-class="flavor-button-pressed"><text class="flavor-option-label">清淡</text><view class="flavor-selection-mark" aria-hidden="true"/></button>
+        <button class="flavor-button {{intensityValue === 100 ? 'selected' : ''}}" data-value="{{100}}" data-revision="{{revision}}" bindtap="selectFlavor" disabled="{{busy || dragging}}" aria-pressed="{{intensityValue === 100}}" hover-class="flavor-button-pressed"><text class="flavor-option-label">重口味</text><view class="flavor-selection-mark" aria-hidden="true"/></button>
+      </view>
+    </view>
+  </view>
+  <view wx:if="{{error}}" class="preference-error" role="alert">{{error}}</view>
+  <button wx:if="{{showEnter}}" class="enter-button" bindtap="finish" data-revision="{{revision}}" disabled="{{busy || dragging}}" loading="{{busy}}" hover-class="enter-button-pressed">进入首页</button>
+</view>

@@ -1,0 +1,44 @@
+<page-meta page-style="{{detail ? 'overflow:hidden;' : ''}}"/>
+<view class="page glass-page utility-page saved-page {{themeClass}} {{reducedMotion ? 'reduce-motion' : ''}}">
+  <view class="glass-backdrop" aria-hidden="true"></view>
+  <view class="page-eyebrow">你的账号记录</view>
+  <view class="title">收藏与记录</view>
+  <view class="subtitle">想去的、常吃的，都放在这里。</view>
+  <view class="card glass-panel access-card">
+    <view class="access-heading"><view class="label">{{!sections.length ? '功能暂未开放' : signedIn ? '已连接你的账号' : '登录后查看'}}</view><text wx:if="{{sections.length && signedIn}}" class="state-badge success-state">已登录</text></view>
+    <view class="muted access-copy">{{notice}}</view>
+    <button wx:if="{{sections.length > 0 && !signedIn}}" class="primary" hover-class="utility-pressed" bindtap="login">前往登录</button>
+  </view>
+  <view wx:if="{{sections.length}}" class="chips glass-control section-tabs"><button wx:for="{{sections}}" wx:key="id" class="chip {{section === item.id ? 'selected' : ''}}" hover-class="utility-pressed" data-section="{{item.id}}" bindtap="select" disabled="{{busy}}" aria-label="{{item.label}}{{section === item.id ? '，已选' : ''}}">{{item.label}}</button></view>
+  <view wx:if="{{error}}" class="error" role="alert"><view class="error-title">这次操作未完成</view><view>{{error}}</view><button wx:if="{{enabled && signedIn}}" class="retry-button glass-control" hover-class="utility-pressed" bindtap="reload" disabled="{{busy}}">重新加载</button></view>
+  <block wx:if="{{enabled && signedIn}}">
+    <view class="toolbar"><text class="section-caption">{{sectionLabel}}</text><view class="toolbar-actions"><button class="chip" hover-class="utility-pressed" bindtap="reload" disabled="{{busy}}">{{busy ? '处理中' : '刷新'}}</button><button wx:if="{{section !== 'FAVORITES' && rows.length}}" class="chip danger" hover-class="utility-pressed" bindtap="clearAll" disabled="{{busy}}">清空</button></view></view>
+    <view wx:if="{{section === 'HISTORY'}}" class="muted retention">账号历史保留 90 天。打开导航或拨号器仅表示操作，不代表到店或就餐。</view>
+    <block wx:if="{{busy && !rows.length}}">
+      <view class="loading-label" aria-role="status">正在读取{{sectionLabel}}</view>
+      <view wx:for="{{[1, 2]}}" wx:key="*this" class="card glass-panel record skeleton-card" aria-hidden="true"><view class="skeleton-line skeleton-title"/><view class="skeleton-line skeleton-meta"/><view class="skeleton-line skeleton-address"/><view class="skeleton-actions"><view/><view/></view></view>
+    </block>
+    <view wx:for="{{rows}}" wx:key="id" class="card glass-panel record" hover-class="record-pressed" data-id="{{item.id}}" bindtap="showDetail">
+      <view class="row record-heading"><view class="label">{{item.title}}</view><text class="badge">{{item.kind}}</text></view>
+      <view class="record-meta">{{item.date}}<text wx:if="{{item.meal}}"> · {{item.meal}}</text></view>
+      <view wx:if="{{item.available}}" class="muted address">{{item.address}}</view>
+      <view wx:if="{{item.available}}" class="record-facts glass-inset"><text>{{item.price}}</text><text>{{item.openLabel}}</text></view>
+      <view class="record-actions"><button class="chip" hover-class="utility-pressed" data-id="{{item.id}}" catchtap="showDetail">详情</button><button wx:if="{{section === 'FAVORITES'}}" class="chip" hover-class="utility-pressed" data-id="{{item.id}}" catchtap="move" disabled="{{busy}}">移到{{item.group === 'WANT_TO_GO' ? '常吃' : '想去'}}</button><button wx:if="{{section !== 'HISTORY'}}" class="chip danger" hover-class="utility-pressed" data-id="{{item.id}}" catchtap="remove" disabled="{{busy}}">删除</button></view>
+    </view>
+    <view wx:if="{{loaded && rows.length === 0 && !busy && !error}}" class="card glass-panel empty-state"><view class="empty-symbol glass-inset">{{section === 'FAVORITES' ? '☆' : '◷'}}</view><view class="empty-title">暂无{{sectionLabel}}</view><view class="empty-copy">{{section === 'FAVORITES' ? '账号中已有的收藏，会同步显示在这里。' : section === 'HISTORY' ? '这里展示账号中的操作记录。' : '你提交的反馈只对自己可见。'}}</view></view>
+    <button wx:if="{{hasMore}}" class="secondary" hover-class="utility-pressed" bindtap="loadMore" disabled="{{busy}}">{{busy ? '正在加载' : '加载更多'}}</button>
+  </block>
+  <view class="detail-layer {{detail ? 'is-open' : ''}}" aria-hidden="{{!detail}}">
+    <view class="detail-backdrop" bindtap="closeDetail" catchtouchmove="noop"/>
+    <view class="detail-sheet glass-sheet" aria-role="dialog" aria-modal="true" aria-label="记录详情">
+      <view class="detail-header"><view class="sheet-handle"/><view class="row"><view class="section-title">记录详情</view><button class="close-button glass-control" hover-class="utility-pressed" bindtap="closeDetail" aria-label="关闭记录详情">×</button></view></view>
+      <scroll-view class="detail-scroll" scroll-y="{{true}}" enhanced="{{true}}" show-scrollbar="{{false}}">
+        <view class="detail-body"><view class="detail-title">{{detailContent.title}}</view><view class="record-meta">{{detailContent.kind}} · {{detailContent.date}}</view>
+          <block wx:if="{{detailContent.available}}"><view class="detail-facts glass-inset"><view><view class="fact-label">参考人均</view><view class="fact-value">{{detailContent.price}}</view></view><view><view class="fact-label">营业状态</view><view class="fact-value">{{detailContent.openLabel}}</view></view></view><view class="address">{{detailContent.address}}</view><view wx:if="{{detailContent.tags.length}}" class="chips detail-tags"><text wx:for="{{detailContent.tags}}" wx:key="*this" class="tag">{{item}}</text></view><view class="source-note">数据来源：{{detailContent.sourceLabel}}<view>本次解析：{{detailContent.resolved}}</view></view></block>
+          <view wx:if="{{detailContent.expires}}" class="source-note">到期时间：{{detailContent.expires}}</view>
+          <view wx:if="{{section === 'PRIVATE_FEEDBACK'}}" class="source-note">仅自己可见，不形成公开评分。</view>
+        </view>
+      </scroll-view>
+    </view>
+  </view>
+</view>

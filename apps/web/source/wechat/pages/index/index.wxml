@@ -1,0 +1,71 @@
+<view wx:if="{{preferenceReady}}" class="shell decision-shell {{themeClass}} {{reducedMotion ? 'motion-reduced' : ''}} glass-page">
+  <view class="glass-backdrop" aria-hidden="true"></view>
+  <view class="home-content" wx:if="{{tab === 0}}">
+    <view class="home-eyebrow"><view class="eyebrow-dot"/> 吃什么 · 每一餐，都简单一点</view>
+    <view class="home-title">今天吃什么？</view>
+    <view class="decision-entries">
+      <button class="decision-entry glass-panel" bindtap="decide" hover-class="press-soft" aria-label="真实决策，选择高德附近餐厅">
+        <view class="decision-entry-top"><view class="decision-entry-mark glass-inset" aria-hidden="true"><image class="entry-icon" src="/assets/glass/restaurant.svg" aria-hidden="true"/></view><text class="decision-entry-arrow" aria-hidden="true">↗</text></view>
+        <text class="decision-entry-title">真实决策</text><text class="decision-entry-hint">高德附近餐厅</text>
+      </button>
+      <button class="decision-entry glass-panel" data-page="canteen" bindtap="open" hover-class="press-soft" aria-label="食堂决策，从食堂菜单选择一餐">
+        <view class="decision-entry-top"><view class="decision-entry-mark glass-inset" aria-hidden="true"><image class="entry-icon" src="/assets/glass/canteen.svg" aria-hidden="true"/></view><text class="decision-entry-arrow" aria-hidden="true">↗</text></view>
+        <text class="decision-entry-title">食堂决策</text><text class="decision-entry-hint">从食堂菜单选一餐</text>
+      </button>
+    </view>
+    <button class="takeout-entry glass-panel" data-page="takeout" bindtap="open" hover-class="press-soft" aria-label="外卖决策，上传列表截图帮你选择">
+      <view class="decision-entry-mark glass-inset" aria-hidden="true"><image class="entry-icon" src="/assets/glass/takeout.svg" aria-hidden="true"/></view>
+      <view class="takeout-entry-copy"><text class="decision-entry-title">外卖决策</text><text class="takeout-entry-hint">上传列表截图，让 MiMo 帮你选</text></view>
+      <text class="decision-entry-arrow" aria-hidden="true">↗</text>
+    </button>
+    <view class="real-decision-settings">
+      <view class="real-decision-settings-title">真实决策设置</view>
+      <button class="location" bindtap="open" data-page="location" aria-label="选择真实决策的出发地点">
+        <image src="/assets/location.svg" class="location-icon"/><text class="location-name">{{city}}</text><text class="location-current">出发地点</text><image src="/assets/chevron-down.svg" class="chevron"/>
+      </button>
+      <button class="filter-entry glass-control" bindtap="openFilter" hover-class="press-soft" aria-label="调整真实决策的餐厅条件"><view class="filter-symbol glass-inset"><image src="/assets/conditions.svg"/></view><view class="filter-entry-copy"><text class="filter-entry-title">餐厅推荐条件</text><text class="filter-summary">{{filterSummary}}</text></view><text class="filter-change">调整 ›</text></button>
+      <view class="home-caption">餐厅资料由高德提供 · 人均消费仅供参考</view>
+    </view>
+
+  </view>
+  <view class="tab-content" wx:elif="{{tab === 1}}">
+    <view class="home-eyebrow">留住每一次选择</view>
+    <view class="home-title">我的记录</view>
+    <view class="tab-intro">本机摘要与账号记录，在这里分别查看。</view>
+    <button class="canteen-entry glass-panel" data-page="canteen-records" bindtap="open" hover-class="press-soft"><view class="canteen-entry-mark glass-inset" aria-hidden="true">食</view><view class="canteen-entry-copy"><text class="canteen-entry-title">食堂选择记录</text><text class="canteen-entry-hint">查看自己确认的菜品与规格</text></view><text class="canteen-entry-arrow" aria-hidden="true">›</text></button>
+    <view class="card records-card glass-panel"><view class="record-icon-wrap glass-inset"><image class="empty-icon" src="/assets/history.svg"/></view><view class="record-title">本机最近决策</view><view class="muted">查看这台设备保留的决策摘要。</view><button class="primary" data-page="local-records" bindtap="open">查看本机摘要</button></view>
+    <view class="card account-records glass-panel">
+      <view class="section-heading"><view class="label">收藏与账号记录</view><text class="status-chip">{{historyEnabled ? '账号服务' : '按服务能力开放'}}</text></view>
+      <view class="muted">{{historyMessage}}</view>
+      <button class="secondary" data-page="saved" bindtap="open">查看账号记录</button>
+    </view>
+    <view class="page-footnote">本机摘要不保存餐厅内容和精确位置。</view>
+  </view>
+  <view class="tab-content" wx:else>
+    <view class="home-eyebrow">你的选择，你来掌握</view>
+    <view class="home-title personal-title">个人</view>
+    <button class="personal-card taste-card glass-panel" data-page="preferences" bindtap="open"><view class="taste-monogram glass-inset">✓</view><view class="personal-text"><view class="taste-caption">已确认 · 仅存本机</view><view class="label">我的口味偏好</view><view class="muted">让下一餐，更合心意</view></view><text class="arrow">›</text></button>
+    <view class="group-label">用餐与外观</view>
+    <view class="menu-group glass-panel">
+      <button class="personal-card" data-page="conditions" bindtap="open"><image class="personal-icon" src="/assets/conditions.svg"/><view class="personal-text"><view class="label">本次推荐条件</view><view class="muted">人均预算、距离与出行方式</view></view><text class="arrow">›</text></button>
+      <button class="personal-card" data-page="settings" bindtap="open"><image class="personal-icon" src="/assets/settings.svg"/><view class="personal-text"><view class="label">设置</view><view class="muted">主题、隐私与本机数据</view></view><text class="arrow">›</text></button>
+    </view>
+    <view class="group-label">账号与记录</view>
+    <view class="consent-card glass-panel" wx:if="{{!consent}}"><view class="label">使用在线功能前</view><view class="muted consent-copy">请先阅读隐私说明，再使用附近餐厅、外卖截图与账号服务。</view><text class="link policy-link" bindtap="privacy">阅读隐私说明 ›</text><button class="primary" bindtap="accept">同意隐私说明</button></view>
+    <view class="menu-group glass-panel">
+    <button class="personal-card" data-page="account" bindtap="open">
+      <image class="personal-icon" src="/assets/account.svg"/><view class="personal-text"><view class="label">账号与安全</view><view class="muted">登录、账号资料与数据管理</view></view><text class="arrow">›</text>
+    </button>
+    <button class="personal-card" data-page="saved" bindtap="open"><image class="personal-icon" src="/assets/history.svg"/><view class="personal-text"><view class="label">收藏与账号记录</view><view class="muted">想去、常吃与私有反馈</view></view><text class="arrow">›</text></button>
+    </view>
+    <view class="page-footnote">吃什么 · {{version}}</view>
+  </view>
+  <view class="dock-wrap">
+    <view class="dock glass-chrome">
+      <view class="dock-highlight glass-inset" style="transform:translateX({{tab * 100}}%);"/>
+      <button wx:for="{{tabs}}" wx:key="icon" class="dock-item {{tab === index ? 'active' : ''}}" data-tab="{{index}}" bindtap="switchTab" aria-label="{{item.label}}">
+        <image class="dock-icon" src="/assets/{{item.icon}}{{tab === index ? '-active' : ''}}.svg"/><text>{{item.label}}</text>
+      </button>
+    </view>
+  </view>
+</view>

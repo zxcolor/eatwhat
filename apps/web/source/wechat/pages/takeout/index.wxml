@@ -1,0 +1,68 @@
+<view class="page takeout-page glass-page {{themeClass}} {{reducedMotion ? 'reduce-motion' : ''}}">
+  <view class="glass-backdrop" aria-hidden="true"></view>
+  <view class="takeout-header"><view class="takeout-eyebrow">外卖截图</view><view class="title">从这些里面，选一个</view><view class="subtitle">选取美团等外卖列表截图，核对识别内容，再交给 MiMo 帮你决定。</view></view>
+
+  <view class="card glass-panel image-card">
+    <view class="row"><view class="label">这次想选的范围</view><text class="step-label">1 · 选图</text></view>
+    <view wx:if="{{!previews.length}}" class="image-empty glass-inset"><view class="image-symbol" aria-hidden="true">＋</view><view>选择相册中的外卖列表截图</view><text>最多3张；保留完整商家或菜品名称</text></view>
+    <view wx:else class="preview-list">
+      <view wx:for="{{previews}}" wx:key="path" class="preview-row glass-inset">
+        <button class="preview-thumb" data-index="{{index}}" bindtap="previewImage" aria-label="预览{{item.label}}"><image src="{{item.path}}" mode="aspectFit" /></button>
+        <view class="preview-copy"><view class="preview-label">{{item.label}}</view><text class="muted preview-dimensions">{{item.dimensions}}</text><button class="text-button" data-index="{{index}}" bindtap="editImage" disabled="{{busy}}">编辑 / 裁剪</button></view>
+      </view>
+    </view>
+    <button class="{{previews.length ? 'secondary' : 'primary'}}" bindtap="chooseImages" disabled="{{busy}}">{{previews.length ? '重新选择截图' : '选择截图'}}</button>
+    <button wx:if="{{previews.length}}" class="text-button clear-images" bindtap="removeImages">移除本次截图</button>
+    <view class="image-note">长截图会按清晰度分段，合计最多3个上传片段。超出时请裁短，不会自动省略下半部分。原相册图片不会被修改或删除。</view>
+  </view>
+
+  <view wx:if="{{showPlatformPrivacy}}" class="card glass-panel privacy-card">
+    <view class="label">先确认微信照片隐私授权</view><view class="muted">选择照片前，请阅读并同意{{privacyName}}。</view>
+    <button class="text-button" bindtap="openPlatformPrivacy">阅读微信隐私指引</button>
+    <button class="primary" id="takeout-privacy-agree" open-type="agreePrivacyAuthorization" bindagreeprivacyauthorization="agreePlatformPrivacy">同意后选择截图</button>
+    <button class="text-button" bindtap="dismissPlatformPrivacy">暂不选择</button>
+  </view>
+
+  <view wx:if="{{previews.length}}" class="card glass-panel privacy-card">
+    <view class="row"><view class="label">只上传你确认的内容</view><text class="step-label">2 · 识别</text></view>
+    <view class="disclosure">请先裁掉或遮盖姓名、地址、手机号、订单号。确认后，截图片段会发送到吃什么服务器并交给小米 MiMo 识别；此步骤不发送口味偏好。</view>
+    <view class="disclosure">识别后，只有你确认候选并点击选择时，才发送本机口味偏好、识别回执和排除的候选编号；换一个不会再次上传截图。</view>
+    <view class="disclosure muted">不要求账号登录，不访问外卖平台接口。本机临时副本清理失败时会提示，并在下次打开或重试时继续尝试。服务器不持久保存截图和识别结果；小米按其服务政策处理，不能承诺供应商零留存。离开本页清除本次候选，已发送请求无法撤回。</view>
+    <button wx:if="{{!globalConsent}}" class="text-button" bindtap="openAppPrivacy">阅读应用隐私说明（离开会清除本次截图）</button>
+    <button wx:if="{{!globalConsent}}" class="secondary" bindtap="acceptGlobalPrivacy" disabled="{{busy}}">同意应用隐私说明</button>
+    <view wx:elif="{{!serviceReady}}" class="service-note"><text>{{serviceStatus === 'ready' ? '当前服务暂未开放外卖截图识别。' : '截图服务尚未就绪，请连接后再上传。'}}</text><button class="text-button" bindtap="retryService" disabled="{{busy || serviceStatus === 'loading'}}">{{serviceStatus === 'loading' ? '连接中…' : '重新检查服务'}}</button></view>
+    <checkbox-group bindchange="changeUploadConsent"><label class="consent-row glass-inset"><checkbox value="agree" checked="{{uploadConsent}}" color="#b94a29" /><text>我已检查预览、移除个人信息，并同意本次截图识别和后续选择。</text></label></checkbox-group>
+    <button class="primary" bindtap="recognize" disabled="{{!canRecognize}}">{{candidates.length ? '重新识别截图' : '识别这些截图'}}</button>
+  </view>
+
+  <view wx:if="{{busy && statusText}}" class="status-card glass-panel"><view class="status-dot" aria-hidden="true"></view><view>{{statusText}}</view><button class="text-button" bindtap="cancelWork">取消</button></view>
+  <view wx:if="{{error}}" class="error" role="alert">{{error}}</view>
+  <view wx:if="{{notice}}" class="notice glass-inset">{{notice}}</view>
+  <button wx:if="{{cleanupNeeded}}" class="secondary" bindtap="retryCleanup" disabled="{{busy}}">重试清理截图临时副本</button>
+
+  <view wx:if="{{candidates.length}}" class="card glass-panel candidates-card">
+    <view class="row"><view class="label">核对这些选项</view><text class="step-label">3 · 确认</text></view>
+    <view class="muted candidate-intro">AI识别可能有误。取消勾选不准确或不想选的项目；价格按截图原文展示，不代表最终实付金额。</view>
+    <checkbox-group bindchange="changeCandidates" data-revision="{{revision}}">
+      <view wx:for="{{candidates}}" wx:key="id" class="candidate-row glass-inset">
+        <label class="candidate-main"><checkbox value="{{item.id}}" checked="{{item.included}}" disabled="{{busy}}" color="#b94a29" /><view class="candidate-copy"><text class="candidate-kind">{{item.kind === 'MERCHANT' ? '商家' : '菜品'}}</text><view class="candidate-name">{{item.name}}</view><view wx:if="{{item.merchantName}}" class="candidate-merchant">{{item.merchantName}}</view><view class="candidate-price">{{item.visiblePriceText || '未识别到明确标价'}}</view><view wx:if="{{item.visibleMetaText}}" class="candidate-meta">{{item.visibleMetaText}}</view></view></label>
+        <button class="text-button candidate-source" data-id="{{item.id}}" bindtap="previewCandidate" disabled="{{busy}}">核对截图</button>
+      </view>
+    </checkbox-group>
+    <view class="round-count">保留 {{keptCount}} 项 · 本轮还剩 {{remainingCount}} 项</view>
+    <button class="primary" bindtap="decide" data-revision="{{revision}}" disabled="{{!canDecide}}">{{decisionLabel}}</button>
+    <view wx:if="{{!keptCount}}" class="muted small-note">请至少保留一个你确认准确的选项。</view>
+    <button wx:if="{{canRestart}}" class="secondary" bindtap="restart" data-revision="{{revision}}">已全部看过，重新开始这一轮</button>
+  </view>
+
+  <view wx:if="{{result}}" class="card glass-panel result-card">
+    <view class="result-caption">这次就选</view><view class="result-kind">{{result.kind === 'MERCHANT' ? '商家' : '菜品'}}</view><view class="result-name">{{result.name}}</view>
+    <view wx:if="{{result.merchantName}}" class="result-merchant">{{result.merchantName}}</view>
+    <view class="result-divider"></view><view class="price-caption">截图中的原始标价</view><view class="result-price">{{result.visiblePriceText || '未识别到明确标价'}}</view>
+    <view wx:if="{{result.visibleMetaText}}" class="result-meta">{{result.visibleMetaText}}</view>
+    <view class="result-source">{{resultSource}}</view><view class="muted small-note">{{resultNote}}</view>
+    <button class="text-button" data-id="{{result.id}}" bindtap="previewCandidate">再核对一次截图</button>
+  </view>
+  <view class="page-note">仅为选择建议，不会替你下单。请回到原外卖平台核对商品、优惠和最终价格。</view>
+  <canvas type="2d" id="takeout-processing-canvas" class="processing-canvas" aria-hidden="true"></canvas>
+</view>
