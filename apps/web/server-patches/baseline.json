@@ -1,7 +1,7 @@
 {
   "formatVersion": 1,
-  "release": "20261026-preference-ai-853f06b",
-  "image": "sha256:5716c2befd27008e94005345e819c3d98cb1f0fb43c7d9e587bd0e9e0323ebc4",
+  "release": "20261026-preference-ai-budget-770b1b01f930",
+  "image": "sha256:2aadff36759594233c245b0e46422d68a88c25aadd3f1c5fa6cc91b59a1781ac",
   "files": [
     {
       "path": ".dockerignore",
@@ -825,8 +825,8 @@
     },
     {
       "path": "apps/api/src/recommendations/domain/restaurant-taste-query.ts",
-      "sha256": "e5b70221496475280d37ccf7123eafbe3351ee2e14e1a5e4bf7f051d93b50ca9",
-      "bytes": 4002
+      "sha256": "9280425578be581f66ebe0777cc954eaadd8ff9c3b9eedc6af605cbc6194dc3d",
+      "bytes": 4278
     },
     {
       "path": "apps/api/src/recommendations/providers/amap-place.provider.ts",
@@ -855,8 +855,8 @@
     },
     {
       "path": "apps/api/src/recommendations/providers/mimo-restaurant-intent.provider.ts",
-      "sha256": "5b739fb21dd5e15192b05c455527caee5ea3e1d0527300591e80ee325b4998f1",
-      "bytes": 7209
+      "sha256": "fd2b9c17b1a4c8d119c86b2f175fc0b46e4ed4d1e6f0230f5d86bd675dfc2066",
+      "bytes": 7976
     },
     {
       "path": "apps/api/src/recommendations/providers/qwen-intent-registry.ts",
@@ -900,8 +900,8 @@
     },
     {
       "path": "apps/api/src/recommendations/restaurant-decision-pool.service.ts",
-      "sha256": "48b210028641bc4542677377b0dceeb61617b105489e3e82d97b3413c731b9ee",
-      "bytes": 12991
+      "sha256": "081e98331eb7fe464b6c2a3c26b5fb4bde4e5a08629552583eb2d359d8bad8eb",
+      "bytes": 13082
     },
     {
       "path": "apps/api/src/recommendations/restaurant-route.controller.ts",
@@ -1096,6 +1096,6 @@
       "bytes": 291213
     }
   ],
-  "verifiedAt": "2026-10-26T13:13:01.047Z",
-  "provenance": "Runtime inputs copied from the active immutable release over SSH and individually SHA-256 verified; validation-only inputs retained from the prior audited local source."
+  "verifiedAt": "2026-10-26T14:21:44.918Z",
+  "provenance": "Runtime inputs retrieved from the active immutable budget release and individually SHA-256 verified. Three budget source updates are preserved; WEB patch inputs, 10 related compiled originals, 34 deployment payloads and 16 migration checksums are unchanged from the prior audited release. Validation-only inputs remain independently pinned."
 }

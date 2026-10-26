@@ -1,6 +1,6 @@
 {
   "formatVersion": 1,
-  "release": "20261026-preference-ai-853f06b",
+  "release": "20261026-preference-ai-budget-770b1b01f930",
   "helpers": [
     {
       "sha256": "382971d0e02097c804c841e14660deb4fde470ba1bbb185ec6d4056a61bbcb0c",
@@ -219,6 +219,6 @@
       "path": "infra/postgres/verify-canteen-public-ratings.sql"
     }
   ],
-  "verifiedAt": "2026-10-26T13:13:01.047Z",
-  "provenance": "All 34 payload hashes matched the active release SHA256SUMS; local builder helpers remain independently pinned."
+  "verifiedAt": "2026-10-26T14:21:44.918Z",
+  "provenance": "All 34 deployment payload hashes and non-image environment fields matched the prior audited release; only release/time metadata changed."
 }
