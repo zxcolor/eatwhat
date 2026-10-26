@@ -45,7 +45,7 @@ function build() {
     }
     if (file.endsWith('.wxss')) styles[relative.slice(0, -5)] = compileCss(sourceRoot, relative);
   }
-  const bundle = `/* Generated from the immutable WeChat source snapshot. */\nwindow.EW_MINI={modules:{${modules.join(',\n')}},templates:{${templates.join(',\n')}},configs:${JSON.stringify(configs)},styles:${JSON.stringify(styles)},appConfig:${JSON.stringify(configs.app)}};\n`;
+  const bundle = `/* Generated from the immutable WeChat source snapshot. Includes JSBI 4.3.2 (Apache-2.0); see licenses/jsbi-LICENSE.txt. */\nwindow.EW_MINI={modules:{${modules.join(',\n')}},templates:{${templates.join(',\n')}},configs:${JSON.stringify(configs)},styles:${JSON.stringify(styles)},appConfig:${JSON.stringify(configs.app)}};\n`;
   new vm.Script(bundle, { filename: 'mini.js' });
   for (const route of configs.app.pages) {
     if (!fs.existsSync(path.join(sourceRoot, `${route}.js`))) throw new Error(`Missing page ${route}`);
@@ -56,6 +56,8 @@ function build() {
   const revision = sha(bundle).slice(0, 12);
   fs.writeFileSync(path.join(output, 'mini.js'), bundle);
   fs.cpSync(path.join(sourceRoot, 'assets'), path.join(output, 'assets'), { recursive: true });
+  fs.mkdirSync(path.join(output, 'licenses'));
+  fs.copyFileSync(path.join(sourceRoot, 'lib/decision/vendor/LICENSE'), path.join(output, 'licenses/jsbi-LICENSE.txt'));
   for (const name of ['platform.js', 'render.js', 'map.js', 'base.css', 'map.css']) {
     const runtimeFile = path.join(root, 'runtime', name);
     if (!fs.existsSync(runtimeFile)) throw new Error(`Missing browser runtime ${name}`);
