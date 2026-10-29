@@ -201,7 +201,11 @@ jobs:
         run: |
           set -euo pipefail
           repository_root="$PWD"
-          sudo env REPOSITORY_ROOT="$repository_root" bash -c '
+          completion_directory="$(mktemp -d)"
+          completion_marker="$completion_directory/completed"
+          trap 'rm -f -- "$completion_marker"; rmdir -- "$completion_directory"' EXIT
+          sudo env REPOSITORY_ROOT="$repository_root" \
+            AUTH_CONTINUITY_COMPLETION_MARKER="$completion_marker" bash -c '
             set -euo pipefail
             test_root=/opt/chi-shen-me
             lock_directory=/run/lock/chi-shen-me
@@ -255,7 +259,7 @@ jobs:
           #!/usr/bin/env bash
           set -euo pipefail
           [[ "${PREFLIGHT_FAIL_FIXTURE:-false}" != "true" ]]
-            FAKE_PREFLIGHT
+          FAKE_PREFLIGHT
             printf "#!/usr/bin/env bash\nexit 0\n" >"$candidate/scripts/verify-runtime.sh"
             cp -- "$candidate/scripts/verify-runtime.sh" "$active_deploy/scripts/verify-runtime.sh"
             cat >"$fake_bin/docker" <<"FAKE_DOCKER"
@@ -620,7 +624,11 @@ jobs:
             ! grep -Eq "^QQ_UNION_ID_NAMESPACE_INITIALIZED=" "$candidate/deployment.env"
             grep -Fq "release must preserve the shared QQ Open Platform realm" \
               "$REPOSITORY_ROOT/infra/ecs/scripts/preflight-deployment.sh"
+            touch "$AUTH_CONTINUITY_COMPLETION_MARKER"
           '
+          # A swallowed heredoc can exit zero without reaching any assertion.
+          test -f "$completion_marker"
+          printf "Authentication continuity assertions completed\n"
       - uses: pnpm/action-setup@v4
         with:
           version: 11.17.0
